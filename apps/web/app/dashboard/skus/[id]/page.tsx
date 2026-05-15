@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { SkuAnalysisChart, type ChartPoint } from "./SkuAnalysisChart";
 import { ReorderPanel } from "./ReorderPanel";
 import { HealthKpi, buildHealthBreakdown, buildConfidenceBreakdown } from "./HealthTooltip";
+import { Icons } from "../../../_components/Icons";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +25,6 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
   const leadTime = product.lead_time_days ?? seller?.default_lead_time_days ?? 14;
   const safety = product.safety_days ?? seller?.default_safety_days ?? 7;
 
-  // Snapshots за последние 60 дней
   const day60Ago = new Date(Date.now() - 60 * 86400_000).toISOString();
   const { data: snapshots } = await supabase
     .from("inventory_snapshots")
@@ -33,7 +33,6 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     .gte("snapshot_time", day60Ago)
     .order("snapshot_time");
 
-  // TVelo metrics последние периоды (для динамики)
   const { data: metrics } = await supabase
     .from("tvelo_metrics")
     .select("*")
@@ -41,7 +40,6 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     .order("period_end", { ascending: false })
     .limit(30);
 
-  // Price elasticity history (Rule 12.3)
   const { data: elasticity } = await supabase
     .from("price_elasticity")
     .select("change_date,previous_price,new_price,price_delta_pct,velocity_before,velocity_after,price_impact_percent,days_before,days_after")
@@ -49,7 +47,6 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     .order("change_date", { ascending: false })
     .limit(10);
 
-  // Changelog по этому SKU
   const day30Ago = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
   const { data: changelog } = await supabase
     .from("changelog")
@@ -61,7 +58,6 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
 
   const latest = metrics?.[0];
 
-  // Группируем snapshots по дням (latest of day)
   const byDay = new Map<string, ChartPoint>();
   for (const s of snapshots ?? []) {
     const day = new Date(s.snapshot_time).toISOString().slice(0, 10);
@@ -73,16 +69,12 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
       velocity: 0,
     });
   }
-  // Подмешиваем velocity из metrics по period_end
   for (const m of metrics ?? []) {
     const day = m.period_end as string;
-    if (byDay.has(day)) {
-      byDay.get(day)!.velocity = Number(m.adjusted_velocity);
-    }
+    if (byDay.has(day)) byDay.get(day)!.velocity = Number(m.adjusted_velocity);
   }
   const chartData = Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date));
 
-  // Группируем changelog entries по дате — для tooltip popover
   const changelogByDate: Record<string, any[]> = {};
   for (const e of (changelog ?? [])) {
     const day = (e as any).event_date as string;
@@ -93,14 +85,15 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
   return (
     <div className="space-y-6">
       <header>
-        <Link href="/dashboard/skus" className="text-sm text-teal-700 hover:text-teal-800">← Все SKU</Link>
-        <h1 className="text-2xl font-bold text-slate-900 mt-2">
-          <span className="font-mono">{product.sku}</span>
-          <span className="text-slate-500 font-normal ml-3">{product.product_name}</span>
-        </h1>
+        <Link href="/dashboard/skus" className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition">
+          <span className="rotate-180"><Icons.ArrowRight size={12} /></span> Все SKU
+        </Link>
+        <div className="mt-3 flex items-baseline gap-3 flex-wrap">
+          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink font-mono">{product.sku}</h1>
+          <span className="text-ink-muted text-lg">{product.product_name}</span>
+        </div>
       </header>
 
-      {/* KPI */}
       {latest && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <Kpi label="TVelo" value={Number(latest.adjusted_velocity).toFixed(2)} sub="ед./день" />
@@ -113,17 +106,15 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         </div>
       )}
 
-      {/* График анализа товара */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">Анализ SKU</h2>
+      <div className="rounded-2xl border border-line bg-paper p-6">
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-4">Анализ SKU</h2>
         {chartData.length < 2 ? (
-          <p className="text-sm text-slate-500">Недостаточно данных для графика (нужно 2+ дня)</p>
+          <p className="text-sm text-ink-muted">Недостаточно данных для графика (нужно 2+ дня)</p>
         ) : (
           <SkuAnalysisChart data={chartData} changelogByDate={changelogByDate} />
         )}
       </div>
 
-      {/* Reorder calculator (Rule 1.6 + 8.1) */}
       {latest && Number(latest.adjusted_velocity) > 0 && (
         <ReorderPanel
           productId={product.product_id}
@@ -134,37 +125,37 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         />
       )}
 
-      {/* Price elasticity (Rule 12.3) */}
       {(elasticity ?? []).length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6">
-          <h2 className="text-lg font-semibold text-slate-900 mb-1">Влияние цены на скорость</h2>
-          <p className="text-sm text-slate-500 mb-4">Velocity до и после смены цены (минимум 7 in-stock дней с каждой стороны)</p>
+        <div className="rounded-2xl border border-line bg-paper p-6">
+          <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">Price elasticity</h2>
+          <h3 className="font-display text-lg font-medium text-ink mt-1">Влияние цены на скорость</h3>
+          <p className="text-sm text-ink-muted mb-4">Velocity до и после смены цены (минимум 7 in-stock дней с каждой стороны)</p>
           <div className="grid gap-3">
             {(elasticity ?? []).map((e: any, i: number) => {
               const impact = Number(e.price_impact_percent);
               const positiveImpact = impact > 0;
               return (
-                <div key={i} className="flex items-center gap-6 p-4 border border-slate-100 rounded-xl">
-                  <div className="text-xs text-slate-500 whitespace-nowrap">
+                <div key={i} className="flex items-center gap-4 md:gap-6 p-4 rounded-xl border border-line bg-bg-soft flex-wrap">
+                  <div className="font-mono text-xs text-ink-hush whitespace-nowrap">
                     {new Date(e.change_date).toLocaleDateString("ru-RU")}
                   </div>
                   <div className="text-sm">
-                    <span className="text-slate-500">Цена:</span>{" "}
-                    <span className="font-mono">{Number(e.previous_price).toFixed(2)}</span>
+                    <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Цена:</span>{" "}
+                    <span className="font-mono text-ink-soft">{Number(e.previous_price).toFixed(2)}</span>
                     {" → "}
-                    <span className="font-mono font-semibold">{Number(e.new_price).toFixed(2)}</span>
-                    <span className={`ml-2 text-xs ${Number(e.price_delta_pct) > 0 ? "text-amber-700" : "text-emerald-700"}`}>
+                    <span className="font-mono font-semibold text-ink">{Number(e.new_price).toFixed(2)}</span>
+                    <span className={`ml-2 font-mono text-xs font-semibold ${Number(e.price_delta_pct) > 0 ? "text-orange" : "text-lime-deep"}`}>
                       ({Number(e.price_delta_pct) > 0 ? "+" : ""}{Number(e.price_delta_pct).toFixed(1)}%)
                     </span>
                   </div>
                   <div className="text-sm flex-1">
-                    <span className="text-slate-500">Velocity:</span>{" "}
-                    <span className="font-mono">{Number(e.velocity_before).toFixed(2)}</span>
+                    <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Velocity:</span>{" "}
+                    <span className="font-mono text-ink-soft">{Number(e.velocity_before).toFixed(2)}</span>
                     {" → "}
-                    <span className="font-mono font-semibold">{Number(e.velocity_after).toFixed(2)}</span>
+                    <span className="font-mono font-semibold text-ink">{Number(e.velocity_after).toFixed(2)}</span>
                   </div>
-                  <div className={`px-3 py-1.5 rounded-lg text-sm font-semibold ${
-                    positiveImpact ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"
+                  <div className={`px-3 py-1.5 rounded-lg font-mono text-sm font-semibold ${
+                    positiveImpact ? "bg-lime-soft text-lime-deep border border-lime-deep/30" : "bg-rose/10 text-rose border border-rose/30"
                   }`}>
                     {positiveImpact ? "+" : ""}{impact.toFixed(1)}%
                   </div>
@@ -175,24 +166,24 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         </div>
       )}
 
-      {/* Changelog за месяц */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-6">
-        <h2 className="text-lg font-semibold text-slate-900 mb-4">События за последние 30 дней</h2>
+      <div className="rounded-2xl border border-line bg-paper p-6">
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">Changelog</h2>
+        <h3 className="font-display text-lg font-medium text-ink mt-1 mb-4">События за последние 30 дней</h3>
         {(changelog ?? []).length === 0 ? (
-          <p className="text-sm text-slate-500">Событий нет</p>
+          <p className="text-sm text-ink-muted">Событий нет</p>
         ) : (
-          <ul className="divide-y divide-slate-100">
+          <ul className="divide-y divide-line">
             {(changelog ?? []).map((e: any, i: number) => (
-              <li key={i} className="py-2 flex items-start gap-4 text-sm">
-                <span className="text-slate-500 text-xs whitespace-nowrap w-24 mt-0.5">
+              <li key={i} className="py-2.5 flex items-start gap-4 text-sm flex-wrap">
+                <span className="text-ink-hush text-xs whitespace-nowrap w-24 mt-0.5 font-mono">
                   {new Date(e.event_date).toLocaleDateString("ru-RU")}
                 </span>
-                <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium w-32 text-center ${TYPE_STYLES[e.event_type] ?? "bg-slate-100"}`}>
+                <span className={`inline-flex items-center justify-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold w-32 ${TYPE_STYLES[e.event_type] ?? "text-ink-soft bg-bg-soft border-line"}`}>
                   {TYPE_LABELS[e.event_type] ?? e.event_type}
                 </span>
-                <span className="text-slate-700 flex-1">{e.message}</span>
+                <span className="text-ink-soft flex-1">{e.message}</span>
                 {e.confidence_impact != null && Number(e.confidence_impact) !== 0 && (
-                  <span className="text-xs text-amber-700 whitespace-nowrap">conf {Number(e.confidence_impact).toFixed(1)}%</span>
+                  <span className="font-mono text-xs text-orange whitespace-nowrap">−{Math.abs(Number(e.confidence_impact)).toFixed(1)}%</span>
                 )}
               </li>
             ))}
@@ -209,24 +200,24 @@ const TYPE_LABELS: Record<string, string> = {
   replenishment_like: "Пополнение",
   anomaly_like: "Аномалия",
   missing_data: "Нет данных",
-  recount_like: "Цена",
+  recount_like: "Пересчёт",
 };
 
 const TYPE_STYLES: Record<string, string> = {
-  first_snapshot: "bg-slate-100 text-slate-700",
-  sales_like: "bg-emerald-100 text-emerald-800",
-  replenishment_like: "bg-blue-100 text-blue-800",
-  anomaly_like: "bg-amber-100 text-amber-800",
-  missing_data: "bg-slate-100 text-slate-700",
-  recount_like: "bg-violet-100 text-violet-800",
+  first_snapshot:     "text-ink-soft bg-bg-soft border-line",
+  sales_like:         "text-lime-deep bg-lime-soft border-lime-deep/30",
+  replenishment_like: "text-azure bg-azure/10 border-azure/30",
+  anomaly_like:       "text-orange bg-orange/10 border-orange/30",
+  missing_data:       "text-ink-soft bg-bg-soft border-line",
+  recount_like:       "text-azure bg-azure/10 border-azure/30",
 };
 
 function Kpi({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-xl p-4">
-      <div className="text-xs text-slate-500 uppercase tracking-wide">{label}</div>
-      <div className="mt-1 text-2xl font-bold text-slate-900">{value}</div>
-      {sub && <div className="text-xs text-slate-500 mt-0.5">{sub}</div>}
+    <div className="rounded-xl border border-line bg-paper p-4">
+      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush">{label}</div>
+      <div className="mt-1 font-display text-2xl tabular font-medium text-ink">{value}</div>
+      {sub && <div className="text-xs text-ink-hush mt-0.5 font-mono">{sub}</div>}
     </div>
   );
 }
