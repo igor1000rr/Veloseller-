@@ -39,8 +39,11 @@ export default function AppHeader({
       ]
     : [
         { href: "/admin",          label: "Обзор" },
+        { href: "/admin/finance",  label: "Финансы" },
+        { href: "/admin/health",   label: "Здоровье" },
         { href: "/admin/sellers",  label: "Селлеры" },
         { href: "/admin/activity", label: "Активность" },
+        { href: "/admin/settings", label: "Настройки" },
       ];
 
   return (
@@ -86,7 +89,6 @@ export default function AppHeader({
         <div className="flex items-center gap-2">
           <span className="hidden md:inline font-mono text-xs text-ink-hush truncate max-w-[180px]">{email}</span>
 
-          {/* Переключатель Admin/Личный — виден если isAdmin */}
           {isAdmin && variant === "dashboard" && (
             <Link
               href={"/admin" as any}
@@ -148,27 +150,18 @@ export default function AppHeader({
                 <Icons.ArrowRight size={16} />
               </Link>
             ))}
-
-            {/* Переключатель Admin <-> Личный в мобайл-меню */}
             {isAdmin && variant === "dashboard" && (
-              <Link
-                href={"/admin" as any}
-                onClick={() => setOpen(false)}
-                className="flex items-center justify-between py-4 border-b border-line text-xl font-display text-orange hover:opacity-80 transition"
-              >
-                <span className="flex items-center gap-3">
-                  Admin
+              <Link href={"/admin" as any} onClick={() => setOpen(false)}
+                className="flex items-center justify-between py-4 border-b border-line text-xl font-display text-orange hover:opacity-80 transition">
+                <span className="flex items-center gap-3">Admin
                   <span className="font-mono text-[10px] text-orange uppercase tracking-[0.18em] font-semibold border border-orange/30 bg-orange/10 px-1.5 py-0.5 rounded">admin</span>
                 </span>
                 <Icons.ArrowRight size={16} />
               </Link>
             )}
             {variant === "admin" && (
-              <Link
-                href={"/dashboard" as any}
-                onClick={() => setOpen(false)}
-                className="flex items-center justify-between py-4 border-b border-line text-xl font-display text-ink hover:text-lime-deep transition"
-              >
+              <Link href={"/dashboard" as any} onClick={() => setOpen(false)}
+                className="flex items-center justify-between py-4 border-b border-line text-xl font-display text-ink hover:text-lime-deep transition">
                 <span>В личный кабинет</span>
                 <Icons.ArrowRight size={16} />
               </Link>

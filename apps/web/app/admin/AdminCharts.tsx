@@ -1,47 +1,57 @@
 "use client";
-import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line, RadialBarChart, RadialBar } from "recharts";
 
 const COLORS = {
-  violet: "#7c3aed",
-  blue: "#2563eb",
-  indigo: "#4f46e5",
-  sky: "#0284c7",
-  slate: "#94a3b8",
-  green: "#10b981",
-  red: "#ef4444",
+  lime:    "#84cc16",
+  limeDeep:"#3f6212",
+  emerald: "#065f46",
+  azure:   "#0284c7",
+  orange:  "#ea580c",
+  rose:    "#e11d48",
+  ink:     "#0a0a08",
+  hush:    "#8a8a7e",
+  line:    "#e6e3d4",
+};
+
+const tooltipStyle = {
+  borderRadius: 8,
+  border: "1px solid #e6e3d4",
+  background: "#ffffff",
+  fontSize: 12,
+  fontFamily: "var(--font-mono)",
 };
 
 export function RegistrationsChart({ data }: { data: { date: string; count: number }[] }) {
-  if (data.length === 0) return <Empty>Регистраций пока нет</Empty>;
+  if (!data || data.length === 0) return <Empty>Нет данных</Empty>;
   return (
-    <ResponsiveContainer width="100%" height={200}>
+    <ResponsiveContainer width="100%" height={220}>
       <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
         <defs>
           <linearGradient id="regGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={COLORS.violet} stopOpacity={0.2} />
-            <stop offset="100%" stopColor={COLORS.violet} stopOpacity={0} />
+            <stop offset="0%" stopColor={COLORS.lime} stopOpacity={0.35} />
+            <stop offset="100%" stopColor={COLORS.lime} stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-        <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
-        <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
-        <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
-        <Area type="monotone" dataKey="count" stroke={COLORS.violet} strokeWidth={2} fill="url(#regGrad)" />
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.line} vertical={false} />
+        <XAxis dataKey="date" stroke={COLORS.hush} fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+        <YAxis stroke={COLORS.hush} fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} />
+        <Tooltip contentStyle={tooltipStyle} />
+        <Area type="monotone" dataKey="count" stroke={COLORS.limeDeep} strokeWidth={2} fill="url(#regGrad)" />
       </AreaChart>
     </ResponsiveContainer>
   );
 }
 
 export function SnapshotsChart({ data }: { data: { date: string; count: number }[] }) {
-  if (data.length === 0) return <Empty>Снимков нет</Empty>;
+  if (!data || data.length === 0) return <Empty>Нет снимков</Empty>;
   return (
-    <ResponsiveContainer width="100%" height={200}>
+    <ResponsiveContainer width="100%" height={220}>
       <BarChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-        <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
-        <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
-        <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
-        <Bar dataKey="count" fill={COLORS.blue} radius={[4, 4, 0, 0]} />
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.line} vertical={false} />
+        <XAxis dataKey="date" stroke={COLORS.hush} fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+        <YAxis stroke={COLORS.hush} fontSize={10} tickLine={false} axisLine={false} allowDecimals={false} />
+        <Tooltip contentStyle={tooltipStyle} />
+        <Bar dataKey="count" fill={COLORS.azure} radius={[3, 3, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -49,38 +59,99 @@ export function SnapshotsChart({ data }: { data: { date: string; count: number }
 
 export function PlansPieChart({ data }: { data: { plan: string; count: number }[] }) {
   const palette: Record<string, string> = {
-    trial: COLORS.slate, starter: COLORS.sky, growth: COLORS.blue, pro: COLORS.violet,
+    trial:   COLORS.hush,
+    starter: COLORS.azure,
+    growth:  COLORS.lime,
+    pro:     COLORS.limeDeep,
   };
-  const filtered = data.filter(d => d.count > 0);
-  if (filtered.length === 0) return <Empty>Селлеров нет</Empty>;
+  const filtered = (data ?? []).filter(d => d.count > 0);
+  if (filtered.length === 0) return <Empty>Нет селлеров</Empty>;
   return (
-    <ResponsiveContainer width="100%" height={200}>
+    <ResponsiveContainer width="100%" height={220}>
       <PieChart>
-        <Pie data={filtered} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={3} dataKey="count" nameKey="plan">
-          {filtered.map((e, i) => <Cell key={i} fill={palette[e.plan] ?? COLORS.slate} />)}
+        <Pie data={filtered} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3} dataKey="count" nameKey="plan">
+          {filtered.map((e, i) => <Cell key={i} fill={palette[e.plan] ?? COLORS.hush} />)}
         </Pie>
-        <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
+        <Tooltip contentStyle={tooltipStyle} />
       </PieChart>
     </ResponsiveContainer>
   );
 }
 
+export function MrrChart({ data }: { data: { date: string; mrr: number }[] }) {
+  if (!data || data.length === 0) return <Empty>Нет платежей</Empty>;
+  return (
+    <ResponsiveContainer width="100%" height={260}>
+      <AreaChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+        <defs>
+          <linearGradient id="mrrGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={COLORS.limeDeep} stopOpacity={0.4} />
+            <stop offset="100%" stopColor={COLORS.limeDeep} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.line} vertical={false} />
+        <XAxis dataKey="date" stroke={COLORS.hush} fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+        <YAxis stroke={COLORS.hush} fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => `$${v}`} />
+        <Area type="monotone" dataKey="mrr" stroke={COLORS.limeDeep} strokeWidth={2.2} fill="url(#mrrGrad)" />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+}
+
+export function HealthRadial({ value }: { value: number }) {
+  const data = [{ name: "health", value, fill: value > 70 ? COLORS.lime : value > 40 ? COLORS.orange : COLORS.rose }];
+  return (
+    <ResponsiveContainer width="100%" height={180}>
+      <RadialBarChart cx="50%" cy="50%" innerRadius="70%" outerRadius="100%" barSize={12} data={data} startAngle={90} endAngle={-270}>
+        <RadialBar background={{ fill: COLORS.line } as any} dataKey="value" cornerRadius={6} />
+      </RadialBarChart>
+    </ResponsiveContainer>
+  );
+}
+
 export function ActivityChart({ data }: { data: { date: string; snapshots: number; recalcs: number }[] }) {
-  if (data.length === 0) return <Empty>Активности нет</Empty>;
+  if (!data || data.length === 0) return <Empty>Нет активности</Empty>;
   return (
     <ResponsiveContainer width="100%" height={260}>
       <LineChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-        <XAxis dataKey="date" stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} />
-        <YAxis stroke="#94a3b8" fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
-        <Tooltip contentStyle={{ borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12 }} />
-        <Line type="monotone" dataKey="snapshots" stroke={COLORS.blue} strokeWidth={2} dot={{ r: 2 }} name="Snapshots" />
-        <Line type="monotone" dataKey="recalcs" stroke={COLORS.violet} strokeWidth={2} dot={{ r: 2 }} name="Метрик" />
+        <CartesianGrid strokeDasharray="3 3" stroke={COLORS.line} vertical={false} />
+        <XAxis dataKey="date" stroke={COLORS.hush} fontSize={11} tickLine={false} axisLine={false} />
+        <YAxis stroke={COLORS.hush} fontSize={11} tickLine={false} axisLine={false} allowDecimals={false} />
+        <Tooltip contentStyle={tooltipStyle} />
+        <Line type="monotone" dataKey="snapshots" stroke={COLORS.azure} strokeWidth={2} dot={{ r: 2 }} name="Snapshots" />
+        <Line type="monotone" dataKey="recalcs" stroke={COLORS.limeDeep} strokeWidth={2} dot={{ r: 2 }} name="Метрик" />
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
+export function HourlyHeatmap({ data }: { data: { hour: number; count: number }[] }) {
+  const max = Math.max(...data.map(d => d.count), 1);
+  return (
+    <div className="grid grid-cols-12 md:grid-cols-24 gap-1">
+      {data.map((d) => {
+        const intensity = d.count / max;
+        const opacity = d.count === 0 ? 0.08 : 0.25 + intensity * 0.75;
+        return (
+          <div key={d.hour} className="flex flex-col items-center gap-1">
+            <div
+              className="w-full aspect-square rounded"
+              style={{ background: COLORS.lime, opacity }}
+              title={`${d.hour}:00 — ${d.count}`}
+            />
+            {d.hour % 3 === 0 && <span className="font-mono text-[9px] text-ink-hush">{String(d.hour).padStart(2, "0")}</span>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function Empty({ children }: { children: React.ReactNode }) {
-  return <div className="h-[200px] flex items-center justify-center text-sm text-slate-400">{children}</div>;
+  return (
+    <div className="h-[200px] flex items-center justify-center text-sm text-ink-hush font-mono">
+      {children}
+    </div>
+  );
 }
