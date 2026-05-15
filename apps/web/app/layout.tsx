@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
-import { Funnel_Display, Funnel_Sans, JetBrains_Mono } from "next/font/google";
+import { Unbounded, Onest, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const display = Funnel_Display({
+const display = Unbounded({
   subsets: ["latin", "cyrillic"],
   variable: "--font-display",
   display: "swap",
+  weight: ["300", "400", "500", "600", "700"],
 });
-const body = Funnel_Sans({
+const body = Onest({
   subsets: ["latin", "cyrillic"],
   variable: "--font-body",
   display: "swap",
