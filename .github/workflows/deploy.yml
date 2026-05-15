@@ -36,8 +36,11 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            echo "→ запуск finalize.sh (npm install в корне workspaces + pip + build + restart)"
-            sudo /opt/veloseller/deploy/finalize.sh
+            echo "→ chmod +x для всех скриптов деплоя"
+            chmod +x /opt/veloseller/deploy/*.sh || true
+
+            echo "→ запуск finalize.sh (npm install + pip + build + restart)"
+            sudo bash /opt/veloseller/deploy/finalize.sh
 
             echo "✅ deploy OK ($(git rev-parse --short HEAD))"
           EOF
