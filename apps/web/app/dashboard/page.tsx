@@ -5,6 +5,7 @@ import { HealthTrend, LostRevenueTrend, SegmentPie } from "./StoreCharts";
 import { DayProgress } from "./DayProgress";
 import { PeriodSelector } from "./PeriodSelector";
 import { DeadInventoryChart } from "./StoreCharts";
+import { HealthScoreBlock } from "./HealthScale";
 
 export default async function DashboardOverview({ searchParams }: {
   searchParams: Promise<{ period?: string }>;
@@ -20,8 +21,6 @@ export default async function DashboardOverview({ searchParams }: {
   const { data: seller } = await supabase.from("sellers").select("created_at").eq("id", user.id).maybeSingle();
   const daysSinceSetup = seller?.created_at ? Math.floor((Date.now() - new Date(seller.created_at).getTime()) / 86400_000) : 0;
 
-  // Самая свежая запись store_metrics для выбранного периода
-  // Длина периода = period_end - period_start (по spec). Фильтруем выборкой с подходящей длиной.
   const periodStartDate = new Date(Date.now() - periodDays * 86400_000);
   const periodStartIso = periodStartDate.toISOString().slice(0, 10);
   const { data: storeMetricsRows } = await supabase
@@ -31,13 +30,11 @@ export default async function DashboardOverview({ searchParams }: {
     .gte("period_start", periodStartIso)
     .order("computed_at", { ascending: false })
     .limit(20);
-  // Берём первую запись где (period_end - period_start) ≈ periodDays
   const storeMetrics = (storeMetricsRows ?? []).find((r: any) => {
     const len = Math.round((new Date(r.period_end).getTime() - new Date(r.period_start).getTime()) / 86400_000);
     return Math.abs(len - (periodDays - 1)) <= 1;
   }) ?? (storeMetricsRows?.[0] ?? null);
 
-  // История store_metrics за последние 14 дней — для графиков
   const { data: storeHistory } = await supabase
     .from("store_metrics")
     .select("period_end,warehouse_health_score,lost_revenue,total_inventory_value,store_frozen_inventory_value,dead_inventory_sku_count")
@@ -45,7 +42,6 @@ export default async function DashboardOverview({ searchParams }: {
     .order("period_end", { ascending: false })
     .limit(14);
 
-  // Velocity всех SKU за выбранный период — для быстрой/средней/медленной KPI
   const { data: skuVelocities } = await supabase
     .from("tvelo_metrics")
     .select("adjusted_velocity,product_id,period_end")
@@ -76,22 +72,22 @@ export default async function DashboardOverview({ searchParams }: {
 
   if ((connectionsCount ?? 0) === 0) {
     return (
-      <div className="rounded-2xl border border-brand-100 bg-white p-8 text-center">
-        <h1 className="text-2xl font-bold text-slate-900">Подключи первый источник данных</h1>
-        <p className="mx-auto mt-2 max-w-xl text-slate-600">
+      <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center">
+        <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Подключи первый источник данных</h1>
+        <p className="mx-auto mt-3 max-w-xl text-ink-muted">
           Чтобы Veloseller начал считать TVelo, нужны ежедневные snapshots по твоим SKU.
           Это занимает 5 минут — выбери способ, как тебе удобнее.
         </p>
-        <div className="mt-6 flex gap-3 justify-center">
+        <div className="mt-6 flex gap-3 justify-center flex-wrap">
           <Link
-            href="/onboarding"
-            className="inline-block rounded-xl border border-brand-700 text-brand-700 px-6 py-3 font-semibold hover:bg-brand-50"
+            href={"/onboarding" as any}
+            className="inline-flex items-center rounded-lg border border-line bg-bg-soft text-ink px-5 py-3 font-semibold hover:border-lime-deep/40 transition"
           >
             Гид по настройке
           </Link>
           <Link
-            href="/connections/new"
-            className="inline-block rounded-xl bg-brand-700 px-6 py-3 font-semibold text-white hover:bg-brand-600"
+            href={"/connections/new" as any}
+            className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition"
           >
             Подключить источник
           </Link>
@@ -103,7 +99,7 @@ export default async function DashboardOverview({ searchParams }: {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="text-3xl font-bold text-slate-900">Обзор склада</h1>
+        <h1 className="font-display text-3xl md:text-4xl font-medium tracking-tight text-ink">Обзор склада</h1>
         <div className="flex items-center gap-3">
           <PeriodSelector current={period} />
           <RecalcButton />
@@ -120,24 +116,18 @@ export default async function DashboardOverview({ searchParams }: {
         <Kpi label="Неликвид" value={storeMetrics?.dead_inventory_sku_count ?? "—"} tone="warn" />
       </div>
 
+      {/* Health + Inventory value */}
       <div className="grid gap-6 md:grid-cols-2">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6">
-          <div className="text-sm text-slate-500">Inventory Health Score</div>
-          <div className="mt-2 text-5xl font-bold text-brand-700">
-            {storeMetrics?.warehouse_health_score?.toFixed(0) ?? "—"}
-            <span className="text-2xl text-slate-400">/100</span>
-          </div>
-          <div className="mt-2 text-sm text-slate-600">{scoreLabel(storeMetrics?.warehouse_health_score)}</div>
-        </div>
+        <HealthScoreBlock score={storeMetrics?.warehouse_health_score} />
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-6">
-          <div className="text-sm text-slate-500">Денег в остатках</div>
-          <div className="mt-2 text-3xl font-bold text-slate-900">
+        <div className="rounded-2xl border border-line bg-paper p-6">
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">Денег в остатках</div>
+          <div className="mt-3 font-display text-4xl md:text-5xl tracking-tight font-medium text-ink tabular">
             {formatMoney(storeMetrics?.total_inventory_value)}
           </div>
-          <div className="mt-3 text-sm">
-            <span className="text-slate-500">Заморожено в неликвиде: </span>
-            <span className="font-semibold text-amber-700">
+          <div className="mt-4 rounded-lg border border-orange/20 bg-orange/5 p-3 flex items-center justify-between gap-3 flex-wrap">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold">Заморожено в неликвиде</span>
+            <span className="font-display tabular text-xl text-orange font-medium">
               {formatMoney(storeMetrics?.store_frozen_inventory_value)}
             </span>
           </div>
@@ -145,83 +135,62 @@ export default async function DashboardOverview({ searchParams }: {
       </div>
 
       {/* Concentrations */}
-      <div className="grid gap-6 md:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6">
-          <div className="text-sm text-slate-500">Концентрация остатков</div>
-          <div className="mt-2 text-2xl font-bold text-slate-900">
-            {storeMetrics?.inventory_concentration_50 ?? "—"} SKU
+      <div className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border border-line bg-paper p-5">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Концентрация остатков</div>
+          <div className="mt-2 font-display text-2xl tabular text-ink font-medium">
+            {storeMetrics?.inventory_concentration_50 ?? "—"} <span className="text-base text-ink-muted">SKU</span>
           </div>
-          <div className="mt-1 text-sm text-slate-600">дают 50% остатков по деньгам</div>
+          <div className="mt-1 text-xs text-ink-muted">дают 50% остатков по деньгам</div>
         </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-6">
-          <div className="text-sm text-slate-500">Концентрация спроса</div>
-          <div className="mt-2 text-2xl font-bold text-slate-900">
-            {storeMetrics?.demand_concentration_50 ?? "—"} SKU
+        <div className="rounded-2xl border border-line bg-paper p-5">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Концентрация спроса</div>
+          <div className="mt-2 font-display text-2xl tabular text-ink font-medium">
+            {storeMetrics?.demand_concentration_50 ?? "—"} <span className="text-base text-ink-muted">SKU</span>
           </div>
-          <div className="mt-1 text-sm text-slate-600">дают 50% спроса</div>
+          <div className="mt-1 text-xs text-ink-muted">дают 50% спроса</div>
         </div>
-        <div className="rounded-2xl border border-red-100 bg-red-50 p-6">
-          <div className="text-sm text-red-700">Lost revenue</div>
-          <div className="mt-2 text-2xl font-bold text-red-900">
+        <div className="rounded-2xl border border-rose/30 bg-rose/5 p-5">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-rose font-semibold">Lost revenue</div>
+          <div className="mt-2 font-display text-2xl tabular text-rose font-medium">
             {formatMoney(storeMetrics?.lost_revenue)}
           </div>
-          <div className="mt-1 text-sm text-red-700">недополучено за период из-за OOS</div>
+          <div className="mt-1 text-xs text-rose/80">недополучено за период из-за OOS</div>
         </div>
       </div>
 
-      {/* 3 скорости продаж по Project.docx Day 7 */}
+      {/* 3 скорости продаж (Project.docx Day 7) */}
       <div>
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Скорости продаж по SKU</h3>
+        <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">Скорости продаж по SKU</h3>
         <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white border border-slate-200 border-l-4 border-l-emerald-500 rounded-xl p-4">
-            <div className="text-xs text-slate-500 uppercase tracking-wide">Быстрая</div>
-            <div className="mt-1 text-2xl font-bold text-emerald-700">{fastVelocity.toFixed(2)}</div>
-            <div className="text-xs text-slate-500 mt-0.5">топ 10% SKU</div>
-          </div>
-          <div className="bg-white border border-slate-200 border-l-4 border-l-blue-500 rounded-xl p-4">
-            <div className="text-xs text-slate-500 uppercase tracking-wide">Средняя</div>
-            <div className="mt-1 text-2xl font-bold text-blue-700">{avgVelocity.toFixed(2)}</div>
-            <div className="text-xs text-slate-500 mt-0.5">по всем SKU</div>
-          </div>
-          <div className="bg-white border border-slate-200 border-l-4 border-l-amber-500 rounded-xl p-4">
-            <div className="text-xs text-slate-500 uppercase tracking-wide">Медленная</div>
-            <div className="mt-1 text-2xl font-bold text-amber-700">{slowVelocity.toFixed(2)}</div>
-            <div className="text-xs text-slate-500 mt-0.5">нижние 10% SKU</div>
-          </div>
+          <VelocityCard label="Быстрая" value={fastVelocity} sub="топ 10% SKU" tone="fast" />
+          <VelocityCard label="Средняя" value={avgVelocity}  sub="по всем SKU"  tone="mid" />
+          <VelocityCard label="Медленная" value={slowVelocity} sub="нижние 10%" tone="slow" />
         </div>
       </div>
 
       {/* Графики */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6">
-          <h3 className="text-sm font-semibold text-slate-900 mb-3">Health за 14 дней</h3>
-          <HealthTrend history={storeHistory ?? []} />
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-6">
-          <h3 className="text-sm font-semibold text-slate-900 mb-3">Lost revenue за 14 дней</h3>
-          <LostRevenueTrend history={storeHistory ?? []} />
-        </div>
-        <div className="rounded-2xl border border-slate-200 bg-white p-6">
-          <h3 className="text-sm font-semibold text-slate-900 mb-3">Распределение по сегментам</h3>
-          <SegmentPie distribution={storeMetrics?.demand_pattern_distribution as any} />
-        </div>
+      <div className="grid gap-4 lg:grid-cols-3">
+        <ChartCard title="Health за 14 дней"><HealthTrend history={storeHistory ?? []} /></ChartCard>
+        <ChartCard title="Lost revenue за 14 дней"><LostRevenueTrend history={storeHistory ?? []} /></ChartCard>
+        <ChartCard title="Распределение по сегментам"><SegmentPie distribution={storeMetrics?.demand_pattern_distribution as any} /></ChartCard>
       </div>
 
-      {/* Dead inventory (товары >6 мес) — отдельный график по Project.docx */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6">
-        <h3 className="text-sm font-semibold text-slate-900 mb-1">Неликвид (товары &gt; 6 месяцев)</h3>
-        <p className="text-xs text-slate-500 mb-4">Динамика количества SKU и замороженных денег</p>
+      {/* Dead inventory */}
+      <div className="rounded-2xl border border-line bg-paper p-6">
+        <h3 className="font-display text-lg font-medium text-ink">Неликвид (товары &gt; 6 месяцев)</h3>
+        <p className="text-xs text-ink-muted mt-1 mb-4">Динамика количества SKU и замороженных денег</p>
         <DeadInventoryChart history={storeHistory ?? []} />
       </div>
 
       {/* Alerts */}
       {alerts && alerts.length > 0 && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-6">
-          <h2 className="text-lg font-semibold text-slate-900">Уведомления</h2>
+        <div className="rounded-2xl border border-line bg-paper p-6">
+          <h2 className="font-display text-lg font-medium text-ink">Уведомления</h2>
           <ul className="mt-3 space-y-2">
             {alerts.map((a) => (
-              <li key={a.id} className="rounded-lg bg-slate-50 p-3 text-sm text-slate-700">
-                <span className="font-medium">{kindLabel(a.kind)}: </span>
+              <li key={a.id} className="rounded-lg border border-line bg-bg-soft p-3 text-sm text-ink-soft">
+                <span className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold mr-2">{kindLabel(a.kind)}</span>
                 {a.message}
               </li>
             ))}
@@ -234,22 +203,36 @@ export default async function DashboardOverview({ searchParams }: {
 
 function Kpi({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "warn" }) {
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-      <div className="text-sm text-slate-500">{label}</div>
-      <div className={`mt-1 text-2xl font-bold ${tone === "warn" ? "text-amber-700" : "text-slate-900"}`}>
+    <div className="rounded-2xl border border-line bg-paper p-4">
+      <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{label}</div>
+      <div className={`mt-1.5 font-display text-2xl md:text-3xl tabular font-medium tracking-tight ${tone === "warn" ? "text-orange" : "text-ink"}`}>
         {value}
       </div>
     </div>
   );
 }
 
-function scoreLabel(score: number | null | undefined): string {
-  if (score == null) return "Недостаточно данных";
-  if (score >= 90) return "Excellent";
-  if (score >= 75) return "Good";
-  if (score >= 60) return "Warning";
-  if (score >= 40) return "Risky";
-  return "Critical";
+function VelocityCard({ label, value, sub, tone }: { label: string; value: number; sub: string; tone: "fast" | "mid" | "slow" }) {
+  const cls =
+    tone === "fast" ? "border-l-lime-deep text-lime-deep" :
+    tone === "mid"  ? "border-l-azure text-azure" :
+                      "border-l-orange text-orange";
+  return (
+    <div className={`bg-paper border border-line border-l-4 rounded-xl p-4 ${cls.replace("text-", "")}`}>
+      <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{label}</div>
+      <div className={`mt-1 font-display text-2xl tabular font-medium ${cls.split(" ")[1]}`}>{value.toFixed(2)}</div>
+      <div className="text-[10px] text-ink-hush mt-0.5 font-mono uppercase tracking-wider">{sub}</div>
+    </div>
+  );
+}
+
+function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-line bg-paper p-6">
+      <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">{title}</h3>
+      {children}
+    </div>
+  );
 }
 
 function formatMoney(n: number | null | undefined): string {
