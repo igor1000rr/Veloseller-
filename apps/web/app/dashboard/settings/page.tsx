@@ -18,8 +18,15 @@ export default async function SettingsPage() {
   const deeplinkUrl = botUsername ? `https://t.me/${botUsername}?start=${user.id}` : null;
 
   return (
-    <div className="max-w-2xl space-y-8">
-      <h1 className="text-3xl font-bold text-slate-900">Настройки</h1>
+    <div className="max-w-2xl space-y-6">
+      <header>
+        <div className="inline-flex items-center gap-2 mb-2">
+          <span className="size-1 rounded-full bg-lime-deep" />
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Settings</span>
+        </div>
+        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">Настройки</h1>
+        <p className="mt-1 text-ink-muted text-sm">Профиль и уведомления</p>
+      </header>
       <SettingsForm initial={seller ?? {}} telegramDeeplink={deeplinkUrl} />
     </div>
   );

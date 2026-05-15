@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { Icons } from "../_components/Icons";
 
 export const dynamic = "force-dynamic";
 
@@ -21,12 +22,18 @@ export default async function OnboardingPage() {
   const step3Done = (metricsCount ?? 0) > 0;
 
   return (
-    <main className="min-h-screen bg-slate-50 py-12 px-4">
+    <main className="min-h-screen bg-bg py-12 px-4">
       <div className="mx-auto max-w-2xl">
-        <h1 className="text-3xl font-bold text-slate-900 mb-2">Добро пожаловать в Veloseller!</h1>
-        <p className="text-slate-600 mb-8">3 шага до первого расчёта TVelo:</p>
+        <div className="inline-flex items-center gap-2 mb-2">
+          <span className="size-1 rounded-full bg-lime-deep" />
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Onboarding</span>
+        </div>
+        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">
+          Добро пожаловать в <span className="text-lime-deep italic">Veloseller</span>
+        </h1>
+        <p className="mt-2 text-ink-muted text-sm">3 шага до первого расчёта TVelo</p>
 
-        <ol className="space-y-4">
+        <ol className="mt-8 space-y-3">
           <Step
             n={1}
             title="Подключи источник данных"
@@ -45,19 +52,21 @@ export default async function OnboardingPage() {
             n={3}
             title="Дождись пересчёта"
             done={step3Done}
-            description="Cron запускается каждый час, или нажми «Пересчитать сейчас» на dashboard"
+            description="Cron запускается каждый час — или нажми «Пересчитать сейчас» на dashboard"
             cta={step2Done && !step3Done ? { href: "/dashboard", label: "Открыть dashboard" } : null}
           />
         </ol>
 
         {step1Done && step2Done && step3Done && (
-          <div className="mt-8 p-6 bg-teal-50 border border-teal-200 rounded-xl text-center">
-            <p className="text-teal-900 font-medium mb-3">🎉 Готово! Veloseller считает твою скорость продаж.</p>
+          <div className="mt-8 p-6 rounded-2xl border-2 border-lime-deep/40 bg-lime-soft text-center">
+            <p className="font-display text-lg text-ink font-medium mb-3">
+              🎉 Готово! Veloseller считает твою скорость продаж.
+            </p>
             <Link
               href="/dashboard"
-              className="inline-block bg-teal-700 hover:bg-teal-800 text-white px-6 py-2.5 rounded-lg font-medium"
+              className="inline-flex items-center gap-2 bg-ink text-paper px-6 py-3 rounded-lg font-semibold hover:bg-ink-soft transition"
             >
-              Открыть dashboard →
+              Открыть dashboard <Icons.ArrowRight />
             </Link>
           </div>
         )}
@@ -71,16 +80,27 @@ function Step({ n, title, done, description, cta }: {
   cta: { href: string; label: string } | null;
 }) {
   return (
-    <li className={`flex gap-4 p-5 rounded-xl border ${done ? "bg-teal-50 border-teal-200" : "bg-white border-slate-200"}`}>
-      <div className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center font-bold ${done ? "bg-teal-600 text-white" : "bg-slate-100 text-slate-600"}`}>
-        {done ? "✓" : n}
+    <li
+      className={`flex gap-4 p-5 rounded-2xl border ${
+        done ? "bg-lime-soft border-lime-deep/30" : "bg-paper border-line"
+      }`}
+    >
+      <div
+        className={`shrink-0 size-10 rounded-full flex items-center justify-center font-display font-medium ${
+          done ? "bg-lime-deep text-paper" : "bg-bg-soft text-ink-muted border border-line"
+        }`}
+      >
+        {done ? <Icons.Check size={16} /> : n}
       </div>
-      <div className="flex-1">
-        <h3 className="font-semibold text-slate-900">{title}</h3>
-        <p className="text-sm text-slate-600 mt-1">{description}</p>
+      <div className="flex-1 min-w-0">
+        <h3 className="font-display font-medium text-ink">{title}</h3>
+        <p className="text-sm text-ink-muted mt-1 leading-relaxed">{description}</p>
         {cta && (
-          <Link href={cta.href as any} className="inline-block mt-3 text-sm text-teal-700 hover:underline font-medium">
-            {cta.label} →
+          <Link
+            href={cta.href as any}
+            className="inline-flex items-center gap-1 mt-3 text-sm text-lime-deep hover:text-ink font-medium transition"
+          >
+            {cta.label} <Icons.ArrowRight size={12} />
           </Link>
         )}
       </div>
