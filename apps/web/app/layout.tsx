@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Geologica, Onest, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
+import { CookieBanner } from "./_components/CookieBanner";
 
-// Geologica — variable font, weight НЕ передаём (вызывает runtime crash)
 const display = Geologica({
   subsets: ["latin", "cyrillic"],
   variable: "--font-display",
@@ -28,7 +28,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ru" className={`${display.variable} ${body.variable} ${mono.variable}`}>
-      <body className="min-h-screen">{children}</body>
+      <body className="min-h-screen">
+        {children}
+        <CookieBanner />
+      </body>
     </html>
   );
 }
