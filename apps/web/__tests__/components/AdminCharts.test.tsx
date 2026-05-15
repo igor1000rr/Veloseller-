@@ -7,65 +7,71 @@ import {
   ActivityChart,
 } from "@/app/admin/AdminCharts";
 
+// Утилита: проверяет что текст есть в textContent контейнера
+// (более устойчиво к разбиению текста между элементами, чем getByText)
+function hasText(container: HTMLElement, text: string): boolean {
+  return (container.textContent || "").includes(text);
+}
+
 describe("AdminCharts: RegistrationsChart", () => {
   it("пустой массив → Empty 'Регистраций пока нет'", () => {
-    render(<RegistrationsChart data={[]} />);
-    expect(screen.getByText("Регистраций пока нет")).toBeInTheDocument();
+    const { container } = render(<RegistrationsChart data={[]} />);
+    expect(hasText(container, "Регистраций пока нет")).toBe(true);
   });
 
   it("с данными — рендерит AreaChart", () => {
-    render(<RegistrationsChart data={[{ date: "05-01", count: 3 }, { date: "05-02", count: 5 }]} />);
-    expect(screen.queryByText(/Регистраций пока нет/)).not.toBeInTheDocument();
+    const { container } = render(<RegistrationsChart data={[{ date: "05-01", count: 3 }, { date: "05-02", count: 5 }]} />);
+    expect(hasText(container, "Регистраций пока нет")).toBe(false);
   });
 });
 
 describe("AdminCharts: SnapshotsChart", () => {
   it("пустой → 'Снимков нет'", () => {
-    render(<SnapshotsChart data={[]} />);
-    expect(screen.getByText("Снимков нет")).toBeInTheDocument();
+    const { container } = render(<SnapshotsChart data={[]} />);
+    expect(hasText(container, "Снимков нет")).toBe(true);
   });
 
   it("с данными — BarChart", () => {
     const { container } = render(<SnapshotsChart data={[{ date: "05-01", count: 100 }, { date: "05-02", count: 200 }]} />);
     expect(container.firstChild).toBeTruthy();
-    expect(screen.queryByText("Снимков нет")).not.toBeInTheDocument();
+    expect(hasText(container, "Снимков нет")).toBe(false);
   });
 });
 
 describe("AdminCharts: PlansPieChart", () => {
   it("пустой массив → 'Селлеров нет'", () => {
-    render(<PlansPieChart data={[]} />);
-    expect(screen.getByText("Селлеров нет")).toBeInTheDocument();
+    const { container } = render(<PlansPieChart data={[]} />);
+    expect(hasText(container, "Селлеров нет")).toBe(true);
   });
 
   it("массив с count=0 для всех — тоже Empty", () => {
-    render(<PlansPieChart data={[{ plan: "trial", count: 0 }, { plan: "pro", count: 0 }]} />);
-    expect(screen.getByText("Селлеров нет")).toBeInTheDocument();
+    const { container } = render(<PlansPieChart data={[{ plan: "trial", count: 0 }, { plan: "pro", count: 0 }]} />);
+    expect(hasText(container, "Селлеров нет")).toBe(true);
   });
 
   it("реальные данные — отрисовывает Pie", () => {
-    render(<PlansPieChart data={[
+    const { container } = render(<PlansPieChart data={[
       { plan: "trial", count: 5 }, { plan: "starter", count: 3 },
       { plan: "growth", count: 1 }, { plan: "pro", count: 1 },
     ]} />);
-    expect(screen.queryByText("Селлеров нет")).not.toBeInTheDocument();
+    expect(hasText(container, "Селлеров нет")).toBe(false);
   });
 
-  it("неизвестный plan — fallback цвет (slate)", () => {
-    render(<PlansPieChart data={[{ plan: "unknown_plan", count: 2 }]} />);
-    expect(screen.queryByText("Селлеров нет")).not.toBeInTheDocument();
+  it("неизвестный plan — fallback цвет", () => {
+    const { container } = render(<PlansPieChart data={[{ plan: "unknown_plan", count: 2 }]} />);
+    expect(hasText(container, "Селлеров нет")).toBe(false);
   });
 
   it("фильтрует count=0", () => {
-    render(<PlansPieChart data={[{ plan: "trial", count: 0 }, { plan: "pro", count: 5 }]} />);
-    expect(screen.queryByText("Селлеров нет")).not.toBeInTheDocument();
+    const { container } = render(<PlansPieChart data={[{ plan: "trial", count: 0 }, { plan: "pro", count: 5 }]} />);
+    expect(hasText(container, "Селлеров нет")).toBe(false);
   });
 });
 
 describe("AdminCharts: ActivityChart", () => {
   it("пустой → 'Активности нет'", () => {
-    render(<ActivityChart data={[]} />);
-    expect(screen.getByText("Активности нет")).toBeInTheDocument();
+    const { container } = render(<ActivityChart data={[]} />);
+    expect(hasText(container, "Активности нет")).toBe(true);
   });
 
   it("с данными — LineChart рендерится", () => {
@@ -74,6 +80,6 @@ describe("AdminCharts: ActivityChart", () => {
       { date: "05-02", snapshots: 120, recalcs: 6 },
     ]} />);
     expect(container.firstChild).toBeTruthy();
-    expect(screen.queryByText("Активности нет")).not.toBeInTheDocument();
+    expect(hasText(container, "Активности нет")).toBe(false);
   });
 });
