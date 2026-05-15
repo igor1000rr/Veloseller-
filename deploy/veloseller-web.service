@@ -1,0 +1,20 @@
+[Unit]
+Description=Veloseller Web (Next.js)
+After=network.target veloseller-worker.service
+
+[Service]
+Type=simple
+User=veloseller
+Group=veloseller
+WorkingDirectory=/opt/veloseller/apps/web
+Environment=NODE_ENV=production
+Environment=PORT=3000
+EnvironmentFile=/opt/veloseller/apps/web/.env.production
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start -p 3000
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,18 @@
+[Unit]
+Description=Veloseller Worker (FastAPI)
+After=network.target
+
+[Service]
+Type=simple
+User=veloseller
+Group=veloseller
+WorkingDirectory=/opt/veloseller/apps/worker
+EnvironmentFile=/opt/veloseller/apps/worker/.env
+ExecStart=/opt/veloseller/apps/worker/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 2
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
