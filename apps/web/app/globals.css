@@ -3,14 +3,77 @@
 @tailwind utilities;
 
 :root {
-  --background: 0 0% 100%;
-  --foreground: 222.2 84% 4.9%;
+  /* Landing dark theme */
+  --ink-900: #0a0d0a;
+  --ink-800: #0f1310;
+  --ink-700: #161c18;
+  --ink-600: #1f2a23;
+  --ink-500: #2a3830;
+  --mist-50:  #f4f7f3;
+  --mist-200: #d4dcd6;
+  --mist-400: #7a8b80;
+  --mist-600: #4b5a52;
+  --lime:        #a3e635;
+  --lime-bright: #d4ff5c;
+  --lime-soft:   rgba(163, 230, 53, 0.12);
+  --orange:      #fb923c;
+  --rose:        #f87171;
 }
 
 html, body { height: 100%; }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Helvetica, Arial, sans-serif;
+  font-family: var(--font-body), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   color: rgb(15 23 42);
   background: rgb(248 250 252);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
+
+@layer utilities {
+  .font-display { font-family: var(--font-display), serif; letter-spacing: -0.02em; }
+  .font-mono    { font-family: var(--font-mono), ui-monospace, "SF Mono", monospace; font-feature-settings: "zero", "ss02"; }
+
+  /* Atmospheric backgrounds для landing */
+  .bg-grain {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.16 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+  .bg-grid-dark {
+    background-image:
+      linear-gradient(to right, rgba(163,230,53,0.06) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(163,230,53,0.06) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+  .bg-dots-dark {
+    background-image: radial-gradient(circle, rgba(163,230,53,0.18) 1px, transparent 1px);
+    background-size: 22px 22px;
+  }
+
+  /* tabular nums для цифр */
+  .tabular { font-variant-numeric: tabular-nums; }
+
+  /* Live ticker — мигающий курсор */
+  .blink::after {
+    content: "";
+    display: inline-block;
+    width: 0.55em; height: 1em;
+    margin-left: 0.15em;
+    background: currentColor;
+    vertical-align: -0.12em;
+    animation: blink 1.1s steps(2, end) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Reveal-анимации для landing */
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .reveal { animation: fade-up 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(120,140,130,0.35); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(120,140,130,0.6); }
