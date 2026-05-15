@@ -33,7 +33,7 @@ def _s(id_: str, offset_hours: float, stock: int) -> Snapshot:
 class TestDetectRecountPairs:
 
     def test_empty_returns_nothing(self):
-        аssert detect_recount_pairs([]) == [] if False else (detect_recount_pairs([]) == [])
+        assert detect_recount_pairs([]) == []
 
     def test_one_snapshot_returns_nothing(self):
         assert detect_recount_pairs([_s("a", 0, 100)]) == []
