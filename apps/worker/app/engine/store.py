@@ -1,4 +1,7 @@
-"""Store-level метрики: концентрация, demand pattern, warehouse health."""
+"""Store-level метрики: концентрация, demand pattern, warehouse health.
+
+Реализует раздел 1.5 и Rule 13.2 спеки.
+"""
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
@@ -12,6 +15,7 @@ class SkuValue:
 
 
 def concentration_50(items: list[SkuValue]) -> int:
+    """Минимальное число SKU, покрывающее >= 50% суммарного value."""
     if not items:
         return 0
     total = sum(i.value for i in items)
@@ -28,6 +32,7 @@ def concentration_50(items: list[SkuValue]) -> int:
 
 
 def demand_weight(adjusted_velocity: float, median_30d_velocity: float, price: float) -> float:
+    """DemandWeight для demand_concentration_50 (раздел 1.5)."""
     if adjusted_velocity > 0:
         return adjusted_velocity * price
     if median_30d_velocity > 0:
@@ -36,6 +41,7 @@ def demand_weight(adjusted_velocity: float, median_30d_velocity: float, price: f
 
 
 def demand_pattern(daily_velocities: list[float], min_days_for_pattern: int = 14) -> str:
+    """Stable / unpredictable / seasonal_candidate / insufficient_history."""
     if len(daily_velocities) < min_days_for_pattern:
         return "insufficient_history"
     arr = np.array(daily_velocities, dtype=float)
@@ -62,13 +68,16 @@ class SkuHealthInput:
 
 
 def warehouse_health_score(skus: list[SkuHealthInput]) -> Optional[int]:
+    """Rule 13.2: weighted SKU health - weighted stockout penalty."""
     if not skus:
         return None
+
     total_weight = sum(s.stock_quantity * s.price for s in skus)
     if total_weight <= 0:
         weighted_score = float(np.mean([s.health_score for s in skus]))
     else:
         weighted_score = sum(s.health_score * s.stock_quantity * s.price for s in skus) / total_weight
+
     total_demand = sum(demand_weight(s.adjusted_velocity, s.median_30d_velocity, s.price) for s in skus)
     oos_demand = sum(
         demand_weight(s.adjusted_velocity, s.median_30d_velocity, s.price)
@@ -80,10 +89,14 @@ def warehouse_health_score(skus: list[SkuHealthInput]) -> Optional[int]:
 
 
 def health_label(score: int) -> str:
-    if score >= 90: return "excellent"
-    if score >= 75: return "good"
-    if score >= 60: return "warning"
-    if score >= 40: return "risky"
+    if score >= 90:
+        return "excellent"
+    if score >= 75:
+        return "good"
+    if score >= 60:
+        return "warning"
+    if score >= 40:
+        return "risky"
     return "critical"
 
 
@@ -92,6 +105,7 @@ def total_inventory_value(skus: list[SkuHealthInput]) -> float:
 
 
 def frozen_inventory_value(skus: list[SkuHealthInput], coverage_days_per_sku: dict[str, Optional[float]]) -> float:
+    """Сумма stock × price по SKU с coverage > 180 (dead inventory risk)."""
     frozen = 0.0
     for s in skus:
         cov = coverage_days_per_sku.get(s.product_id)

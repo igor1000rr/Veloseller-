@@ -7,6 +7,7 @@ from typing import Optional
 
 @dataclass
 class PriceChange:
+    """Запись о смене цены SKU."""
     day: date
     previous_price: float
     new_price: float
@@ -14,6 +15,11 @@ class PriceChange:
 
 
 def detect_price_changes(daily_prices: list[tuple[date, float]]) -> list[PriceChange]:
+    """Rule 12.1: ищет дни где цена изменилась.
+
+    Args:
+        daily_prices: список (date, price) упорядоченный по дате.
+    """
     if len(daily_prices) < 2:
         return []
     out: list[PriceChange] = []
@@ -28,10 +34,11 @@ def detect_price_changes(daily_prices: list[tuple[date, float]]) -> list[PriceCh
 
 @dataclass
 class ElasticitySignal:
+    """Rule 12.3: влияние смены цены на velocity."""
     change_day: date
     velocity_before: float
     velocity_after: float
-    price_impact_percent: float
+    price_impact_percent: float       # (vel_after - vel_before) / vel_before * 100
     days_before: int
     days_after: int
 
@@ -42,6 +49,12 @@ def calculate_elasticity(
     sales_by_day_after: list[float],
     min_days_each_side: int = 7,
 ) -> Optional[ElasticitySignal]:
+    """Rule 12.3: если до и после смены >= 7 in-stock days, считаем elasticity.
+
+    Args:
+        sales_by_day_before: clean consumption по дням ДО смены (только in-stock).
+        sales_by_day_after: clean consumption по дням ПОСЛЕ смены (только in-stock).
+    """
     if len(sales_by_day_before) < min_days_each_side or len(sales_by_day_after) < min_days_each_side:
         return None
     vel_before = sum(sales_by_day_before) / len(sales_by_day_before)

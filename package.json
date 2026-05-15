@@ -2,13 +2,17 @@
   "name": "veloseller",
   "version": "0.1.0",
   "private": true,
-  "workspaces": ["apps/*"],
+  "description": "Veloseller — inventory intelligence for ecommerce sellers",
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
     "dev:web": "pnpm --filter @veloseller/web dev",
     "build:web": "pnpm --filter @veloseller/web build",
+    "lint:web": "pnpm --filter @veloseller/web lint",
     "worker:dev": "cd apps/worker && uvicorn app.main:app --reload --port 8001",
     "worker:test": "cd apps/worker && pytest -v"
   },
   "packageManager": "pnpm@9.12.0",
-  "engines": {"node": ">=20"}
+  "engines": {
+    "node": ">=20"
+  }
 }

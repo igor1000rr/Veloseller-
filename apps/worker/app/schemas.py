@@ -1,9 +1,12 @@
-"""Pydantic-схемы: входные snapshots, промежуточные метрики."""
+"""Pydantic-модели и enum-ы (синхронизировано с supabase/migrations/0001_init.sql)."""
 from __future__ import annotations
+
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Optional
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 
@@ -13,8 +16,8 @@ class EventType(str, Enum):
     SALES_LIKE = "sales_like"
     REPLENISHMENT_LIKE = "replenishment_like"
     ANOMALY_LIKE = "anomaly_like"
-    RECOUNT_LIKE = "recount_like"
     MISSING_DATA = "missing_data"
+    RECOUNT_LIKE = "recount_like"
 
 
 class SourceType(str, Enum):
@@ -38,13 +41,13 @@ class SnapshotInput(BaseModel):
     product_name: Optional[str] = None
     stock_quantity: int = Field(ge=0)
     price: Decimal = Field(ge=0)
-    snapshot_time: datetime
+    snapshot_time: Optional[datetime] = None
 
 
 class IngestPayload(BaseModel):
-    seller_id: str
-    connection_id: Optional[str] = None
-    source: SourceType
+    seller_id: UUID
+    source_id: Optional[UUID] = None
+    source_type: SourceType
     snapshots: list[SnapshotInput]
 
 
@@ -65,7 +68,7 @@ class HealthBreakdown(BaseModel):
 
 
 class TVeloMetric(BaseModel):
-    product_id: str
+    product_id: UUID
     period_start: date
     period_end: date
     confirmed_velocity: float

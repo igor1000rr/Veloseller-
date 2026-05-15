@@ -6,6 +6,11 @@ from app.schemas import EventType
 
 
 def event_message(event_type: EventType, delta_stock: Optional[int]) -> tuple[str, float]:
+    """Возвращает (message, confidence_impact) для одной записи changelog.
+
+    confidence_impact — на сколько процентов событие штрафует confidence в этот день
+    (если штрафует), для отображения в tooltip.
+    """
     delta_str = "" if delta_stock is None else f" (Δ={delta_stock:+d})"
     if event_type == EventType.FIRST_SNAPSHOT:
         return ("Первое подключение SKU — точка отсчёта", 0.0)

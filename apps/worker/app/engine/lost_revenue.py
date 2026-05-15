@@ -7,6 +7,10 @@ def average_stockout_price(
     prices_during_stockout: list[float],
     latest_known_price: Optional[float],
 ) -> float:
+    """Rule 9.2: AverageStockoutPrice = AVG(price during stockout period).
+
+    Если цены за stockout-период нет: AverageStockoutPrice = latest known price.
+    """
     if prices_during_stockout:
         return sum(prices_during_stockout) / len(prices_during_stockout)
     return latest_known_price or 0.0
@@ -18,6 +22,7 @@ def lost_revenue_per_sku(
     prices_during_stockout: list[float],
     latest_known_price: Optional[float],
 ) -> float:
+    """LostRevenue = LostUnits × AverageStockoutPrice = adj_vel × stockout × avg_price."""
     if adjusted_velocity <= 0 or stockout_days <= 0:
         return 0.0
     avg_price = average_stockout_price(prices_during_stockout, latest_known_price)
