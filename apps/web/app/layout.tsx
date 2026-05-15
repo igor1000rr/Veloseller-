@@ -1,17 +1,12 @@
 import type { Metadata } from "next";
-import { Unbounded, Onest, JetBrains_Mono } from "next/font/google";
+import { Manrope, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const display = Unbounded({
+const sans = Manrope({
   subsets: ["latin", "cyrillic"],
-  variable: "--font-display",
+  variable: "--font-sans",
   display: "swap",
-  weight: ["300", "400", "500", "600", "700"],
-});
-const body = Onest({
-  subsets: ["latin", "cyrillic"],
-  variable: "--font-body",
-  display: "swap",
+  weight: ["300", "400", "500", "600", "700", "800"],
 });
 const mono = JetBrains_Mono({
   subsets: ["latin", "cyrillic"],
@@ -22,12 +17,13 @@ const mono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: "Veloseller — скорость продаж без вранья",
   description:
-    "TVelo учитывает out-of-stock дни. Видишь реальную скорость продаж, где замораживаешь деньги, на каких SKU теряешь.",
+    "TVelo учитывает out-of-stock дни. Реальная скорость продаж, поиск замороженных денег в неликвиде.",
+  viewport: "width=device-width, initial-scale=1, maximum-scale=5",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ru" className={`${display.variable} ${body.variable} ${mono.variable}`}>
+    <html lang="ru" className={`${sans.variable} ${mono.variable}`}>
       <body>{children}</body>
     </html>
   );
