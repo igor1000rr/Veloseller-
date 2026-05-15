@@ -6,7 +6,13 @@ import { DayProgress } from "./DayProgress";
 import { PeriodSelector } from "./PeriodSelector";
 import { DeadInventoryChart } from "./StoreCharts";
 
-export default async function DashboardOverview() {
+export default async function DashboardOverview({ searchParams }: {
+  searchParams: Promise<{ period?: string }>;
+}) {
+  const sp = await searchParams;
+  const period: "7" | "30" | "90" = (["7", "30", "90"].includes(sp.period ?? "") ? sp.period : "30") as any;
+  const periodDays = parseInt(period, 10);
+
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
@@ -16,7 +22,6 @@ export default async function DashboardOverview() {
 
   // Самая свежая запись store_metrics для выбранного периода
   // Длина периода = period_end - period_start (по spec). Фильтруем выборкой с подходящей длиной.
-  const periodEndDate = new Date();
   const periodStartDate = new Date(Date.now() - periodDays * 86400_000);
   const periodStartIso = periodStartDate.toISOString().slice(0, 10);
   const { data: storeMetricsRows } = await supabase
@@ -45,8 +50,7 @@ export default async function DashboardOverview() {
     .from("tvelo_metrics")
     .select("adjusted_velocity,product_id,period_end")
     .order("period_end", { ascending: false })
-    .limit(1000);  // ограничение Supabase
-  // Берём только последнюю запись на каждый product_id
+    .limit(1000);
   const latestByProduct = new Map<string, number>();
   for (const m of skuVelocities ?? []) {
     const pid = (m as any).product_id;
@@ -65,7 +69,6 @@ export default async function DashboardOverview() {
     .order("created_at", { ascending: false })
     .limit(5);
 
-  // Если ещё нет ни одного коннекшна — направляем на onboarding
   const { count: connectionsCount } = await supabase
     .from("data_connections")
     .select("*", { count: "exact", head: true })
