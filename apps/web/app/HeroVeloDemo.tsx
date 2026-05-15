@@ -3,9 +3,8 @@
 import { useMemo, useState } from "react";
 
 /**
- * Интерактивный hero-калькулятор:
- * показывает разницу между «наивной» velocity (sales / period) и TVelo (sales / in_stock_days).
- * Слайдер OOS-дней меняет цифры в реальном времени — это и есть суть продукта.
+ * Live-демо: «обычная velocity vs TVelo».
+ * Слайдер OOS-дней пересчитывает всё в реальном времени.
  */
 export default function HeroVeloDemo() {
   const [oos, setOos] = useState(8);
@@ -17,13 +16,11 @@ export default function HeroVeloDemo() {
   const tvelo = useMemo(() => sales / inStockDays, [inStockDays]);
   const lift = ((tvelo - naive) / naive) * 100;
 
-  // Sparkline данные: имитация ежедневных продаж где OOS дни = 0
   const series = useMemo(() => {
     const days = period;
     const oosStart = Math.floor((days - oos) / 2);
     return Array.from({ length: days }, (_, i) => {
       if (i >= oosStart && i < oosStart + oos) return 0;
-      // Чуть рандомный паттерн (детерминированный по индексу)
       const base = 2.5;
       const wobble = Math.sin(i * 0.9) * 0.7 + Math.cos(i * 1.7) * 0.4;
       return Math.max(0, base + wobble);
@@ -40,45 +37,40 @@ export default function HeroVeloDemo() {
 
   return (
     <div className="relative">
-      {/* glow за карточкой */}
       <div
         aria-hidden
-        className="absolute -inset-8 -z-10 blur-3xl opacity-40"
-        style={{ background: "radial-gradient(closest-side, rgba(163,230,53,0.35), transparent 70%)" }}
+        className="absolute -inset-8 -z-10 blur-3xl opacity-50"
+        style={{ background: "radial-gradient(closest-side, rgba(132,204,22,0.30), transparent 70%)" }}
       />
-      <div className="rounded-2xl border border-[#1f2a23] bg-[#0f1310]/95 backdrop-blur p-5 md:p-7 shadow-2xl shadow-black/40">
-        {/* «window controls» */}
+      <div className="rounded-2xl border border-line bg-paper p-5 md:p-7 shadow-[0_20px_50px_-15px_rgba(10,13,10,0.20)]">
         <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-2">
-            <span className="size-2 rounded-full bg-[#fb923c]" />
-            <span className="size-2 rounded-full bg-[#a3e635]" />
-            <span className="size-2 rounded-full bg-[#3b4a40]" />
-            <span className="ml-3 font-mono text-[10px] uppercase tracking-[0.18em] text-[#7a8b80]">
+            <span className="size-2 rounded-full bg-rose/70" />
+            <span className="size-2 rounded-full bg-orange/70" />
+            <span className="size-2 rounded-full bg-lime/70" />
+            <span className="ml-3 font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush">
               veloseller / live demo
             </span>
           </div>
-          <span className="font-mono text-[10px] text-[#a3e635]/80 blink">LIVE</span>
+          <span className="font-mono text-[10px] text-lime-deep blink">LIVE</span>
         </div>
 
-        {/* Заголовок мини-кейса */}
         <div className="flex items-baseline justify-between">
           <div>
-            <div className="font-mono text-[11px] uppercase tracking-widest text-[#7a8b80]">SKU · Кроссовки Nike Pegasus 41</div>
-            <div className="mt-1 font-mono text-xs text-[#d4dcd6]">
-              продано <span className="text-[#f4f7f3] tabular">60</span> шт за <span className="tabular">30</span> дней
+            <div className="font-mono text-[11px] uppercase tracking-widest text-ink-hush">SKU · Кроссовки Nike Pegasus 41</div>
+            <div className="mt-1 font-mono text-xs text-ink-muted">
+              продано <span className="text-ink tabular">60</span> шт за <span className="tabular">30</span> дней
             </div>
           </div>
         </div>
 
-        {/* Sparkline */}
         <svg viewBox={`0 0 ${W} ${H}`} className="mt-5 w-full h-[84px]" preserveAspectRatio="none">
           <defs>
-            <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#a3e635" stopOpacity="0.45" />
-              <stop offset="100%" stopColor="#a3e635" stopOpacity="0" />
+            <linearGradient id="hgrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#84cc16" stopOpacity="0.30" />
+              <stop offset="100%" stopColor="#84cc16" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {/* OOS-zone подсветка */}
           {(() => {
             const start = series.findIndex((v) => v === 0);
             const end = series.findLastIndex((v) => v === 0);
@@ -87,23 +79,22 @@ export default function HeroVeloDemo() {
             const x2 = pad + end * stepX;
             return (
               <g>
-                <rect x={x1} y={pad} width={Math.max(x2 - x1, 2)} height={H - pad * 2} fill="#fb923c" fillOpacity="0.08" />
+                <rect x={x1} y={pad} width={Math.max(x2 - x1, 2)} height={H - pad * 2} fill="#f97316" fillOpacity="0.12" />
                 <text x={(x1 + x2) / 2} y={H - pad - 4} textAnchor="middle" className="font-mono"
-                  fill="#fb923c" fontSize="9" letterSpacing="0.1em">OOS</text>
+                  fill="#f97316" fontSize="9" letterSpacing="0.1em">OOS</text>
               </g>
             );
           })()}
-          <path d={areaPath} fill="url(#grad)" />
-          <path d={path} fill="none" stroke="#a3e635" strokeWidth="1.8" strokeLinejoin="round" />
+          <path d={areaPath} fill="url(#hgrad)" />
+          <path d={path} fill="none" stroke="#4d7c0f" strokeWidth="1.8" strokeLinejoin="round" />
         </svg>
 
-        {/* Слайдер OOS-дней */}
         <div className="mt-5">
           <div className="flex justify-between items-center mb-2">
-            <label htmlFor="oos" className="font-mono text-[10px] uppercase tracking-widest text-[#7a8b80]">
+            <label htmlFor="oos" className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
               Дней без товара
             </label>
-            <span className="font-mono text-sm text-[#fb923c] tabular">{oos} / 30 дней</span>
+            <span className="font-mono text-sm text-orange tabular">{oos} / 30 дней</span>
           </div>
           <input
             id="oos"
@@ -112,31 +103,30 @@ export default function HeroVeloDemo() {
             max={20}
             value={oos}
             onChange={(e) => setOos(parseInt(e.target.value))}
-            className="w-full accent-[#a3e635] cursor-pointer"
+            className="w-full accent-lime cursor-pointer"
           />
         </div>
 
-        {/* Сравнение */}
         <div className="mt-6 grid grid-cols-2 gap-3">
-          <div className="rounded-lg border border-[#2a3830] bg-[#0a0d0a] p-4">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-[#7a8b80]">обычная velocity</div>
-            <div className="mt-1 font-mono text-3xl text-[#7a8b80] tabular line-through decoration-[#fb923c]/60 decoration-2">
+          <div className="rounded-lg border border-line bg-bg-soft p-4">
+            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">обычная velocity</div>
+            <div className="mt-1 font-mono text-3xl text-ink-hush tabular line-through decoration-orange/70 decoration-2">
               {naive.toFixed(2)}
             </div>
-            <div className="mt-0.5 font-mono text-[10px] text-[#7a8b80]">шт / день</div>
+            <div className="mt-0.5 font-mono text-[10px] text-ink-hush">шт / день</div>
           </div>
-          <div className="rounded-lg border border-[#a3e635]/30 bg-[#a3e635]/[0.06] p-4 relative overflow-hidden">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-[#a3e635]">TVelo</div>
-            <div className="mt-1 font-mono text-3xl text-[#d4ff5c] tabular">{tvelo.toFixed(2)}</div>
-            <div className="mt-0.5 font-mono text-[10px] text-[#7a8b80]">
-              шт / день · <span className="text-[#a3e635]">+{lift.toFixed(0)}%</span>
+          <div className="rounded-lg border-2 border-lime/40 bg-lime/[0.08] p-4 relative overflow-hidden">
+            <div className="font-mono text-[10px] uppercase tracking-widest text-lime-deep">TVelo</div>
+            <div className="mt-1 font-mono text-3xl text-ink tabular font-semibold">{tvelo.toFixed(2)}</div>
+            <div className="mt-0.5 font-mono text-[10px] text-ink-muted">
+              шт / день · <span className="text-lime-deep font-semibold">+{lift.toFixed(0)}%</span>
             </div>
           </div>
         </div>
 
-        <p className="mt-5 text-[12.5px] leading-relaxed text-[#7a8b80]">
-          Поделить продажи на 30 — это неправильно: <span className="text-[#fb923c]">{oos} дней</span> товара
-          просто не было на складе. TVelo считает только дни <span className="text-[#a3e635]">когда товар был доступен</span>.
+        <p className="mt-5 text-[12.5px] leading-relaxed text-ink-muted">
+          Поделить продажи на 30 — это неправильно: <span className="text-orange font-medium">{oos} дней</span> товара
+          просто не было на складе. TVelo считает только <span className="text-lime-deep font-medium">дни доступности</span>.
         </p>
       </div>
     </div>

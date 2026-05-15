@@ -9,25 +9,29 @@ export default {
         mono:    ["var(--font-mono)", "ui-monospace", "monospace"],
       },
       colors: {
-        // Spotlight — lime-зелёный, акцент landing'а
+        // Spotlight — lime accent
         lime: {
-          DEFAULT: "#a3e635",
-          soft:    "rgba(163, 230, 53, 0.12)",
-          bright:  "#d4ff5c",
+          DEFAULT: "#84cc16",
+          bright:  "#a3e635",
+          deep:    "#4d7c0f",
+          soft:    "rgba(132, 204, 22, 0.10)",
         },
+        // Light surfaces
+        paper:  "#ffffff",
+        bg:     "#fafaf6",
+        "bg-soft": "#f3f4ed",
         ink: {
-          900: "#0a0d0a",
-          800: "#0f1310",
-          700: "#161c18",
-          600: "#1f2a23",
-          500: "#2a3830",
+          DEFAULT: "#0a0d0a",
+          soft:    "#1f2a23",
+          muted:   "#525a4e",
+          hush:    "#8a948a",
         },
-        mist: {
-          50:  "#f4f7f3",
-          200: "#d4dcd6",
-          400: "#7a8b80",
-          600: "#4b5a52",
-        },
+        line:   "#e6e9de",
+        "line-2": "#d4d8cd",
+        // Сигнальные
+        orange: "#f97316",
+        rose:   "#e11d48",
+        azure:  "#0ea5e9",
         // Brand teal сохраняем для dashboard/admin
         brand: {
           DEFAULT: "#0F766E",
@@ -39,9 +43,6 @@ export default {
           700: "#0F766E",
           900: "#134E4A",
         },
-      },
-      animation: {
-        "fade-up": "fade-up 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both",
       },
     },
   },

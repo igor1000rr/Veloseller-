@@ -3,56 +3,63 @@
 @tailwind utilities;
 
 :root {
-  /* Landing dark theme */
-  --ink-900: #0a0d0a;
-  --ink-800: #0f1310;
-  --ink-700: #161c18;
-  --ink-600: #1f2a23;
-  --ink-500: #2a3830;
-  --mist-50:  #f4f7f3;
-  --mist-200: #d4dcd6;
-  --mist-400: #7a8b80;
-  --mist-600: #4b5a52;
-  --lime:        #a3e635;
-  --lime-bright: #d4ff5c;
-  --lime-soft:   rgba(163, 230, 53, 0.12);
-  --orange:      #fb923c;
-  --rose:        #f87171;
+  /* Light terminal-data palette */
+  --bg:       #fafaf6;   /* off-white teply */
+  --bg-soft:  #f3f4ed;
+  --paper:    #ffffff;
+  --ink:      #0a0d0a;
+  --ink-soft: #1f2a23;
+  --muted:    #525a4e;
+  --hush:     #8a948a;
+  --line:     #e6e9de;
+  --line-2:   #d4d8cd;
+
+  --lime:        #84cc16;
+  --lime-bright: #a3e635;
+  --lime-deep:   #4d7c0f;
+  --lime-soft:   rgba(132, 204, 22, 0.10);
+
+  --orange:    #f97316;
+  --rose:      #e11d48;
+  --azure:     #0ea5e9;
 }
 
 html, body { height: 100%; }
-
 body {
   font-family: var(--font-body), -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: rgb(15 23 42);
-  background: rgb(248 250 252);
+  color: var(--ink);
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
 
 @layer utilities {
-  .font-display { font-family: var(--font-display), serif; letter-spacing: -0.02em; }
-  .font-mono    { font-family: var(--font-mono), ui-monospace, "SF Mono", monospace; font-feature-settings: "zero", "ss02"; }
+  .font-display { font-family: var(--font-display), serif; letter-spacing: -0.025em; }
+  .font-mono    { font-family: var(--font-mono), ui-monospace, monospace; font-feature-settings: "zero", "ss02"; }
+  .tabular      { font-variant-numeric: tabular-nums; }
 
-  /* Atmospheric backgrounds для landing */
-  .bg-grain {
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160' viewBox='0 0 160 160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.16 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
-  }
-  .bg-grid-dark {
+  /* Light-theme grid + dot backgrounds */
+  .bg-grid-light {
     background-image:
-      linear-gradient(to right, rgba(163,230,53,0.06) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(163,230,53,0.06) 1px, transparent 1px);
+      linear-gradient(to right, rgba(10,13,10,0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(10,13,10,0.05) 1px, transparent 1px);
     background-size: 56px 56px;
   }
-  .bg-dots-dark {
-    background-image: radial-gradient(circle, rgba(163,230,53,0.18) 1px, transparent 1px);
+  .bg-dots-light {
+    background-image: radial-gradient(circle, rgba(10,13,10,0.12) 1px, transparent 1px);
     background-size: 22px 22px;
   }
+  .bg-paper {
+    background:
+      radial-gradient(circle at 20% 0%, rgba(132,204,22,0.06), transparent 50%),
+      radial-gradient(circle at 80% 100%, rgba(14,165,233,0.05), transparent 50%),
+      var(--bg);
+  }
+  .bg-noise {
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180' viewBox='0 0 180 180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 0.07 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
 
-  /* tabular nums для цифр */
-  .tabular { font-variant-numeric: tabular-nums; }
-
-  /* Live ticker — мигающий курсор */
+  /* Blink для live-индикаторов */
   .blink::after {
     content: "";
     display: inline-block;
@@ -64,16 +71,30 @@ body {
   }
   @keyframes blink { 50% { opacity: 0; } }
 
-  /* Reveal-анимации для landing */
+  /* Reveal-анимации */
   @keyframes fade-up {
     from { opacity: 0; transform: translateY(14px); }
     to   { opacity: 1; transform: translateY(0); }
   }
   .reveal { animation: fade-up 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
+
+  /* Marquee-лента (для integration logos) */
+  @keyframes marquee {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+  .marquee-track { animation: marquee 35s linear infinite; }
+
+  /* Floating chip decoration */
+  @keyframes float-y {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-8px); }
+  }
+  .float-y { animation: float-y 5s ease-in-out infinite; }
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(120,140,130,0.35); border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(120,140,130,0.6); }
+::-webkit-scrollbar-thumb { background: rgba(10,13,10,0.15); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(10,13,10,0.3); }
