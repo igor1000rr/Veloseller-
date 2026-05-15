@@ -1,11 +1,16 @@
 name: Deploy
 
 on:
-  # Деплой запускается ТОЛЬКО после успешного CI (один прогон вместо двух)
+  # Деплой запускается ТОЛЬКО после успешного CI
   workflow_run:
     workflows: ["CI"]
     types: [completed]
     branches: [main]
+
+# Новый деплой отменяет прошлый идущий — не нужно катить устаревший коммит
+concurrency:
+  group: deploy-production
+  cancel-in-progress: true
 
 jobs:
   deploy:

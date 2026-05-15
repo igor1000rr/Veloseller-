@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [main]
 
+# Новый push в main отменяет прошлый идущий CI — не тратим минуты на устаревшие коммиты
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   worker:
     runs-on: ubuntu-latest
