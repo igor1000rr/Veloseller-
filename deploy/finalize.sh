@@ -22,8 +22,14 @@ chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR"
 chmod 600 "$WEB_ENV" "$WORKER_ENV"
 
 # ===== Web =====
-log "npm ci (корень монорепо — все workspace-зависимости)…"
-sudo -u "$DEPLOY_USER" -H bash -c "cd $DEPLOY_DIR && npm ci --no-audit --no-fund"
+# npm ci требует package-lock.json. Если его нет — делаем npm install (он создаст lock).
+if [ -f "$DEPLOY_DIR/package-lock.json" ]; then
+  log "npm ci (корень монорепо — все workspace-зависимости)…"
+  sudo -u "$DEPLOY_USER" -H bash -c "cd $DEPLOY_DIR && npm ci --no-audit --no-fund"
+else
+  log "package-lock.json отсутствует — делаем npm install (5-10 мин)…"
+  sudo -u "$DEPLOY_USER" -H bash -c "cd $DEPLOY_DIR && npm install --no-audit --no-fund"
+fi
 
 log "npm run build (Next.js production build, может занять 3-5 мин)…"
 sudo -u "$DEPLOY_USER" -H bash -c "cd $DEPLOY_DIR/apps/web && npm run build"
@@ -49,12 +55,12 @@ systemctl restart veloseller-web
 sleep 3
 
 log "Статус worker:"
-systemctl is-active veloseller-worker && echo "  ✅ работает" || {
+systemctl is-active veloseller-worker && echo "  ✅ работает" || {
   err "worker не запустился. Логи: journalctl -u veloseller-worker -n 50 --no-pager"
 }
 
 log "Статус web:"
-systemctl is-active veloseller-web && echo "  ✅ работает" || {
+systemctl is-active veloseller-web && echo "  ✅ работает" || {
   err "web не запустился. Логи: journalctl -u veloseller-web -n 50 --no-pager"
 }
 
