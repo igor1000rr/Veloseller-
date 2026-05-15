@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import SyncButton from "./SyncButton";
+import { Icons } from "../_components/Icons";
 
 export default async function ConnectionsPage() {
   const supabase = await createSupabaseServerClient();
@@ -14,92 +15,95 @@ export default async function ConnectionsPage() {
     .order("created_at", { ascending: false });
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-3">
-          <div className="flex items-center gap-6">
-            <Link href="/dashboard" className="text-lg font-bold text-brand-700">Veloseller</Link>
-            <nav className="flex gap-4 text-sm">
-              <Link href="/dashboard" className="text-slate-700 hover:text-brand-700">Обзор</Link>
-              <Link href="/dashboard/skus" className="text-slate-700 hover:text-brand-700">SKU</Link>
-              <Link href="/connections" className="font-semibold text-brand-700">Источники</Link>
-            </nav>
+    <>
+      <div className="flex items-end justify-between flex-wrap gap-4 mb-6 md:mb-8">
+        <div>
+          <div className="inline-flex items-center gap-2 mb-2">
+            <span className="size-1 rounded-full bg-lime-deep" />
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Sources</span>
           </div>
-          <div className="text-sm text-slate-600">{user.email}</div>
+          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">Источники данных</h1>
+          <p className="mt-1 text-ink-muted text-sm">Подключённые маркетплейсы и файлы — read-only</p>
         </div>
-      </header>
+        <Link
+          href={"/connections/new" as any}
+          className="inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-5 py-3 text-sm font-semibold hover:bg-ink-soft transition"
+        >
+          <Icons.Plus /> Подключить источник
+        </Link>
+      </div>
 
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        <div className="flex items-center justify-between">
-          <h1 className="text-3xl font-bold text-slate-900">Источники данных</h1>
-          <Link
-            href="/connections/new"
-            className="rounded-xl bg-brand-700 px-4 py-2 font-semibold text-white hover:bg-brand-600"
-          >
-            + Подключить источник
-          </Link>
-        </div>
-
-        <div className="mt-6 space-y-3">
-          {connections?.length ? (
-            connections.map((c) => (
-              <div key={c.id} className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-5">
-                <div>
-                  <div className="font-semibold text-slate-900">{c.name}</div>
-                  <div className="mt-1 text-sm text-slate-600">
-                    {sourceLabel(c.source, c.marketplace)} ·{" "}
-                    <StatusBadge status={c.status} />
-                    {c.last_sync_at && (
-                      <span className="ml-2 text-slate-500">
-                        синк: {new Date(c.last_sync_at).toLocaleString("ru-RU")}
-                      </span>
-                    )}
-                  </div>
-                  {c.last_error && (
-                    <div className="mt-2 text-sm text-red-700">{c.last_error}</div>
+      <div className="space-y-3">
+        {connections?.length ? (
+          connections.map((c) => (
+            <div key={c.id} className="flex items-center justify-between gap-4 rounded-2xl border border-line bg-paper p-5 md:p-6 hover:shadow-sm transition flex-wrap">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="font-display text-lg font-medium text-ink truncate">{c.name}</span>
+                  <StatusBadge status={c.status} />
+                </div>
+                <div className="mt-1.5 flex items-center gap-2 flex-wrap font-mono text-xs text-ink-hush">
+                  <span className="uppercase tracking-wider">{sourceLabel(c.source, c.marketplace)}</span>
+                  {c.last_sync_at && (
+                    <>
+                      <span className="size-1 rounded-full bg-line-2" />
+                      <span>синк: {new Date(c.last_sync_at).toLocaleString("ru-RU")}</span>
+                    </>
                   )}
                 </div>
-                <SyncButton connectionId={c.id} source={c.source} />
+                {c.last_error && (
+                  <div className="mt-2 text-xs text-rose font-mono break-all">{c.last_error}</div>
+                )}
               </div>
-            ))
-          ) : (
-            <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
-              <p className="text-slate-600">Ещё нет подключённых источников.</p>
-              <Link
-                href="/connections/new"
-                className="mt-4 inline-block rounded-xl bg-brand-700 px-6 py-3 font-semibold text-white hover:bg-brand-600"
-              >
-                Подключить первый источник
-              </Link>
+              <SyncButton connectionId={c.id} source={c.source} />
             </div>
-          )}
-        </div>
-      </main>
-    </div>
+          ))
+        ) : (
+          <div className="rounded-2xl border-2 border-dashed border-line-2 bg-paper p-10 md:p-14 text-center">
+            <div className="size-12 mx-auto rounded-full bg-lime-soft flex items-center justify-center text-lime-deep mb-4">
+              <Icons.Plug />
+            </div>
+            <p className="font-display text-xl md:text-2xl text-ink font-medium">Ещё нет подключённых источников</p>
+            <p className="mt-2 text-ink-muted text-sm max-w-md mx-auto">Самый быстрый способ начать — Google Sheet или CSV. Для боёвых маркетплейсов выдай read-only API ключ.</p>
+            <Link
+              href={"/connections/new" as any}
+              className="mt-6 inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-6 py-3 text-sm font-semibold hover:bg-ink-soft transition"
+            >
+              Подключить первый источник <Icons.ArrowRight />
+            </Link>
+          </div>
+        )}
+      </div>
+    </>
   );
 }
 
-function sourceLabel(source: string, marketplace?: string | null): string {
-  if (source === "google_sheet") return "Google Sheet";
-  if (source === "csv_upload") return "CSV-загрузка";
-  if (source === "marketplace_api") {
-    return marketplace === "ozon" ? "Ozon API" : marketplace === "wildberries" ? "Wildberries API" : "Marketplace API";
-  }
-  return source;
+function StatusBadge({ status }: { status: string | null }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    active:   { label: "активен",     cls: "text-lime-deep border-lime-deep/30 bg-lime-soft" },
+    syncing:  { label: "синхронизация", cls: "text-azure border-azure/30 bg-azure/10" },
+    paused:   { label: "пауза",       cls: "text-ink-hush border-line-2 bg-bg-soft" },
+    error:    { label: "ошибка",      cls: "text-rose border-rose/30 bg-rose/10" },
+  };
+  const s = map[status || ""] || map.paused;
+  return (
+    <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold ${s.cls}`}>
+      {s.label}
+    </span>
+  );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    active: "bg-emerald-50 text-emerald-700",
-    pending: "bg-slate-100 text-slate-600",
-    paused: "bg-amber-50 text-amber-700",
-    error: "bg-red-50 text-red-700",
-  };
-  const labels: Record<string, string> = {
-    active: "Активно",
-    pending: "Ожидает синка",
-    paused: "Приостановлено",
-    error: "Ошибка",
-  };
-  return <span className={`rounded px-2 py-0.5 text-xs font-medium ${map[status] ?? "bg-slate-100"}`}>{labels[status] ?? status}</span>;
+function sourceLabel(source: string, marketplace: string | null): string {
+  if (source === "csv_upload") return "CSV upload";
+  if (source === "google_sheet") return "Google Sheet";
+  if (source === "feed") return "YML feed";
+  if (source === "marketplace_api") {
+    return {
+      ozon: "Ozon API",
+      wildberries: "Wildberries API",
+      shopify: "Shopify",
+      amazon: "Amazon SP-API",
+    }[marketplace || ""] || "Marketplace API";
+  }
+  return source;
 }
