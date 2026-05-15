@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { Icons } from "../_components/Icons";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -18,47 +19,56 @@ export default function ForgotPasswordPage() {
     const redirectTo = `${window.location.origin}/reset-password`;
     const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo });
     setLoading(false);
-    if (error) {
-      setError(error.message);
-      return;
-    }
+    if (error) { setError(error.message); return; }
     setSent(true);
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-      <div className="w-full max-w-md bg-white rounded-xl shadow-sm border border-slate-200 p-8">
-        <h1 className="text-2xl font-bold text-slate-900 mb-2">Восстановление пароля</h1>
-        <p className="text-slate-600 mb-6 text-sm">Введите email — пришлём ссылку для сброса.</p>
+    <main className="min-h-screen bg-paper-warm relative overflow-hidden">
+      <div aria-hidden className="pointer-events-none fixed -top-40 -left-40 size-[500px] rounded-full blur-3xl opacity-40"
+        style={{ background: "radial-gradient(closest-side, rgba(132,204,22,0.25), transparent 70%)" }} />
 
-        {sent ? (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 rounded-lg p-4 text-sm">
-            Письмо отправлено на <strong>{email}</strong>. Проверьте почту (и папку «Спам»).
+      <div className="relative mx-auto flex min-h-screen max-w-md flex-col justify-center px-4 md:px-6 py-12">
+        <Link href="/" className="mb-8 flex items-center justify-center gap-2.5">
+          <Icons.Logo size={32} />
+          <span className="font-display text-xl font-medium tracking-tight">
+            Velo<span className="text-lime-deep">seller</span>
+          </span>
+        </Link>
+        <div className="rounded-2xl border border-line bg-paper p-7 md:p-8 shadow-[0_20px_50px_-20px_rgba(10,10,8,0.15)]">
+          <h1 className="font-display text-2xl md:text-3xl tracking-tight font-medium">Восстановление пароля</h1>
+          <p className="mt-1.5 text-sm text-ink-muted">Пришлём ссылку на сброс</p>
+          {sent ? (
+            <div className="mt-6 rounded-lg border border-lime-deep/30 bg-lime-soft p-4">
+              <div className="flex items-center gap-2 text-lime-deep font-semibold">
+                <Icons.Check /> Письмо отправлено
+              </div>
+              <p className="mt-2 text-sm text-ink-muted">Проверь почту {email}</p>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+              <div>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Email</label>
+                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-lg border border-line bg-bg-soft px-4 py-3 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+              </div>
+              {error && (
+                <div className="rounded-lg border border-rose/30 bg-rose/10 p-3 text-sm text-rose">
+                  {error}
+                </div>
+              )}
+              <button type="submit" disabled={loading}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-ink text-paper px-4 py-3 font-semibold hover:bg-ink-soft disabled:opacity-50 transition">
+                {loading ? "Отправляем…" : (<>Прислать ссылку <Icons.ArrowRight /></>)}
+              </button>
+            </form>
+          )}
+          <div className="mt-5 text-center">
+            <Link href={"/login" as any} className="text-sm text-ink-muted hover:text-lime-deep transition">
+              Вернуться к входу
+            </Link>
           </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <input
-              type="email"
-              required
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-            {error && <p className="text-sm text-red-600">{error}</p>}
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-teal-700 hover:bg-teal-800 text-white font-medium py-2.5 rounded-lg transition disabled:opacity-60"
-            >
-              {loading ? "Отправка…" : "Отправить ссылку"}
-            </button>
-          </form>
-        )}
-
-        <p className="text-center text-sm text-slate-600 mt-6">
-          <Link href="/login" className="text-teal-700 hover:underline">← Вернуться к входу</Link>
-        </p>
+        </div>
       </div>
     </main>
   );
