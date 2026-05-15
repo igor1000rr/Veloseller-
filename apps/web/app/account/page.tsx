@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { AccountActions } from "./AccountActions";
 
 export const metadata = {
@@ -9,17 +8,7 @@ export const metadata = {
 };
 
 export default async function AccountPage() {
-  const cookieStore = cookies();
-  const sb = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll(); },
-        setAll() {},
-      },
-    },
-  );
+  const sb = await createSupabaseServerClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect("/login?redirect=/account");
 

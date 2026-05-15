@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
-import { getSupabaseAdmin } from "@/lib/supabase";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
 /**
  * GDPR Article 17 — Right to erasure ("right to be forgotten").
@@ -15,18 +14,7 @@ import { getSupabaseAdmin } from "@/lib/supabase";
  * — защита от accidental delete.
  */
 export async function DELETE(req: NextRequest) {
-  // Auth check
-  const cookieStore = cookies();
-  const sb = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() { return cookieStore.getAll(); },
-        setAll() {},
-      },
-    },
-  );
+  const sb = await createSupabaseServerClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -45,13 +33,14 @@ export async function DELETE(req: NextRequest) {
     }, { status: 400 });
   }
 
-  const admin = getSupabaseAdmin();
+  const admin = createSupabaseAdminClient();
   const sellerId = user.id;
 
   // Cascading delete. RLS не мешает service-role клиенту.
   // Order: продукты-зависимые таблицы первыми (на случай отсутствия ON DELETE CASCADE).
   try {
-    const productIds = (await admin.from("products").select("product_id").eq("seller_id", sellerId)).data?.map(p => p.product_id) || [];
+    const productsRes = await admin.from("products").select("product_id").eq("seller_id", sellerId);
+    const productIds = (productsRes.data || []).map(p => p.product_id);
 
     if (productIds.length > 0) {
       await admin.from("inventory_events").delete().in("product_id", productIds);
