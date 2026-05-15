@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 
 from app.config import settings
 from app.db import get_supabase
@@ -217,8 +217,9 @@ def ingest_feed(connection_id: str) -> dict:
 # ============================================================================
 
 @app.post("/jobs/recalc/{seller_id}", dependencies=[Depends(require_worker_secret)])
-def job_recalc_seller(seller_id: str, period_days: int = 30) -> dict:
-    return recalc_seller(seller_id, period_days)
+def job_recalc_seller(seller_id: str) -> dict:
+    """Пересчёт по всем периодам (7/30/90 дней) — для UI с PeriodSelector."""
+    return recalc_seller_all_periods(seller_id)
 
 
 @app.post("/jobs/recalc-all", dependencies=[Depends(require_worker_secret)])
