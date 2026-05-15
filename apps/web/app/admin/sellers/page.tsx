@@ -75,7 +75,7 @@ export default async function AdminSellersPage({ searchParams }: {
               <Th align="right">SKU</Th>
               <Th align="right">Alerts</Th>
               <Th>Регистрация</Th>
-              <Th></Th>
+              <Th>&nbsp;</Th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
@@ -130,7 +130,7 @@ export default async function AdminSellersPage({ searchParams }: {
   );
 }
 
-function Th({ children, align }: { children: React.ReactNode; align?: "right" }) {
+function Th({ children, align }: { children?: React.ReactNode; align?: "right" }) {
   return <th className={`px-4 py-2.5 font-medium text-slate-600 text-xs uppercase tracking-wider ${align === "right" ? "text-right" : "text-left"}`}>{children}</th>;
 }
 
