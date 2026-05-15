@@ -1,8 +1,7 @@
 name: Deploy
 
 on:
-  push:
-    branches: [main]
+  # Деплой запускается ТОЛЬКО после успешного CI (один прогон вместо двух)
   workflow_run:
     workflows: ["CI"]
     types: [completed]
@@ -10,8 +9,7 @@ on:
 
 jobs:
   deploy:
-    # Деплоим только если CI зелёный (или прямой push в main)
-    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
