@@ -124,11 +124,12 @@ export default function LandingPage() {
             <div>
               <Eyebrow>Integrations</Eyebrow>
               <h2 className="mt-2 font-display text-2xl md:text-4xl tracking-tight font-medium">
-                Подключается к всему,<br className="hidden md:block"/> где живут твои данные
+                Подключается ко всему,<br className="hidden md:block"/> где живут твои данные
               </h2>
             </div>
             <p className="text-ink-muted text-sm md:text-[15px] max-w-md">
-              Read-only доступ через API маркетплейсов, или просто пришли CSV или Google Sheet.
+              Read-only доступ через API маркетплейсов, или просто пришли CSV или Google Sheet.{" "}
+              <span className="text-orange font-medium">Shopify и Amazon — скоро.</span>
             </p>
           </div>
         </div>
@@ -137,13 +138,29 @@ export default function LandingPage() {
           <div className="absolute left-0 top-0 bottom-0 w-16 md:w-32 bg-gradient-to-r from-bg to-transparent z-10" />
           <div className="absolute right-0 top-0 bottom-0 w-16 md:w-32 bg-gradient-to-l from-bg to-transparent z-10" />
           <div className="flex marquee-track gap-3 md:gap-4 w-max">
-            {[...integrations, ...integrations].map((src, i) => (
-              <div key={i} className="flex items-center gap-3 rounded-xl border border-line bg-paper px-5 md:px-7 py-4 md:py-5 shrink-0 hover:border-lime-deep/40 transition shadow-sm">
-                <span className="size-2.5 rounded-full" style={{ background: src.dot }} />
-                <span className="font-display text-base md:text-xl text-ink tracking-tight font-medium">{src.name}</span>
-                <span className="font-mono text-[10px] text-ink-hush uppercase tracking-widest">{src.tag}</span>
-              </div>
-            ))}
+            {[...integrations, ...integrations].map((src, i) => {
+              const isSoon = src.tag === "SOON";
+              return (
+                <div
+                  key={i}
+                  className={`flex items-center gap-3 rounded-xl border bg-paper px-5 md:px-7 py-4 md:py-5 shrink-0 transition shadow-sm ${
+                    isSoon
+                      ? "border-orange/30 hover:border-orange/50"
+                      : "border-line hover:border-lime-deep/40"
+                  }`}
+                >
+                  <span className="size-2.5 rounded-full" style={{ background: src.dot }} />
+                  <span className={`font-display text-base md:text-xl tracking-tight font-medium ${isSoon ? "text-ink-muted" : "text-ink"}`}>
+                    {src.name}
+                  </span>
+                  <span className={`font-mono text-[10px] uppercase tracking-widest font-semibold ${
+                    isSoon ? "text-orange border border-orange/30 bg-orange/10 px-1.5 py-0.5 rounded" : "text-ink-hush"
+                  }`}>
+                    {src.tag}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>
@@ -182,7 +199,6 @@ export default function LandingPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5 auto-rows-[minmax(180px,_auto)]">
-            {/* Big card: TVelo */}
             <div className="md:col-span-2 md:row-span-2 rounded-2xl border border-line bg-paper p-6 md:p-8 hover:border-lime-deep/40 transition shadow-sm relative overflow-hidden">
               <div className="absolute -top-10 -right-10 size-48 rounded-full bg-lime-soft blur-2xl" />
               <div className="relative">
@@ -213,7 +229,7 @@ export default function LandingPage() {
             <BentoCard idx="03" icon={<Icons.Health />}   title="Health Score 0-100"  text="Состояние склада одной цифрой. Дефицит, неликвид, тренд." accent="lime" />
             <BentoCard idx="04" icon={<Icons.Shield />}   title="Confidence-брейкдаун" text="Видно насколько надёжна метрика. Аномалии, пополнения, пропуски." accent="emerald" />
             <BentoCard idx="05" icon={<Icons.Bell />}     title="Умные уведомления" text="Telegram и email. Только важное: скоро закончится, повторный OOS." accent="orange" />
-            <BentoCard idx="06" icon={<Icons.Plug />}     title="5 источников данных" text="Sheets, CSV, Ozon, WB, YML feed. Read-only." accent="azure" />
+            <BentoCard idx="06" icon={<Icons.Plug />}     title="Гибкие источники данных" text="Sheets, CSV, Ozon, WB, YML. Скоро: Shopify и Amazon SP-API." accent="azure" />
           </div>
         </div>
       </section>
@@ -402,12 +418,23 @@ export default function LandingPage() {
               ["#pricing", "Тарифы"],
               ["#faq", "FAQ"],
             ]} />
-            <FooterCol title="Интеграции" items={[
-              ["#", "Ozon API"],
-              ["#", "Wildberries API"],
-              ["#", "Google Sheets"],
-              ["#", "CSV upload"],
-            ]} />
+            <div className="col-span-1 md:col-span-2">
+              <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Интеграции</div>
+              <ul className="mt-4 space-y-2.5 text-sm">
+                <li className="text-ink-soft">Ozon API</li>
+                <li className="text-ink-soft">Wildberries API</li>
+                <li className="text-ink-soft">Google Sheets</li>
+                <li className="text-ink-soft">CSV upload</li>
+                <li className="flex items-center gap-1.5 text-ink-soft">
+                  Shopify
+                  <span className="font-mono text-[9px] text-orange uppercase border border-orange/30 bg-orange/10 px-1 rounded">soon</span>
+                </li>
+                <li className="flex items-center gap-1.5 text-ink-soft">
+                  Amazon SP-API
+                  <span className="font-mono text-[9px] text-orange uppercase border border-orange/30 bg-orange/10 px-1 rounded">soon</span>
+                </li>
+              </ul>
+            </div>
             <FooterCol title="Аккаунт" items={[
               ["/login", "Войти"],
               ["/register", "Регистрация"],
@@ -531,13 +558,15 @@ const stats = [
   { label: "Метрик по каждому SKU", value: "23", sub: "включая confidence" },
 ];
 const integrations = [
-  { name: "Ozon",         tag: "API",       dot: "#005bff" },
-  { name: "Wildberries",  tag: "API",       dot: "#a71179" },
-  { name: "Google Sheets",tag: "READ-ONLY", dot: "#0F9D58" },
-  { name: "CSV",          tag: "UPLOAD",    dot: "#525a4e" },
-  { name: "YML feed",     tag: "FETCH",     dot: "#f97316" },
-  { name: "Telegram",     tag: "BOT",       dot: "#229ED9" },
-  { name: "Resend",       tag: "EMAIL",     dot: "#000" },
+  { name: "Ozon",          tag: "API",       dot: "#005bff" },
+  { name: "Wildberries",   tag: "API",       dot: "#a71179" },
+  { name: "Google Sheets", tag: "READ-ONLY", dot: "#0F9D58" },
+  { name: "CSV",           tag: "UPLOAD",    dot: "#525a4e" },
+  { name: "YML feed",      tag: "FETCH",     dot: "#f97316" },
+  { name: "Shopify",       tag: "SOON",      dot: "#95BF47" },
+  { name: "Amazon SP-API", tag: "SOON",      dot: "#FF9900" },
+  { name: "Telegram",      tag: "BOT",       dot: "#229ED9" },
+  { name: "Resend",        tag: "EMAIL",     dot: "#000" },
 ];
 const compareLeft = [
   "Считаешь velocity вручную раз в месяц",
