@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
+import { Icons } from "../../_components/Icons";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,6 @@ export default async function DynamicsPage({ searchParams }: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // Берём все метрики за последние 90 дней (по weekly хватит, по monthly тоже)
   const lookbackDays = unit === "week" ? 84 : 365;
   const dayCutoff = new Date(Date.now() - lookbackDays * 86400_000).toISOString().slice(0, 10);
   const { data: metrics } = await supabase
@@ -54,53 +54,73 @@ export default async function DynamicsPage({ searchParams }: {
     <div className="space-y-6">
       <header className="flex items-end justify-between gap-3 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Динамика скорости продаж</h1>
-          <p className="text-sm text-slate-500 mt-1">Окраска ячеек зелёным/красным относительно прошлого периода</p>
+          <div className="inline-flex items-center gap-2 mb-2">
+            <span className="size-1 rounded-full bg-lime-deep" />
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Dynamics</span>
+          </div>
+          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">
+            Динамика скорости продаж
+          </h1>
+          <p className="text-sm text-ink-muted mt-1">
+            Ячейки подкрашены: <span className="text-lime-deep font-medium">зелёный</span> — рост &gt;10%, <span className="text-rose font-medium">красный</span> — падение &gt;10%, без подкраски — ±10% от предыдущего периода
+          </p>
         </div>
-        <div className="flex gap-1">
-          <Link href={`/dashboard/dynamics?unit=week` as any}
-                className={`text-xs px-3 py-1.5 rounded-lg border ${unit === "week" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-slate-200"}`}>
+        <div className="inline-flex rounded-lg border border-line bg-paper p-1">
+          <UnitToggle href="/dashboard/dynamics?unit=week" active={unit === "week"}>
             По неделям
-          </Link>
-          <Link href={`/dashboard/dynamics?unit=month` as any}
-                className={`text-xs px-3 py-1.5 rounded-lg border ${unit === "month" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-slate-200"}`}>
+          </UnitToggle>
+          <UnitToggle href="/dashboard/dynamics?unit=month" active={unit === "month"}>
             По месяцам
-          </Link>
+          </UnitToggle>
         </div>
       </header>
 
       {rows.length === 0 ? (
-        <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center">
-          <p className="text-slate-600">Накапливается история — таблица появится после {unit === "week" ? "первой недели" : "первого месяца"} расчётов</p>
+        <div className="rounded-2xl border border-line bg-paper p-10 md:p-14 text-center">
+          <div className="size-12 mx-auto rounded-full bg-lime-soft flex items-center justify-center text-lime-deep mb-4">
+            <Icons.Health />
+          </div>
+          <p className="font-display text-xl text-ink font-medium">
+            Накапливается история
+          </p>
+          <p className="mt-2 text-sm text-ink-muted max-w-md mx-auto">
+            Таблица появится после {unit === "week" ? "первой недели" : "первого месяца"} расчётов.
+          </p>
         </div>
       ) : (
-        <div className="bg-white border border-slate-200 rounded-2xl overflow-x-auto">
+        <div className="rounded-2xl border border-line bg-paper overflow-x-auto shadow-sm">
           <table className="min-w-full text-sm">
-            <thead className="border-b border-slate-200 bg-slate-50">
+            <thead className="border-b border-line bg-bg-soft">
               <tr>
-                <th className="px-4 py-3 text-left text-xs uppercase text-slate-600 sticky left-0 bg-slate-50">SKU</th>
-                <th className="px-4 py-3 text-left text-xs uppercase text-slate-600">Название</th>
+                <th className="px-4 py-3 text-left font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold sticky left-0 bg-bg-soft">
+                  SKU
+                </th>
+                <th className="px-4 py-3 text-left font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
+                  Название
+                </th>
                 {periods.map(p => (
-                  <th key={p} className="px-4 py-3 text-right text-xs uppercase text-slate-600 whitespace-nowrap">
-                    {unit === "week" ? p : new Date(p + "-01").toLocaleDateString("ru-RU", { month: "short", year: "numeric" })}
+                  <th key={p} className="px-4 py-3 text-right font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold whitespace-nowrap">
+                    {unit === "week"
+                      ? p
+                      : new Date(p + "-01").toLocaleDateString("ru-RU", { month: "short", year: "numeric" })}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows.map(row => (
-                <tr key={row.pid} className="border-b border-slate-100 hover:bg-slate-50">
-                  <td className="px-4 py-2 font-mono text-xs sticky left-0 bg-white">
-                    <Link href={`/dashboard/skus/${row.pid}` as any} className="text-teal-700 hover:text-teal-900">
+                <tr key={row.pid} className="border-b border-line hover:bg-bg-soft/50 transition">
+                  <td className="px-4 py-2.5 font-mono text-xs sticky left-0 bg-paper">
+                    <Link href={`/dashboard/skus/${row.pid}` as any} className="text-lime-deep hover:text-ink transition">
                       {row.sku}
                     </Link>
                   </td>
-                  <td className="px-4 py-2 text-slate-700">{row.name}</td>
+                  <td className="px-4 py-2.5 text-ink-soft text-[13px]">{row.name}</td>
                   {row.values.map((v, i) => {
                     const prev = i > 0 ? row.values[i - 1] : null;
                     return (
-                      <td key={i} className={`px-4 py-2 text-right font-mono ${cellColor(v, prev)}`}>
-                        {v != null ? v.toFixed(2) : "—"}
+                      <td key={i} className={`px-4 py-2.5 text-right font-mono tabular text-[13px] font-medium ${cellColor(v, prev)}`}>
+                        {v != null ? v.toFixed(2) : <span className="text-ink-hush">—</span>}
                       </td>
                     );
                   })}
@@ -114,15 +134,28 @@ export default async function DynamicsPage({ searchParams }: {
   );
 }
 
-function cellColor(value: number | null, prev: number | null): string {
-  if (value == null || prev == null || prev === 0) return "text-slate-700";
-  const delta = (value - prev) / prev;
-  if (delta > 0.1) return "bg-emerald-50 text-emerald-800";
-  if (delta < -0.1) return "bg-red-50 text-red-800";
-  return "text-slate-700";
+function UnitToggle({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href as any}
+      className={`px-3 py-1.5 text-xs rounded-md font-medium transition ${
+        active ? "bg-ink text-paper" : "text-ink-muted hover:text-ink hover:bg-bg-soft"
+      }`}
+    >
+      {children}
+    </Link>
+  );
 }
 
-/** ISO week label, например "2026-W19". */
+function cellColor(value: number | null, prev: number | null): string {
+  if (value == null) return "text-ink-hush";
+  if (prev == null || prev === 0) return "text-ink-soft";
+  const delta = (value - prev) / prev;
+  if (delta > 0.1) return "bg-lime-soft text-lime-deep";
+  if (delta < -0.1) return "bg-rose/10 text-rose";
+  return "text-ink-soft";
+}
+
 function toIsoWeek(dateStr: string): string {
   const d = new Date(dateStr);
   d.setUTCHours(0, 0, 0, 0);
