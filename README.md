@@ -51,4 +51,4 @@ cd apps/worker && pytest -v
 - `apps/web/lib/api.ts` — единая точка вызова worker
 - Расчёты строго по `Veloseller_Dev_Spec.docx`
 
-<!-- concurrency-test: push 1 -->
+<!-- concurrency-test: push 2 (должен отменить push 1) -->
