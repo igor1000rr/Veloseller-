@@ -22,11 +22,7 @@ beforeEach(() => {
 });
 
 function makeReq(body: any) {
-  return new Request("http://x", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return new Request("http://x", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
 
 describe("PATCH /api/products/[id]/reorder", () => {
@@ -46,7 +42,7 @@ describe("PATCH /api/products/[id]/reorder", () => {
     expect(capturedUpdate).toEqual({ lead_time_days: 14, safety_days: 7 });
   });
 
-  it("значения вне диапазона 0-365 игнорируются", async () => {
+  it("значения вне 0-365 игнорируются", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     updateChainMock.mockResolvedValue({ error: null });
     const { PATCH } = await import("@/app/api/products/[id]/reorder/route");
@@ -72,13 +68,13 @@ describe("PATCH /api/products/[id]/reorder", () => {
 
   it("при ошибке БД — 400", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    updateChainMock.mockResolvedValue({ error: { message: "rls" } });
+    updateChainMock.mockResolvedValue({ error: { message: "rls violation" } });
     const { PATCH } = await import("@/app/api/products/[id]/reorder/route");
     const res = await PATCH(makeReq({ lead_time_days: 7 }), { params: Promise.resolve({ id: "p1" }) });
     expect(res.status).toBe(400);
   });
 
-  it("невалидный JSON — пустой update", async () => {
+  it("невалидный JSON в body — пустой update", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     updateChainMock.mockResolvedValue({ error: null });
     const req = new Request("http://x", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "not-json" });

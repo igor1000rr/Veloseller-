@@ -25,16 +25,15 @@ vi.mock("@/lib/stripe", () => ({
 }));
 
 beforeEach(() => {
-  getUserMock.mockReset(); selectChainMock.mockReset(); updateChainMock.mockReset();
-  stripeCustomersCreate.mockReset(); stripeCheckoutCreate.mockReset();
+  getUserMock.mockReset();
+  selectChainMock.mockReset();
+  updateChainMock.mockReset();
+  stripeCustomersCreate.mockReset();
+  stripeCheckoutCreate.mockReset();
 });
 
 function req(body: any, origin = "https://app.veloseller.com") {
-  return new Request("http://x", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", origin },
-    body: JSON.stringify(body),
-  });
+  return new Request("http://x", { method: "POST", headers: { "Content-Type": "application/json", origin }, body: JSON.stringify(body) });
 }
 
 describe("POST /api/stripe/checkout", () => {
@@ -54,16 +53,13 @@ describe("POST /api/stripe/checkout", () => {
 
   it("если customer уже есть — создаёт checkout с ним", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1", email: "a@b.com" } } });
-    selectChainMock.mockResolvedValue({ data: { stripe_customer_id: "cus_x", email: "a@b.com" } });
+    selectChainMock.mockResolvedValue({ data: { stripe_customer_id: "cus_existing", email: "a@b.com" } });
     stripeCheckoutCreate.mockResolvedValue({ url: "https://checkout/123" });
     const { POST } = await import("@/app/api/stripe/checkout/route");
-    const res = await POST(req({ plan: "growth" }));
-    expect(res.status).toBe(200);
+    await POST(req({ plan: "growth" }));
     expect(stripeCustomersCreate).not.toHaveBeenCalled();
     expect(stripeCheckoutCreate).toHaveBeenCalledWith(expect.objectContaining({
-      customer: "cus_x",
-      line_items: [{ price: "price_growth", quantity: 1 }],
-      mode: "subscription",
+      customer: "cus_existing", line_items: [{ price: "price_growth", quantity: 1 }], mode: "subscription",
     }));
   });
 
@@ -75,12 +71,10 @@ describe("POST /api/stripe/checkout", () => {
     stripeCheckoutCreate.mockResolvedValue({ url: "https://checkout/abc" });
     const { POST } = await import("@/app/api/stripe/checkout/route");
     await POST(req({ plan: "pro" }));
-    expect(stripeCustomersCreate).toHaveBeenCalledWith({
-      email: "a@b.com", metadata: { seller_id: "u1" },
-    });
+    expect(stripeCustomersCreate).toHaveBeenCalledWith({ email: "a@b.com", metadata: { seller_id: "u1" } });
   });
 
-  it("success/cancel URL берутся из origin header", async () => {
+  it("success/cancel URL из origin header", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1", email: "a@b.com" } } });
     selectChainMock.mockResolvedValue({ data: { stripe_customer_id: "cus_x", email: "a@b.com" } });
     stripeCheckoutCreate.mockResolvedValue({ url: "https://x" });

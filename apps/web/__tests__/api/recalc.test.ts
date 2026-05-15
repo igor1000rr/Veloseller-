@@ -2,7 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const getUserMock = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({
-  createSupabaseServerClient: async () => ({ auth: { getUser: getUserMock } }),
+  createSupabaseServerClient: async () => ({
+    auth: { getUser: getUserMock },
+  }),
 }));
 
 beforeEach(() => {
@@ -20,7 +22,7 @@ describe("POST /api/jobs/recalc", () => {
     expect(res.status).toBe(401);
   });
 
-  it("проксирует на worker с user.id и worker secret", async () => {
+  it("проксирует запрос на worker с user.id и worker secret", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "user-123" } } });
     (global.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ metrics_written: 5 }) });
     const { POST } = await import("@/app/api/jobs/recalc/route");
@@ -28,13 +30,16 @@ describe("POST /api/jobs/recalc", () => {
     expect(res.status).toBe(200);
     expect(global.fetch).toHaveBeenCalledWith(
       "http://worker:8001/jobs/recalc/user-123",
-      expect.objectContaining({ method: "POST", headers: { "X-Worker-Secret": "secret-xyz" } }),
+      expect.objectContaining({
+        method: "POST",
+        headers: { "X-Worker-Secret": "secret-xyz" },
+      }),
     );
   });
 
   it("если worker вернул не-ok — 502", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    (global.fetch as any).mockResolvedValue({ ok: false, status: 500, text: async () => "Internal" });
+    (global.fetch as any).mockResolvedValue({ ok: false, status: 500, text: async () => "Internal error" });
     const { POST } = await import("@/app/api/jobs/recalc/route");
     const res = await POST();
     expect(res.status).toBe(502);

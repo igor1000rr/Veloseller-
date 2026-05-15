@@ -23,7 +23,9 @@ beforeEach(() => {
   process.env.WORKER_SECRET = "secret";
 });
 
-function req() { return {} as any; }
+function req() {
+  return {} as any;
+}
 
 describe("POST /api/connections/[id]/sync", () => {
   it("без авторизации — 401", async () => {

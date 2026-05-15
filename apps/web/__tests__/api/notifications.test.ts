@@ -63,6 +63,8 @@ describe("POST /api/notifications", () => {
     const { POST } = await import("@/app/api/notifications/route");
     await POST(req({ display_name: "X", plan: "pro", id: "evil-user" }));
     expect(capturedUpdate).toEqual({ display_name: "X" });
+    expect(capturedUpdate).not.toHaveProperty("plan");
+    expect(capturedUpdate).not.toHaveProperty("id");
   });
 
   it("при ошибке БД — 400", async () => {
@@ -71,5 +73,6 @@ describe("POST /api/notifications", () => {
     const { POST } = await import("@/app/api/notifications/route");
     const res = await POST(req({ timezone: "X/Y" }));
     expect(res.status).toBe(400);
+    expect((await res.json()).error).toBe("tz invalid");
   });
 });
