@@ -60,7 +60,10 @@ class TestPipelineEdgeCases:
         assert m.stockout_days == 7
         # 7 дней missing → штраф 100% → floor 40
         assert m.confidence_score == 40.0
-        assert m.coverage_days == 0.0  # stock=0
+        # coverage_days = None при velocity=0 (нельзя посчитать без знаменателя)
+        assert m.coverage_days is None
+        # Segment = insufficient_data когда coverage_days = None
+        assert m.segment == InventorySegment.INSUFFICIENT_DATA
 
     def test_replenishment_in_middle_excluded_from_confirmed(self):
         """5 sales + 1 replenishment + 5 sales → replenishment day excluded."""
