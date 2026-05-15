@@ -1,5 +1,10 @@
 /**
+ * @vitest-environment node
+ *
  * Тесты middleware.ts — auth redirect логика.
+ *
+ * ВАЖНО: запускаем в node-environment, потому что jsdom ломает Headers/Request
+ * (Next.js requires native Headers from undici, not jsdom polyfills).
  *
  * Проверяем 3 категории:
  *  1. Неавторизованный + приватный путь → redirect /login
