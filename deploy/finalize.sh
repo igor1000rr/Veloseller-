@@ -1,48 +1,78 @@
-#!/bin/bash
-# Veloseller — финальный этап деплоя.
-# Запускается ПОСЛЕ setup-server.sh, когда уже созданы .env.production и .env.
-# Делает build web + запускает сервисы + выдаёт SSL.
+#!/usr/bin/env bash
+# Veloseller — финальный деплой: установка зависимостей + сборка + запуск сервисов.
+# Запускать после заполнения .env-файлов:
+#   sudo /opt/veloseller/deploy/finalize.sh
 set -euo pipefail
 
-DOMAIN="${1:-veloseller.com}"
-DEPLOY_DIR="/opt/veloseller"
-DEPLOY_USER="veloseller"
+log() { echo -e "\033[1;32m[finalize]\033[0m $*"; }
+err()  { echo -e "\033[1;31m[error]\033[0m $*" >&2; exit 1; }
 
-if [ ! -f "$DEPLOY_DIR/apps/web/.env.production" ]; then
-  echo "❌ Нет $DEPLOY_DIR/apps/web/.env.production — создай из deploy/env.web.example"
-  exit 1
+[ "$(id -u)" = "0" ] || err "Запускай от root (sudo)"
+
+DEPLOY_DIR=/opt/veloseller
+DEPLOY_USER=veloseller
+WEB_ENV="$DEPLOY_DIR/apps/web/.env.production"
+WORKER_ENV="$DEPLOY_DIR/apps/worker/.env"
+
+[ -f "$WEB_ENV" ] || err "Нет $WEB_ENV — создай (см. deploy/README.md)"
+[ -f "$WORKER_ENV" ] || err "Нет $WORKER_ENV — создай (см. deploy/README.md)"
+
+log "Выравниваем владельца /opt/veloseller на $DEPLOY_USER…"
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR"
+chmod 600 "$WEB_ENV" "$WORKER_ENV"
+
+# ===== Web =====
+log "npm ci (корень монорепо — все workspace-зависимости)…"
+sudo -u "$DEPLOY_USER" -H bash -c "cd $DEPLOY_DIR && npm ci --no-audit --no-fund"
+
+log "npm run build (Next.js production build, может занять 3-5 мин)…"
+sudo -u "$DEPLOY_USER" -H bash -c "cd $DEPLOY_DIR/apps/web && npm run build"
+
+# ===== Worker =====
+if [ ! -d "$DEPLOY_DIR/apps/worker/.venv" ]; then
+  log "Создаём Python venv для worker…"
+  sudo -u "$DEPLOY_USER" -H python3.12 -m venv "$DEPLOY_DIR/apps/worker/.venv"
 fi
-if [ ! -f "$DEPLOY_DIR/apps/worker/.env" ]; then
-  echo "❌ Нет $DEPLOY_DIR/apps/worker/.env — создай из deploy/env.worker.example"
-  exit 1
-fi
+log "pip install зависимостей worker…"
+sudo -u "$DEPLOY_USER" -H bash -c "
+  cd $DEPLOY_DIR/apps/worker
+  .venv/bin/pip install --quiet --upgrade pip
+  .venv/bin/pip install --quiet -r requirements.txt
+"
 
-echo "==> npm run build (Next.js, production)"
-cd "$DEPLOY_DIR/apps/web"
-sudo -u "$DEPLOY_USER" npm run build
-
-echo "==> Старт systemd сервисов"
-systemctl enable veloseller-worker veloseller-web
+# ===== Service start =====
+log "Рестарт systemd сервисов…"
+systemctl daemon-reload
 systemctl restart veloseller-worker
-sleep 2
+sleep 3
 systemctl restart veloseller-web
-sleep 2
+sleep 3
 
-echo "==> Статус сервисов:"
-systemctl status veloseller-worker --no-pager -l | head -10
-systemctl status veloseller-web --no-pager -l | head -10
+log "Статус worker:"
+systemctl is-active veloseller-worker && echo "  ✅ работает" || {
+  err "worker не запустился. Логи: journalctl -u veloseller-worker -n 50 --no-pager"
+}
 
-echo "==> SSL через Let's Encrypt (если домен уже указывает на IP)"
-if [ "$DOMAIN" != "veloseller.com" ] || dig +short "$DOMAIN" | grep -q .; then
-  certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos --email "admin@$DOMAIN" || \
-    echo "⚠️ SSL не выдан (проверь DNS), можно позже: certbot --nginx -d $DOMAIN"
-else
-  echo "⚠️ Пропущен SSL — DNS не настроен. Позже: certbot --nginx -d $DOMAIN"
-fi
+log "Статус web:"
+systemctl is-active veloseller-web && echo "  ✅ работает" || {
+  err "web не запустился. Логи: journalctl -u veloseller-web -n 50 --no-pager"
+}
+
+log "Проверяем HTTP…"
+for i in 1 2 3 4 5; do
+  if curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000 | grep -qE "^(200|307|308)"; then
+    log "✅ Next.js отвечает на 127.0.0.1:3000"
+    break
+  fi
+  echo "  ...ждём warmup ($i/5)"
+  sleep 5
+done
 
 echo
-echo "✅ Deploy работает."
-echo "   Web:    http://$DOMAIN/"
-echo "   Worker: внутренний localhost:8001 (через nginx или из web)"
-echo "   logs:   journalctl -u veloseller-web -f"
-echo "           journalctl -u veloseller-worker -f"
+log "✅ Deploy завершён. Сайт: http://$(hostname -I | awk '{print $1}')/"
+echo
+echo "Логи:"
+echo "  journalctl -u veloseller-web -f"
+echo "  journalctl -u veloseller-worker -f"
+echo
+echo "Дальше: отключи парольный SSH — sudo /opt/veloseller/deploy/harden-ssh.sh"

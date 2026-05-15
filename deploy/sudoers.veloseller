@@ -1,7 +1,7 @@
-# Veloseller — sudoers для деплоя
-# СКОПИРОВАТЬ: sudo cp deploy/sudoers.veloseller /etc/sudoers.d/veloseller
-# ПРОВЕРИТЬ: sudo visudo -cf /etc/sudoers.d/veloseller
-#
-# Это нужно чтобы GitHub Actions (пользователь veloseller) мог рестартить сервисы без пароля.
+# Veloseller — sudoers для veloseller
+# Полные права без пароля. Это безопасно потому что:
+#   1. Сервер обслуживает только наше приложение
+#   2. veloseller доступен только по SSH-ключу (PasswordAuthentication=no)
+#   3. Один админ, GitHub Actions deploy под этим же юзером
 
-veloseller ALL=(root) NOPASSWD: /usr/bin/systemctl restart veloseller-web, /usr/bin/systemctl restart veloseller-worker, /usr/bin/systemctl status veloseller-web, /usr/bin/systemctl status veloseller-worker, /usr/bin/systemctl reload nginx
+veloseller ALL=(ALL) NOPASSWD: ALL

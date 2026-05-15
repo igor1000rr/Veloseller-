@@ -1,92 +1,117 @@
-# Veloseller — как переустановить VPS защищённо
+# Veloseller — пошаговый deploy на VPS
 
-## TL;DR
+## Шаг 0. Локально (разово, если ещё нет SSH-ключа)
+
+```cmd
+ssh-keygen -t ed25519 -C "igor@veloseller"
+type %USERPROFILE%\.ssh\id_ed25519.pub
+```
+Скопируй публичный ключ (`ssh-ed25519 AAAA... igor@veloseller`).
+
+Узнай свой IP: https://ipinfo.io → поле IP.
+
+## Шаг 1. Свежий VPS из Hostland
+
+В панели → переустановка → Ubuntu 24.04. Получишь новый root-пароль.
+
+## Шаг 2. Bootstrap (10-15 мин)
 
 ```bash
-# Берёшь свежий Ubuntu 24.04 VPS из панели Hostland.
-# До первого SSH-входа подготовь локально:
-ssh-keygen -t ed25519 -C "igor@veloseller"          # если ещё нет
-cat ~/.ssh/id_ed25519.pub                            # скопируй
-
-# Подключаешься первый раз по паролю root из панели Hostland:
 ssh root@<NEW_IP>
+# пароль из панели
 
-# На VPS:
-export ADMIN_SSH_KEY="ssh-ed25519 AAAA... igor@veloseller"   # вставь свой публичный
-export ADMIN_IP="<твой текущий IP>"                        # https://ipinfo.io — поле IP
+# Подставь свои значения:
+export ADMIN_SSH_KEY="ssh-ed25519 AAAA... igor@veloseller"
+export ADMIN_IP="37.214.205.51"
+
 curl -sSL https://raw.githubusercontent.com/igor1000rr/Veloseller-/main/deploy/secure-bootstrap.sh | bash
-
-# Скрипт:
-#  • Обновит систему, поставит Node 22, Python 3.12, nginx
-#  • Создаст user veloseller с твоим ссх-ключом
-#  • Отключит парольный вход, root login только по ключу
-#  • Включит fail2ban, ufw, unattended-upgrades
-#  • Настроит nginx с rate-limit и блокировкой сканеров
-#  • Клонирует репо в /opt/veloseller
-
-# Дальше:
-passwd root                                          # смени root на длинный рандом
 ```
 
-## После bootstrap
+Скрипт на конце выведет:
+- Путь к `/root/veloseller-secrets.txt` (там сгенерированы WORKER_SECRET и SECRET_ENCRYPTION_KEY)
+- Инструкцию что делать дальше
 
-### 1. Ротируем Supabase ключи
+## Шаг 3. ПРОВЕРЬ что SSH-ключ работает(!)
 
-Dashboard → Settings → API → **Reset** для `service_role` (и `anon`).
+Не закрывая root-сессию, открой НОВОЕ окно cmd и:
+```cmd
+ssh veloseller@<IP>
+```
+Должно пустить БЕЗ пароля. Если не пустил — НЕ иди дальше, разберись.
 
-### 2. Заполняем секреты
+## Шаг 4. Supabase секреты
+
+Dashboard: https://supabase.com/dashboard/project/pptetnhdmxehijslbsrx/settings/api-keys
+
+Возьми:
+- `publishable_key` → `sb_publishable_J4r40...`
+- `secret_key` → `sb_secret_x9Hal...`
+
+## Шаг 5. Создай .env-файлы (под veloseller)
 
 ```bash
-sudo -u veloseller cp /opt/veloseller/deploy/env.web.example     /opt/veloseller/apps/web/.env.production
-sudo -u veloseller cp /opt/veloseller/deploy/env.worker.example  /opt/veloseller/apps/worker/.env
-sudo -u veloseller nano /opt/veloseller/apps/web/.env.production    # вставь НОВЫЕ Supabase ключи
-sudo -u veloseller nano /opt/veloseller/apps/worker/.env
+ssh veloseller@<IP>
+
+# Из сгенерированных секретов:
+sudo cat /root/veloseller-secrets.txt
+# (запиши WORKER_SECRET и SECRET_ENCRYPTION_KEY)
+
+# web .env.production:
+cat > /opt/veloseller/apps/web/.env.production <<'EOF'
+NEXT_PUBLIC_SUPABASE_URL=https://pptetnhdmxehijslbsrx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<sb_publishable_...>
+SUPABASE_SERVICE_ROLE_KEY=<sb_secret_...>
+WORKER_URL=http://127.0.0.1:8001
+WORKER_SECRET=<из secrets.txt>
+SECRET_ENCRYPTION_KEY=<из secrets.txt>
+ADMIN_EMAILS=igor1000rr@gmail.com
+NEXT_PUBLIC_APP_URL=http://<IP>
+EOF
+
+# worker .env:
+cat > /opt/veloseller/apps/worker/.env <<'EOF'
+SUPABASE_URL=https://pptetnhdmxehijslbsrx.supabase.co
+SUPABASE_SERVICE_KEY=<sb_secret_...>
+WORKER_SECRET=<из secrets.txt>
+SECRET_ENCRYPTION_KEY=<из secrets.txt>
+SCHEDULER_TIMEZONE=Europe/Warsaw
+EOF
+
 chmod 600 /opt/veloseller/apps/web/.env.production /opt/veloseller/apps/worker/.env
 ```
 
-### 3. Билд + запуск
+Stripe / Telegram / Resend пока можно пропустить — добавишь позже.
+
+## Шаг 6. Деплой (5-10 мин)
 
 ```bash
-sudo -u veloseller bash /opt/veloseller/deploy/finalize.sh
+sudo /opt/veloseller/deploy/finalize.sh
 ```
 
-`finalize.sh` из репо: npm ci, pip install, npm run build, systemctl restart веб+воркер.
+`finalize.sh` самостоятельно:
+- `npm ci` в корне монорепо
+- `python -m venv` + `pip install` для worker
+- `npm run build` в apps/web
+- Рестарт обоих сервисов
+- Проверяет что Next.js отвечает на :3000
 
-### 4. GitHub Actions secret — новый deploy key
+Сайт жив: http://<IP>/
 
-Старый SSH-ключ для CI/CD лежал на старом VPS и мог быть виден атакующему.
-Генерируем новый:
+## Шаг 7. Закрыть SSH (ТОЛЬКО ПОСЛЕ ПРОВЕРКИ!)
 
 ```bash
-# На VPS:
-sudo -u veloseller ssh-keygen -t ed25519 -f /home/veloseller/.ssh/github_deploy -N "" \
-  -C "github-actions-deploy@veloseller-$(date +%Y%m%d)"
-cat /home/veloseller/.ssh/github_deploy.pub >> /home/veloseller/.ssh/authorized_keys
-cat /home/veloseller/.ssh/github_deploy   # PRIVATE ключ — скопируй
+sudo /opt/veloseller/deploy/harden-ssh.sh
 ```
 
-GitHub → Settings → Secrets → `DEPLOY_SSH_KEY` → вставь НОВЫЙ private.
-После этого старый ключ становится невалидным (в авторизед ключах его нет).
+Скрипт потребует явно написать `YES` и проверит что в authorized_keys всё на месте.
 
-## Что изменилось по безопасности
-
-| Было | Стало |
-|---|---|
-| `PermitRootLogin yes` + пароль | Только SSH-ключ, пароль отключён |
-| Next.js 15.0.3 (CVE-2025-66478 RCE, CVSS 10.0) | Next.js 15.0.7 (все RCE и CVE до май-2026 закрыты) |
-| `proxy_buffers` default 4k → 502 | 16k/8×16k |
-| Нет rate-limit | 30 req/s general, 10/s api, 3/s login |
-| Нет scanner-блока | Shodan/zgrab/wp-admin/boaform → 444 |
-| Нет fail2ban | SSH-jail: 3 fail = 1h бан |
-| Нет авто-патчей | unattended-upgrades включён |
-
-## Диагностика после запуска
+## Диагностика
 
 ```bash
-ufw status                              # должно быть active, deny incoming
-fail2ban-client status sshd             # banned IPs
 systemctl status veloseller-web veloseller-worker --no-pager
-curl -I http://127.0.0.1:3000           # Next.js Ready
-curl -I http://localhost/health         # через nginx
-ss -ltnp | grep -E ':(22|80|443|3000|8001)'
+journalctl -u veloseller-web -n 50 --no-pager
+ufw status
+fail2ban-client status sshd
+curl -I http://127.0.0.1:3000
+curl -I http://localhost/
 ```
