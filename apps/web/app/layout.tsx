@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import { Geologica, Onest, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
+// Geologica — variable font, weight НЕ передаём (вызывает runtime crash)
 const display = Geologica({
   subsets: ["latin", "cyrillic"],
   variable: "--font-display",
   display: "swap",
-  weight: ["300", "400", "500", "600", "700", "800"],
 });
 const body = Onest({
   subsets: ["latin", "cyrillic"],
