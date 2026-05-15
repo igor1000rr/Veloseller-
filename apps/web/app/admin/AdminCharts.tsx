@@ -22,7 +22,7 @@ const tooltipStyle = {
 };
 
 export function RegistrationsChart({ data }: { data: { date: string; count: number }[] }) {
-  if (!data || data.length === 0) return <Empty>Нет данных</Empty>;
+  if (!data || data.length === 0) return <Empty>Регистраций пока нет</Empty>;
   return (
     <ResponsiveContainer width="100%" height={220}>
       <AreaChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -43,7 +43,7 @@ export function RegistrationsChart({ data }: { data: { date: string; count: numb
 }
 
 export function SnapshotsChart({ data }: { data: { date: string; count: number }[] }) {
-  if (!data || data.length === 0) return <Empty>Нет снимков</Empty>;
+  if (!data || data.length === 0) return <Empty>Снимков нет</Empty>;
   return (
     <ResponsiveContainer width="100%" height={220}>
       <BarChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -65,7 +65,7 @@ export function PlansPieChart({ data }: { data: { plan: string; count: number }[
     pro:     COLORS.limeDeep,
   };
   const filtered = (data ?? []).filter(d => d.count > 0);
-  if (filtered.length === 0) return <Empty>Нет селлеров</Empty>;
+  if (filtered.length === 0) return <Empty>Селлеров нет</Empty>;
   return (
     <ResponsiveContainer width="100%" height={220}>
       <PieChart>
@@ -111,7 +111,7 @@ export function HealthRadial({ value }: { value: number }) {
 }
 
 export function ActivityChart({ data }: { data: { date: string; snapshots: number; recalcs: number }[] }) {
-  if (!data || data.length === 0) return <Empty>Нет активности</Empty>;
+  if (!data || data.length === 0) return <Empty>Активности нет</Empty>;
   return (
     <ResponsiveContainer width="100%" height={260}>
       <LineChart data={data} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
@@ -129,7 +129,7 @@ export function ActivityChart({ data }: { data: { date: string; snapshots: numbe
 export function HourlyHeatmap({ data }: { data: { hour: number; count: number }[] }) {
   const max = Math.max(...data.map(d => d.count), 1);
   return (
-    <div className="grid grid-cols-12 md:grid-cols-24 gap-1">
+    <div className="grid grid-cols-12 gap-1" style={{ gridTemplateColumns: "repeat(24, minmax(0, 1fr))" }}>
       {data.map((d) => {
         const intensity = d.count / max;
         const opacity = d.count === 0 ? 0.08 : 0.25 + intensity * 0.75;
