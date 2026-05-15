@@ -1,0 +1,56 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
+
+jobs:
+  deploy:
+    # Деплоим только если CI зелёный (или прямой push в main)
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Настройка SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H ${{ secrets.DEPLOY_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Деплой через SSH
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'bash -s' << 'EOF'
+            set -euo pipefail
+            cd /opt/veloseller
+
+            echo "→ git pull"
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "→ worker deps"
+            cd /opt/veloseller/apps/worker
+            .venv/bin/pip install -r requirements.txt --quiet
+
+            echo "→ web deps + build"
+            cd /opt/veloseller/apps/web
+            npm install --legacy-peer-deps --no-audit --no-fund
+            npm run build
+
+            echo "→ restart services"
+            sudo /usr/bin/systemctl restart veloseller-worker
+            sleep 2
+            sudo /usr/bin/systemctl restart veloseller-web
+            sleep 3
+
+            echo "→ health"
+            curl -fsS http://127.0.0.1:8001/health || (echo "worker DOWN" && exit 1)
+            curl -fsS -o /dev/null -w "web HTTP %{http_code}\n" http://127.0.0.1:3000 || true
+
+            echo "✅ deploy OK ($(git rev-parse --short HEAD))"
+          EOF
