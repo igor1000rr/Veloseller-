@@ -1,13 +1,17 @@
 """Сборка store_metrics из массива посчитанных SKU-метрик.
 
-Реализует раздел 1.5 спеки + Rule 13.2 (warehouse health).
+Реализует раздел 1.5 спеки + Rule 13.2 (warehouse health) + Rule 9.2 (lost_revenue).
+
+Production code в jobs/recalc._write_store_metrics использует эту функцию для
+удобства тестирования. Если передать prices_during_stockout — используется
+строго по Rule 9.2 (AverageStockoutPrice). Иначе fallback на current price.
 """
 from __future__ import annotations
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
-from app.engine.coverage import lost_revenue as lost_revenue_fn
+from app.engine.lost_revenue import average_stockout_price, lost_revenue_per_sku
 from app.engine.store import (
     SkuHealthInput,
     SkuValue,
@@ -32,6 +36,9 @@ class SkuMetricRow:
     segment: Optional[InventorySegment]
     sku_health_score: Optional[float]
     availability: bool
+    # Rule 9.2: цены snapshot'ов за дни stockout. Если переданы — используется
+    # AVG, иначе fallback на self.price (proxy).
+    prices_during_stockout: list[float] = field(default_factory=list)
 
 
 @dataclass
@@ -82,9 +89,12 @@ def aggregate_store_metrics(skus: list[SkuMetricRow]) -> StoreMetricsAggregate:
         if s.coverage_days is not None and s.coverage_days > 180
     )
 
-    # Lost revenue: по каждому SKU с OOS считаем lost = adj_vel × stockout_days × price
+    # Rule 9.2: Lost revenue с AverageStockoutPrice если данные есть, иначе s.price
     total_lost = sum(
-        lost_revenue_fn(s.adjusted_velocity, s.stockout_days, s.price)
+        lost_revenue_per_sku(
+            s.adjusted_velocity, s.stockout_days,
+            s.prices_during_stockout, s.price,
+        )
         for s in skus
     )
 
