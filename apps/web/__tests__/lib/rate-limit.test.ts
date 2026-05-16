@@ -1,7 +1,7 @@
 /**
  * Unit-тесты для in-memory rate limiter.
  */
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   checkRateLimit,
   enforceRateLimit,
@@ -9,7 +9,7 @@ import {
   getRateLimitKey,
   _resetRateLimits,
   RATE_LIMITS,
-} from "../rate-limit";
+} from "../../lib/rate-limit";
 
 beforeEach(() => {
   _resetRateLimits();
