@@ -8,9 +8,10 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test": "vitest run --exclude '**/__tests__/e2e/**'",
+    "test:watch": "vitest --exclude '**/__tests__/e2e/**'",
+    "test:coverage": "vitest run --coverage --exclude '**/__tests__/e2e/**'",
+    "test:e2e": "vitest run __tests__/e2e"
   },
   "dependencies": {
     "@supabase/ssr": "^0.5.1",

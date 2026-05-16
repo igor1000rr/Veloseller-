@@ -12,11 +12,44 @@ from app.config import settings
 from app.db import get_supabase
 from app.jobs.recalc import recalc_all_sellers, recalc_seller, recalc_seller_all_periods
 from app.jobs.scheduler import start_scheduler, stop_scheduler
+from app.logger import JsonFormatter, setup_logger
 from app.schemas import SnapshotInput, SourceType
 from app.sources import csv_upload, feed as feed_src, google_sheet, ozon, wildberries
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("veloseller.worker")
+# Настраиваем root логгер с JsonFormatter — все child логгеры (recalc/sources/jobs)
+# будут выводить свои сообщения в JSON вместо плоского текста.
+_root = logging.getLogger()
+if not any(isinstance(h.formatter, JsonFormatter) for h in _root.handlers if h.formatter):
+    _root.handlers.clear()
+    import sys as _sys
+    _h = logging.StreamHandler(_sys.stdout)
+    _h.setFormatter(JsonFormatter())
+    _root.addHandler(_h)
+_root.setLevel(logging.INFO)
+
+logger = setup_logger("veloseller.worker")
+
+# Sentry (опционально — активируется только при наличии SENTRY_DSN)
+import os as _os
+_sentry_dsn = _os.environ.get("SENTRY_DSN")
+if _sentry_dsn:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.logging import LoggingIntegration
+        sentry_sdk.init(
+            dsn=_sentry_dsn,
+            integrations=[
+                FastApiIntegration(),
+                LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+            ],
+            environment=_os.environ.get("SENTRY_ENV", "production"),
+            traces_sample_rate=0.1,  # 10% performance traces
+            release=_os.environ.get("SENTRY_RELEASE"),
+        )
+        logger.info("sentry initialized", extra={"env": _os.environ.get("SENTRY_ENV", "production")})
+    except ImportError:
+        logger.warning("SENTRY_DSN set but sentry-sdk not installed — skipping")
 
 
 @asynccontextmanager
@@ -24,10 +57,11 @@ async def lifespan(app: FastAPI):
     """Запуск APScheduler при старте, остановка при shutdown."""
     if settings.enable_scheduler:
         start_scheduler()
-        logger.info("APScheduler started")
+        logger.info("scheduler started", extra={"event": "lifecycle"})
     yield
     if settings.enable_scheduler:
         stop_scheduler()
+        logger.info("scheduler stopped", extra={"event": "lifecycle"})
 
 
 app = FastAPI(title="Veloseller Worker", version="0.1.0", lifespan=lifespan)
@@ -121,8 +155,10 @@ async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
     try:
         snapshots = csv_upload.parse_csv(content)
     except Exception as e:
+        logger.warning("csv parse failed", extra={"seller_id": seller_id, "error": str(e)})
         raise HTTPException(400, f"CSV parse error: {e}")
     inserted = _persist_snapshots(seller_id, None, SourceType.CSV_UPLOAD, snapshots)
+    logger.info("csv ingested", extra={"seller_id": seller_id, "skus": len(snapshots), "inserted": inserted})
     return {"inserted": inserted, "skus": len(snapshots)}
 
 
@@ -140,8 +176,10 @@ def ingest_google_sheet(connection_id: str) -> dict:
         snapshots = google_sheet.fetch_snapshots(sheet, cfg.get("worksheet_index", 0))
         inserted = _persist_snapshots(conn.data["seller_id"], connection_id, SourceType.GOOGLE_SHEET, snapshots)
         _mark_connection_synced(sb, connection_id)
+        logger.info("google sheet synced", extra={"connection_id": connection_id, "inserted": inserted})
     except Exception as e:
         _mark_connection_synced(sb, connection_id, error=str(e)[:500])
+        logger.exception("google sheet sync failed", extra={"connection_id": connection_id})
         raise HTTPException(500, f"Google Sheet sync error: {e}")
     return {"inserted": inserted}
 
@@ -164,8 +202,10 @@ def ingest_ozon(connection_id: str) -> dict:
         snapshots = ozon.fetch_snapshots(client_id, api_key)
         inserted = _persist_snapshots(conn.data["seller_id"], connection_id, SourceType.MARKETPLACE_API, snapshots)
         _mark_connection_synced(sb, connection_id)
+        logger.info("ozon synced", extra={"connection_id": connection_id, "inserted": inserted})
     except Exception as e:
         _mark_connection_synced(sb, connection_id, error=str(e)[:500])
+        logger.exception("ozon sync failed", extra={"connection_id": connection_id})
         raise HTTPException(500, f"Ozon sync error: {e}")
     return {"inserted": inserted}
 
@@ -186,8 +226,10 @@ def ingest_wb(connection_id: str) -> dict:
         snapshots = wildberries.fetch_snapshots(token)
         inserted = _persist_snapshots(conn.data["seller_id"], connection_id, SourceType.MARKETPLACE_API, snapshots)
         _mark_connection_synced(sb, connection_id)
+        logger.info("wb synced", extra={"connection_id": connection_id, "inserted": inserted})
     except Exception as e:
         _mark_connection_synced(sb, connection_id, error=str(e)[:500])
+        logger.exception("wb sync failed", extra={"connection_id": connection_id})
         raise HTTPException(500, f"WB sync error: {e}")
     return {"inserted": inserted}
 
@@ -206,8 +248,10 @@ def ingest_feed(connection_id: str) -> dict:
         snapshots = feed_src.fetch_snapshots(feed_url)
         inserted = _persist_snapshots(conn.data["seller_id"], connection_id, SourceType.FEED, snapshots)
         _mark_connection_synced(sb, connection_id)
+        logger.info("feed synced", extra={"connection_id": connection_id, "inserted": inserted})
     except Exception as e:
         _mark_connection_synced(sb, connection_id, error=str(e)[:500])
+        logger.exception("feed sync failed", extra={"connection_id": connection_id})
         raise HTTPException(500, f"Feed sync error: {e}")
     return {"inserted": inserted}
 
@@ -219,13 +263,18 @@ def ingest_feed(connection_id: str) -> dict:
 @app.post("/jobs/recalc/{seller_id}", dependencies=[Depends(require_worker_secret)])
 def job_recalc_seller(seller_id: str) -> dict:
     """Пересчёт по всем периодам (7/30/90 дней) — для UI с PeriodSelector."""
-    return recalc_seller_all_periods(seller_id)
+    logger.info("recalc start", extra={"seller_id": seller_id})
+    result = recalc_seller_all_periods(seller_id)
+    logger.info("recalc done", extra={"seller_id": seller_id, **{k: v for k, v in result.items() if isinstance(v, (int, float))}})
+    return result
 
 
 @app.post("/jobs/recalc-all", dependencies=[Depends(require_worker_secret)])
 def job_recalc_all() -> dict:
-    return recalc_all_sellers()
-
+    logger.info("recalc-all start")
+    result = recalc_all_sellers()
+    logger.info("recalc-all done", extra=result)
+    return result
 
 
 # ============================================================================
@@ -237,7 +286,6 @@ async def telegram_webhook(request: Request) -> dict:
     """Telegram Bot API webhook. Обрабатывает /start <seller_id> deeplink."""
     from app.telegram import send_message
 
-    # Парсим body
     try:
         update = await request.json()
     except Exception:
@@ -251,7 +299,6 @@ async def telegram_webhook(request: Request) -> dict:
     if not chat_id or not text:
         return {"ok": True}
 
-    # /start <seller_id>
     if text.startswith("/start"):
         parts = text.split(maxsplit=1)
         if len(parts) == 2 and parts[1]:
@@ -265,9 +312,10 @@ async def telegram_webhook(request: Request) -> dict:
                 if res.data:
                     send_message(chat_id,
                         "✅ <b>Telegram подключён!</b>\n\nТеперь вы будете получать ежедневный digest по важным уведомлениям.")
+                    logger.info("telegram linked", extra={"seller_id": seller_id, "chat_id": chat_id})
                     return {"ok": True, "linked": True}
-            except Exception as e:
-                logger.exception("Telegram linking error: %s", e)
+            except Exception:
+                logger.exception("telegram linking failed", extra={"chat_id": chat_id})
         send_message(chat_id,
             "Привет! Я бот <b>Veloseller</b>. Чтобы подключить уведомления, откройте Veloseller и нажмите кнопку «Подключить Telegram» в настройках.")
         return {"ok": True, "linked": False}
