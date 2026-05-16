@@ -1,14 +1,19 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 /**
  * POST /api/jobs/recalc
  * Ручной запуск пересчёта метрик для текущего селлера.
  */
-export async function POST() {
+export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Rate limit — recalc дорогая операция, 10/min/user
+  const limited = enforceRateLimit(req, RATE_LIMITS.EXPENSIVE, user.id);
+  if (limited) return limited;
 
   const workerUrl = process.env.WORKER_URL!;
   const workerSecret = process.env.WORKER_SECRET!;

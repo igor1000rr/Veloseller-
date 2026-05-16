@@ -1,25 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 /**
  * GDPR Article 20 — Data portability.
  *
  * Экспортирует все данные пользователя в JSON. Запускается из /account по кнопке.
- * Включает: профиль селлера, products, snapshots, events, метрики, alerts, changelog,
- * price_elasticity, connections (без расшифрованных секретов!).
  */
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
   const sb = await createSupabaseServerClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Rate limit — GDPR запросы очень редкие
+  const limited = enforceRateLimit(req, RATE_LIMITS.SENSITIVE, user.id);
+  if (limited) return limited;
+
   const admin = createSupabaseAdminClient();
   const sellerId = user.id;
 
-  // Сначала вытаскиваем product_ids — они нужны для выборки snapshots/events/metrics
   const productsRes = await admin.from("products").select("*").eq("seller_id", sellerId);
   const productIds = (productsRes.data || []).map(p => p.product_id);
 
@@ -38,7 +40,6 @@ export async function GET(_req: NextRequest) {
     admin.from("alerts").select("*").eq("seller_id", sellerId),
     admin.from("changelog").select("*").eq("seller_id", sellerId),
     admin.from("price_elasticity").select("*").eq("seller_id", sellerId),
-    // Connections: убираем зашифрованные секреты
     admin.from("data_connections").select("id,kind,status,last_sync_at,last_error,created_at").eq("seller_id", sellerId),
   ]);
 

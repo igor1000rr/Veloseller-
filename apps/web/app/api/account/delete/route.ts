@@ -1,17 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 /**
- * GDPR Article 17 — Right to erasure ("right to be forgotten").
- *
- * Удаляет все данные пользователя:
- *  - Каскадно удаляет seller → products → snapshots/events/metrics/alerts/changelog
- *  - Удаляет data_connections
- *  - Удаляет user из Supabase auth.users
- *
- * Требует подтверждения через body: { confirm: "DELETE-MY-ACCOUNT" }
- * — защита от accidental delete.
+ * GDPR Article 17 — Right to erasure.
  */
 export async function DELETE(req: NextRequest) {
   const sb = await createSupabaseServerClient();
@@ -20,7 +13,10 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Confirmation phrase
+  // Rate limit
+  const limited = enforceRateLimit(req, RATE_LIMITS.SENSITIVE, user.id);
+  if (limited) return limited;
+
   let body: { confirm?: string };
   try {
     body = await req.json();
@@ -36,8 +32,6 @@ export async function DELETE(req: NextRequest) {
   const admin = createSupabaseAdminClient();
   const sellerId = user.id;
 
-  // Cascading delete. RLS не мешает service-role клиенту.
-  // Order: продукты-зависимые таблицы первыми (на случай отсутствия ON DELETE CASCADE).
   try {
     const productsRes = await admin.from("products").select("product_id").eq("seller_id", sellerId);
     const productIds = (productsRes.data || []).map(p => p.product_id);
@@ -55,8 +49,6 @@ export async function DELETE(req: NextRequest) {
     await admin.from("products").delete().eq("seller_id", sellerId);
     await admin.from("data_connections").delete().eq("seller_id", sellerId);
     await admin.from("sellers").delete().eq("id", sellerId);
-
-    // Удаляем auth user (требует service-role)
     await admin.auth.admin.deleteUser(sellerId);
   } catch (e: any) {
     return NextResponse.json({
