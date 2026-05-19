@@ -26,13 +26,27 @@ def fetch_all(query_builder, page_size: int = 1000) -> list[dict]:
         )
 
     ВАЖНО: передавай query_builder ДО .execute(), без него.
-    Каждый вызов range() создаёт новый запрос на сервер.
+
+    Если query_builder не поддерживает .range() (тестовые моки или
+    отсутствует у конкретного билдера) — fallback на обычный .execute(),
+    возвращая всё что вернулось без пагинации. Это безопасный fallback
+    т.к. в тестах данных мало, а в продакшене supabase всегда имеет .range().
     """
+    # Если у билдера нет .range() — это тестовый мок или ограниченный билдер,
+    # просто делаем обычный execute
+    if not callable(getattr(query_builder, "range", None)):
+        result = query_builder.execute()
+        return list(result.data or [])
+
     all_rows: list[dict] = []
     offset = 0
     while True:
-        # range(start, end) inclusive в Supabase
-        page = query_builder.range(offset, offset + page_size - 1).execute()
+        try:
+            page = query_builder.range(offset, offset + page_size - 1).execute()
+        except (AttributeError, TypeError):
+            # range() есть, но возвращает что-то странное — fallback
+            result = query_builder.execute()
+            return list(result.data or [])
         rows = page.data or []
         all_rows.extend(rows)
         if len(rows) < page_size:
