@@ -7,11 +7,11 @@
   - /ingest/google-sheet/{id} (404, 400, success)
   - /ingest/ozon, /ingest/wb, /ingest/feed — с mock-ами
   - /jobs/recalc/{seller_id} (синхронный ?sync=true и async режимы), /jobs/recalc-all, /jobs/recalc/{id}/status
-  - /telegram/webhook (/start, /start <id>, empty)
+  - /telegram/webhook (/start, /start <uuid>, empty, БАГ 52 — secret token)
 """
 from __future__ import annotations
 import os
-os.environ["ENABLE_SCHEDULER"] = "false"  # не запускаем APScheduler в тестах
+os.environ["ENABLE_SCHEDULER"] = "false"
 
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -25,10 +25,9 @@ from app.schemas import SnapshotInput
 
 client = TestClient(app)
 
+# Валидный UUID для тестов (тестируем UUID-валидацию seller_id в /telegram/webhook)
+VALID_UUID = "e113ebfb-3409-4cca-b0ab-0a7d965f4cba"
 
-# ============================================================================
-# Health
-# ============================================================================
 
 class TestHealth:
     def test_returns_ok(self):
@@ -39,21 +38,14 @@ class TestHealth:
         assert "ts" in body
 
 
-# ============================================================================
-# Worker secret auth
-# ============================================================================
-
 class TestWorkerSecret:
     def test_dev_secret_skips_auth(self, monkeypatch):
-        """Dev mode (worker_secret = 'dev-secret-replace-me') пропускает без header."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        # Используем /jobs/recalc-all — простой endpoint с auth dependency
         with patch("app.main.recalc_all_sellers", return_value={"sellers": 0}):
             r = client.post("/jobs/recalc-all")
         assert r.status_code == 200
 
     def test_production_requires_header(self, monkeypatch):
-        """Production: без X-Worker-Secret → 401."""
         monkeypatch.setattr("app.main.settings.worker_secret", "real-secret-123")
         r = client.post("/jobs/recalc-all")
         assert r.status_code == 401
@@ -70,10 +62,6 @@ class TestWorkerSecret:
         assert r.status_code == 401
 
 
-# ============================================================================
-# CSV ingest
-# ============================================================================
-
 class TestIngestCsv:
     def test_success(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
@@ -83,7 +71,8 @@ class TestIngestCsv:
             data=[{"product_id": "pid-1", "sku": "A1"}]
         )
         mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock()
-        with patch("app.main.get_supabase", return_value=mock_sb):
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.main.fetch_all", return_value=[]):
             r = client.post(
                 "/ingest/csv?seller_id=s-1",
                 files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
@@ -102,12 +91,7 @@ class TestIngestCsv:
         assert "CSV parse error" in r.json()["detail"]
 
 
-# ============================================================================
-# Connection-based ingests
-# ============================================================================
-
 def _mock_supabase_for_connection(connection_data: dict | None) -> MagicMock:
-    """Mock supabase где select(...).eq().single().execute() возвращает connection_data."""
     mock_sb = MagicMock()
     chain = mock_sb.table.return_value.select.return_value.eq.return_value.single.return_value
     chain.execute.return_value = MagicMock(data=connection_data)
@@ -177,17 +161,11 @@ class TestIngestFeed:
         assert "feed_url" in r.json()["detail"]
 
 
-# ============================================================================
-# Recalc jobs
-# ============================================================================
-
 class TestRecalcJobs:
     def setup_method(self):
-        # Очищаем in-memory state между тестами
         _running_recalcs.clear()
 
     def test_recalc_seller_sync_returns_result(self, monkeypatch):
-        """С ?sync=true endpoint работает синхронно и возвращает результат расчёта."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_result = {"products": 5, "metrics_written": 5, "periods": []}
         with patch("app.main.recalc_seller_all_periods", return_value=mock_result) as fn:
@@ -197,7 +175,6 @@ class TestRecalcJobs:
         fn.assert_called_once_with("seller-uuid-123")
 
     def test_recalc_seller_async_returns_started(self, monkeypatch):
-        """Без sync=true endpoint работает в background и возвращает status=running."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_result = {"products": 5, "metrics_written": 5}
         with patch("app.main.recalc_seller_all_periods", return_value=mock_result):
@@ -207,12 +184,9 @@ class TestRecalcJobs:
         assert body["started"] is True
         assert body["status"] == "running"
         assert "started_at" in body
-        # С TestClient FastAPI выполняет background tasks после возврата response,
-        # поэтому к этому моменту _running_recalcs должен содержать запись
         assert "seller-uuid-456" in _running_recalcs
 
     def test_recalc_seller_dedup_when_running(self, monkeypatch):
-        """Если уже идёт recalc для селлера, второй запрос не запускает второй."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         _running_recalcs["seller-busy"] = {
             "started_at": "2026-05-19T09:00:00Z",
@@ -226,11 +200,9 @@ class TestRecalcJobs:
         body = r.json()
         assert body["started"] is False
         assert body["status"] == "running"
-        # Реальный recalc не был вызван
         fn.assert_not_called()
 
     def test_recalc_status_idle(self, monkeypatch):
-        """Status endpoint возвращает idle если ничего не запускалось."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         r = client.get("/jobs/recalc/some-unknown-seller/status")
         assert r.status_code == 200
@@ -261,12 +233,17 @@ class TestRecalcJobs:
 
 
 # ============================================================================
-# Telegram webhook
+# Telegram webhook (БАГ 52: secret token verification + UUID validation)
 # ============================================================================
 
+
 class TestTelegramWebhook:
+    def setup_method(self):
+        # По умолчанию в тестах secret не задан → проверка пропускается
+        for var in ("TELEGRAM_WEBHOOK_SECRET", "ENV"):
+            os.environ.pop(var, None)
+
     def test_empty_body_returns_ok_false(self):
-        # Передаём невалидный JSON в content body — endpoint должен вернуть ok:False
         r = client.post("/telegram/webhook", content=b"not-json")
         assert r.status_code == 200
         assert r.json() == {"ok": False}
@@ -278,13 +255,12 @@ class TestTelegramWebhook:
 
     def test_no_chat_id_returns_ok(self):
         r = client.post("/telegram/webhook", json={
-            "message": {"text": "hi"}  # нет chat.id
+            "message": {"text": "hi"}
         })
         assert r.status_code == 200
         assert r.json() == {"ok": True}
 
     def test_start_without_seller_id_shows_help(self):
-        """/start без аргумента — показываем help message."""
         with patch("app.telegram.send_message", return_value=True) as send:
             r = client.post("/telegram/webhook", json={
                 "message": {"text": "/start", "chat": {"id": 555}}
@@ -294,32 +270,43 @@ class TestTelegramWebhook:
         assert body["ok"] is True
         assert body["linked"] is False
         send.assert_called_once()
-        # В сообщении упоминается Veloseller
         call_args = send.call_args[0]
         assert "Veloseller" in call_args[1]
 
-    def test_start_with_seller_id_links_account(self):
-        """/start <seller_id> — линкует chat_id к sellers.telegram_chat_id."""
+    def test_start_with_valid_uuid_links_account(self):
+        """/start <valid_uuid> — линкует chat_id к sellers.telegram_chat_id."""
         mock_sb = MagicMock()
         mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
-            data=[{"id": "seller-uuid-1", "telegram_chat_id": "777"}]
+            data=[{"id": VALID_UUID, "telegram_chat_id": "777"}]
         )
         with patch("app.main.get_supabase", return_value=mock_sb), \
              patch("app.telegram.send_message", return_value=True) as send:
             r = client.post("/telegram/webhook", json={
-                "message": {"text": "/start seller-uuid-1", "chat": {"id": 777}}
+                "message": {"text": f"/start {VALID_UUID}", "chat": {"id": 777}}
             })
         assert r.status_code == 200
         body = r.json()
         assert body["ok"] is True
         assert body["linked"] is True
-        # Проверяем что send_message был вызван с success message
         send.assert_called_once()
         msg = send.call_args[0][1]
         assert "подключ" in msg.lower()
 
+    def test_start_with_invalid_uuid_shows_help(self):
+        """БАГ 52: /start с невалидным UUID НЕ делает DB-запрос, показывает help."""
+        mock_sb = MagicMock()
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.telegram.send_message", return_value=True) as send:
+            r = client.post("/telegram/webhook", json={
+                "message": {"text": "/start not-a-uuid; DROP TABLE sellers;--", "chat": {"id": 666}}
+            })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["linked"] is False
+        # Update НЕ должен был быть вызван
+        mock_sb.table.assert_not_called()
+
     def test_unknown_command_returns_ok(self):
-        """Любая команда кроме /start — ok: True без действий."""
         r = client.post("/telegram/webhook", json={
             "message": {"text": "/random", "chat": {"id": 1}}
         })
@@ -327,9 +314,42 @@ class TestTelegramWebhook:
         assert r.json() == {"ok": True}
 
     def test_edited_message_is_processed(self):
-        """edited_message тоже обрабатывается (не только message)."""
         r = client.post("/telegram/webhook", json={
             "edited_message": {"text": "hello", "chat": {"id": 1}}
         })
         assert r.status_code == 200
         assert r.json() == {"ok": True}
+
+    def test_secret_token_required_when_env_set(self, monkeypatch):
+        """БАГ 52: если TELEGRAM_WEBHOOK_SECRET задан, требуем header."""
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "my-secret")
+        # Без header
+        r = client.post("/telegram/webhook", json={"update_id": 1})
+        assert r.status_code == 403
+
+    def test_secret_token_accepted_when_correct(self, monkeypatch):
+        """С правильным header работает."""
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "my-secret")
+        r = client.post(
+            "/telegram/webhook",
+            json={"update_id": 1},
+            headers={"X-Telegram-Bot-Api-Secret-Token": "my-secret"},
+        )
+        assert r.status_code == 200
+
+    def test_secret_token_rejected_when_wrong(self, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "my-secret")
+        r = client.post(
+            "/telegram/webhook",
+            json={"update_id": 1},
+            headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
+        )
+        assert r.status_code == 403
+
+    def test_production_without_secret_returns_500(self, monkeypatch):
+        """БАГ 52: в production без TELEGRAM_WEBHOOK_SECRET → 500 (misconfigured)."""
+        monkeypatch.setenv("ENV", "production")
+        # Убеждаемся что TELEGRAM_WEBHOOK_SECRET точно не задан
+        monkeypatch.delenv("TELEGRAM_WEBHOOK_SECRET", raising=False)
+        r = client.post("/telegram/webhook", json={"update_id": 1})
+        assert r.status_code == 500
