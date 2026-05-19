@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import SyncButton from "./SyncButton";
+import DeleteButton from "./DeleteButton";
 import { Icons } from "../_components/Icons";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export default async function ConnectionsPage() {
   const supabase = await createSupabaseServerClient();
@@ -36,26 +40,51 @@ export default async function ConnectionsPage() {
       <div className="space-y-3">
         {connections?.length ? (
           connections.map((c) => (
-            <div key={c.id} className="flex items-center justify-between gap-4 rounded-2xl border border-line bg-paper p-5 md:p-6 hover:shadow-sm transition flex-wrap">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="font-display text-lg font-medium text-ink truncate">{c.name}</span>
-                  <StatusBadge status={c.status} />
+            <div key={c.id} className="rounded-2xl border border-line bg-paper p-5 md:p-6 hover:shadow-sm transition">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div className="min-w-0 flex-1">
+                  <Link
+                    href={`/connections/${c.id}` as any}
+                    className="inline-flex items-center gap-3 flex-wrap group"
+                  >
+                    <span className="font-display text-lg font-medium text-ink group-hover:text-lime-deep transition truncate">
+                      {c.name}
+                    </span>
+                    <StatusBadge status={c.status} />
+                    <span className="font-mono text-[10px] text-ink-hush opacity-0 group-hover:opacity-100 transition">
+                      детали →
+                    </span>
+                  </Link>
+                  <div className="mt-1.5 flex items-center gap-2 flex-wrap font-mono text-xs text-ink-hush">
+                    <span className="uppercase tracking-wider">{sourceLabel(c.source, c.marketplace)}</span>
+                    {c.last_sync_at ? (
+                      <>
+                        <span className="size-1 rounded-full bg-line-2" />
+                        <span>синк: {new Date(c.last_sync_at).toLocaleString("ru-RU")}</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="size-1 rounded-full bg-line-2" />
+                        <span>ещё не синхронизировался</span>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="mt-1.5 flex items-center gap-2 flex-wrap font-mono text-xs text-ink-hush">
-                  <span className="uppercase tracking-wider">{sourceLabel(c.source, c.marketplace)}</span>
-                  {c.last_sync_at && (
-                    <>
-                      <span className="size-1 rounded-full bg-line-2" />
-                      <span>синк: {new Date(c.last_sync_at).toLocaleString("ru-RU")}</span>
-                    </>
-                  )}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <SyncButton connectionId={c.id} source={c.source} />
+                  <DeleteButton connectionId={c.id} connectionName={c.name} variant="compact" />
                 </div>
-                {c.last_error && (
-                  <div className="mt-2 text-xs text-rose font-mono break-all">{c.last_error}</div>
-                )}
               </div>
-              <SyncButton connectionId={c.id} source={c.source} />
+              {c.last_error && (
+                <details className="mt-3 group">
+                  <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-widest text-rose hover:opacity-80 transition select-none">
+                    Текст последней ошибки
+                  </summary>
+                  <pre className="mt-2 p-3 bg-rose/5 border border-rose/20 rounded text-[11px] text-rose font-mono overflow-x-auto whitespace-pre-wrap break-all">
+                    {c.last_error}
+                  </pre>
+                </details>
+              )}
             </div>
           ))
         ) : (
@@ -82,6 +111,7 @@ function StatusBadge({ status }: { status: string | null }) {
   const map: Record<string, { label: string; cls: string }> = {
     active:   { label: "активен",     cls: "text-lime-deep border-lime-deep/30 bg-lime-soft" },
     syncing:  { label: "синхронизация", cls: "text-azure border-azure/30 bg-azure/10" },
+    pending:  { label: "ожидание",    cls: "text-ink-hush border-line-2 bg-bg-soft" },
     paused:   { label: "пауза",       cls: "text-ink-hush border-line-2 bg-bg-soft" },
     error:    { label: "ошибка",      cls: "text-rose border-rose/30 bg-rose/10" },
   };
