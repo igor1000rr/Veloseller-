@@ -7,6 +7,24 @@ import { PeriodSelector } from "./PeriodSelector";
 import { DeadInventoryChart } from "./StoreCharts";
 import { HealthScoreBlock } from "./HealthScale";
 
+// Свежие данные на каждый запрос (после recalc нет stale UI)
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+/** Постранично загружает все строки из Supabase запроса (default режет до 1000). */
+async function fetchAll<T>(buildQuery: (from: number, to: number) => any, pageSize = 1000): Promise<T[]> {
+  const all: T[] = [];
+  let offset = 0;
+  while (offset < 50_000) {
+    const { data } = await buildQuery(offset, offset + pageSize - 1);
+    if (!data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    offset += pageSize;
+  }
+  return all;
+}
+
 export default async function DashboardOverview({ searchParams }: {
   searchParams: Promise<{ period?: string }>;
 }) {
@@ -42,15 +60,20 @@ export default async function DashboardOverview({ searchParams }: {
     .order("period_end", { ascending: false })
     .limit(14);
 
-  const { data: skuVelocities } = await supabase
-    .from("tvelo_metrics")
-    .select("adjusted_velocity,product_id,period_end")
-    .order("period_end", { ascending: false })
-    .limit(1000);
+  // Velocity — берём только метрики ТЕКУЩЕГО селлера через JOIN с products, и
+  // пагинируем т.к. может быть 5000+ строк (1879 SKU × 3 периода).
+  // Группируем по product_id, берём latest period_end.
+  const tveloRows = await fetchAll<{ adjusted_velocity: number; product_id: string; period_end: string }>(
+    async (from, to) => await supabase
+      .from("tvelo_metrics")
+      .select("adjusted_velocity,product_id,period_end,products!inner(seller_id)")
+      .eq("products.seller_id", user.id)
+      .order("period_end", { ascending: false })
+      .range(from, to),
+  );
   const latestByProduct = new Map<string, number>();
-  for (const m of skuVelocities ?? []) {
-    const pid = (m as any).product_id;
-    if (!latestByProduct.has(pid)) latestByProduct.set(pid, Number(m.adjusted_velocity));
+  for (const m of tveloRows) {
+    if (!latestByProduct.has(m.product_id)) latestByProduct.set(m.product_id, Number(m.adjusted_velocity));
   }
   const velocities = Array.from(latestByProduct.values()).filter(v => v > 0).sort((a, b) => a - b);
   const fastVelocity = velocities.length > 0 ? velocities[Math.floor(velocities.length * 0.9)] : 0;
