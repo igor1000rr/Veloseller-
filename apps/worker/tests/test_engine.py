@@ -111,6 +111,7 @@ class TestVelocity:
 
 class TestConfidence:
     def test_clean_period(self):
+        # sales_like_days не передан (legacy) → low_pen=0
         r = calculate_confidence(7, 0, 0, 0)
         assert r.initial == 95.0 and r.final == 95.0
 
@@ -135,6 +136,32 @@ class TestConfidence:
         # period=100, repl=10, anom=5, missing=3 -> 95-10-5-3=77
         r = calculate_confidence(100, 10, 5, 3)
         assert r.final == 77.0
+
+    def test_low_history_penalty_applied(self):
+        """БАГ 4: при sales_like_days < 7 confidence штрафуется."""
+        # 0 sales_like → max штраф 35
+        r = calculate_confidence(30, 0, 0, 0, sales_like_days=0)
+        assert r.low_history == 35.0
+        assert r.final == 60.0
+
+    def test_low_history_partial(self):
+        """3 sales_like дней → штраф ≈ 20."""
+        r = calculate_confidence(30, 0, 0, 0, sales_like_days=3)
+        # 35 * (1 - 3/7) = 35 * 4/7 = 20
+        assert r.low_history == pytest.approx(20.0, abs=0.1)
+        assert r.final == pytest.approx(75.0, abs=0.1)
+
+    def test_low_history_threshold_no_penalty(self):
+        """≥ 7 sales_like дней → нет штрафа."""
+        r = calculate_confidence(30, 0, 0, 0, sales_like_days=7)
+        assert r.low_history == 0.0
+        assert r.final == 95.0
+
+    def test_legacy_call_no_sales_like_no_penalty(self):
+        """Без sales_like_days (legacy) штраф не применяется (бэк-совместимость)."""
+        r = calculate_confidence(30, 0, 0, 0)  # default sales_like_days=-1
+        assert r.low_history == 0.0
+        assert r.final == 95.0
 
 
 # ============================================================================
@@ -177,7 +204,6 @@ class TestHealth:
         assert h.final == 100
 
     def test_doc_example(self):
-        # stockout=3/30, cov=5, conf=82: 100-4-7.14-3.6 = 85.26 -> 85
         h = sku_health_score(3, 30, 5.0, 82.0)
         assert h.stockout == pytest.approx(4.0, abs=0.01)
         assert h.low_coverage == pytest.approx(7.14, abs=0.01)
@@ -197,14 +223,11 @@ class TestHealth:
         assert h.low_coverage == 0.0 and h.dead_inventory == 0.0
 
     def test_floor_zero(self):
-        # 100 - 40 (stockout) - 25 (low_cov при cov=0) - 0 - 12 (conf) = 23
         h = sku_health_score(30, 30, 0.0, 40.0)
         assert h.final == 23
 
     def test_extreme_penalties_to_floor(self):
-        # Если штрафы превысят 100, должно упасть до 0
         h = sku_health_score(30, 30, 1000.0, 0.0)
-        # stockout=40, low_cov=0, dead=cap25, conf=20 -> 100-85 = 15
         assert 0 <= h.final <= 100
 
 
@@ -273,7 +296,6 @@ class TestStore:
         assert demand_pattern([10.0] * 5) == "insufficient_history"
 
     def test_demand_pattern_unpredictable(self):
-        # CV > 1.0: чередуем 0 и 100 — std=mean -> cv=1.0; делаем экстремальнее
         assert demand_pattern([0.0, 0.0, 0.0, 100.0] * 5) == "unpredictable"
 
     def test_warehouse_basic(self):
@@ -286,7 +308,6 @@ class TestStore:
         skus = [
             SkuHealthInput("a", 80, 10, 100.0, 1.0, 1.0, True),
         ]
-        # 80 - 30 = 50
         assert warehouse_health_score(skus) == 50
 
     def test_warehouse_empty(self):
@@ -315,7 +336,6 @@ class TestStore:
             SkuHealthInput("b", 70, 5, 200.0, 0, 0, False),
         ]
         cov = {"a": 30.0, "b": 250.0}
-        # Только b — 5*200 = 1000
         assert frozen_inventory_value(skus, cov) == 1000.0
 
 
@@ -368,39 +388,58 @@ class TestPipeline:
                 excluded_from_confirmed_metrics=(i == 0),
             ))
         m = compute_metrics_for_sku(pid, ps, pe, agg, current_stock=70)
-        # 29 sales по 1, 30 in_stock_days -> velocity = 29/30 ≈ 0.9667
         assert m.in_stock_days == 30
         assert m.stockout_days == 0
         assert m.confirmed_velocity == pytest.approx(0.9667, abs=0.001)
-        # adj = (29 + median*0_excluded_in_stock) / 30; excluded_in_stock=1 (first), median=1.0
-        # = (29 + 1.0*1)/30 = 1.0
         assert m.adjusted_velocity == pytest.approx(1.0, abs=0.01)
         assert m.coverage_days == pytest.approx(70.0, abs=1.0)
         assert m.segment == InventorySegment.SLOW_MOVERS or m.segment == InventorySegment.STABLE
 
-    def test_smoke_with_stockout(self):
+    def test_smoke_with_real_stockout(self):
+        """5 дней продаж + 5 дней реальный stockout (snapshot есть, stock=0).
+
+        ВАЖНО: после БАГ 1 фикса MISSING_DATA НЕ считается как stockout. Поэтому
+        в этом тесте моделируем РЕАЛЬНЫЙ stockout: snapshot существует с stock=0,
+        availability=False, event_type=NO_CHANGE (или FIRST_SNAPSHOT для первого).
+        """
         from uuid import uuid4
         pid = str(uuid4())
         ps = date(2026, 1, 1)
         pe = date(2026, 1, 10)
-        # 5 дней продаж, 5 дней stockout
         agg = []
         for i in range(10):
             day = date(2026, 1, 1 + i)
             in_stock = i < 5
+            if i == 0:
+                event = EventType.FIRST_SNAPSHOT
+                delta = None
+                excluded = True
+            elif 0 < i < 5:
+                event = EventType.SALES_LIKE
+                delta = -2
+                excluded = False
+            elif i == 5:
+                # Переход с stock=2 на stock=0 — это последняя продажа (sales_like)
+                event = EventType.SALES_LIKE
+                delta = -2
+                excluded = False
+            else:
+                # stock уже 0, остаётся 0 → NO_CHANGE с availability=False
+                event = EventType.NO_CHANGE
+                delta = 0
+                excluded = False
             agg.append(DailyAggregate(
                 day=day,
                 availability=in_stock,
-                end_of_day_stock=10 - i if in_stock else 0,
+                end_of_day_stock=10 - i * 2 if in_stock else 0,
                 price=100.0,
-                event_type=EventType.SALES_LIKE if 0 < i < 5 else (EventType.FIRST_SNAPSHOT if i == 0 else EventType.MISSING_DATA),
-                delta_stock=-2 if 0 < i < 5 else None,
-                excluded_from_confirmed_metrics=not (0 < i < 5),
+                event_type=event,
+                delta_stock=delta,
+                excluded_from_confirmed_metrics=excluded,
             ))
         m = compute_metrics_for_sku(pid, ps, pe, agg, current_stock=0)
         assert m.in_stock_days == 5
-        assert m.stockout_days == 5
-        # coverage = 0 / vel = 0
+        assert m.stockout_days == 5  # реальный stockout НЕ через MISSING_DATA
         assert m.coverage_days == 0.0
         assert m.segment == InventorySegment.FAST_MOVERS
 
@@ -439,8 +478,8 @@ class TestStoreAggregates:
         agg = aggregate_store_metrics(skus)
         assert agg.total_sku_count == 4
         assert agg.oos_sku_count == 1
-        assert agg.low_stock_sku_count == 2  # b (cov=0 <= 7) + c (cov=5 <= 7)
-        assert agg.dead_inventory_sku_count == 1  # d
+        assert agg.low_stock_sku_count == 2
+        assert agg.dead_inventory_sku_count == 1
 
     def test_inventory_value(self):
         skus = [
@@ -456,7 +495,6 @@ class TestStoreAggregates:
             self._make(adjusted_velocity=0.0, stockout_days=0, price=50.0),
         ]
         agg = aggregate_store_metrics(skus)
-        # 2.0 × 5 × 100 = 1000
         assert agg.lost_revenue == 1000.0
 
     def test_demand_pattern_distribution(self):
@@ -481,18 +519,15 @@ from app.engine.lost_revenue import average_stockout_price, lost_revenue_per_sku
 
 class TestLostRevenuePerSku:
     def test_avg_price_with_data(self):
-        # Средняя цена за stockout период
         assert average_stockout_price([100.0, 200.0, 150.0], None) == 150.0
 
     def test_avg_price_fallback_latest(self):
-        # Если цен за период нет — берём latest
         assert average_stockout_price([], 120.0) == 120.0
 
     def test_avg_price_no_data(self):
         assert average_stockout_price([], None) == 0.0
 
     def test_lost_revenue_full(self):
-        # 2.0 × 5 дней × 150 = 1500
         assert lost_revenue_per_sku(2.0, 5, [100.0, 200.0, 150.0], 120.0) == 1500.0
 
     def test_lost_revenue_zero_velocity(self):
@@ -537,7 +572,6 @@ class TestPriceTracking:
         assert len(changes) == 2
 
     def test_elasticity_positive_price_negative_demand(self):
-        # Цена выросла на 10%, продажи упали с 10 до 5
         change = PriceChange(_date(2026,1,15), 100.0, 110.0, 10.0)
         before = [10.0] * 7
         after = [5.0] * 7
@@ -571,18 +605,15 @@ class TestSafetyStock:
         assert safety_stock(0, 5) == 0
 
     def test_reorder_point(self):
-        # lead=7, safety=5, velocity=2 -> 7*2 + 5*2 = 24
         assert reorder_point(2.0, 7, 5) == 24
 
     def test_recommendation_critical(self):
-        # current=10, velocity=2, lead=7, safety=5 -> rp=24, need now
         r = calculate_recommendation(current_stock=10, daily_velocity=2.0,
                                       lead_time_days=7, safety_days=5, reorder_for_days=30)
         assert r.days_until_reorder == 0
         assert r.recommended_order_qty == 60
 
     def test_recommendation_plenty(self):
-        # current=100, velocity=2, rp=24 -> 76 запаса / 2 = 38 days
         r = calculate_recommendation(current_stock=100, daily_velocity=2.0,
                                       lead_time_days=7, safety_days=5, reorder_for_days=30)
         assert r.days_until_reorder == 38
