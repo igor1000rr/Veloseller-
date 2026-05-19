@@ -1,7 +1,11 @@
 """APScheduler: периодические задачи.
 
-- recalc-all каждый час
-- sync активных marketplace-connections раз в 6 часов
+- recalc-all каждый час (без новых snapshot'ов это дёшево)
+- sync активных marketplace-connections РАЗ В СУТКИ в 02:00 UTC (05:00 Moscow)
+  Раньше было каждые 6 часов = 4 раза в сутки, создавалось 4× мусорных snapshot'ов
+  с одинаковыми stock'ами. Дедупликация на ingest решает проблему, но 1 раз в сутки
+  тоже даёт чистый сигнал и экономит rate limits API маркетплейсов.
+- daily digest в 09:00 UTC
 """
 from __future__ import annotations
 
@@ -31,7 +35,11 @@ def _job_recalc_all() -> None:
 
 
 def _job_sync_active_connections() -> None:
-    """Пинаем активные marketplace-connections (Ozon/WB/Google Sheet)."""
+    """Пинаем активные marketplace-connections (Ozon/WB/Google Sheet).
+
+    Запускается 1 раз в сутки в 02:00 UTC. Раньше было 4 раза в сутки, что создавало
+    избыточные snapshot'ы (stock между синками обычно не меняется).
+    """
     from app.crypto import decrypt_if_encrypted
     try:
         sb = get_supabase()
@@ -97,10 +105,8 @@ def _job_send_daily_digests() -> None:
             )
             if not alerts.data:
                 continue
-            # Email
             if s.get("email") and s.get("notify_email", True):
                 send_alert_digest(s["email"], s.get("display_name"), alerts.data)
-            # Telegram
             if s.get("telegram_chat_id") and s.get("notify_telegram", True):
                 text = format_alerts_digest(alerts.data)
                 if text:
@@ -121,12 +127,13 @@ def start_scheduler() -> None:
     if _scheduler is not None:
         return
     _scheduler = BackgroundScheduler(timezone="UTC")
-    # Каждый час в HH:05 — recalc
+    # Каждый час в HH:05 — recalc (без новых snapshot'ов это дёшево, обновляются метрики)
     _scheduler.add_job(_job_recalc_all, CronTrigger(minute=5), id="recalc-all", replace_existing=True)
-    # Каждые 6 часов в HH:30 — sync connections
+    # РАЗ В СУТКИ в 02:00 UTC (05:00 Moscow) — sync connections.
+    # Раньше каждые 6 часов = 4× мусорных snapshot'ов в день.
     _scheduler.add_job(
         _job_sync_active_connections,
-        CronTrigger(hour="*/6", minute=30),
+        CronTrigger(hour=2, minute=0),
         id="sync-active-connections",
         replace_existing=True,
     )
