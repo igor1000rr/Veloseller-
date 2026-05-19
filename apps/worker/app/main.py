@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 
 from app.config import settings
 from app.db import get_supabase
@@ -50,6 +50,13 @@ if _sentry_dsn:
         logger.info("sentry initialized", extra={"env": _os.environ.get("SENTRY_ENV", "production")})
     except ImportError:
         logger.warning("SENTRY_DSN set but sentry-sdk not installed — skipping")
+
+
+# In-memory state для running recalc jobs.
+# {seller_id: {"started_at": iso, "status": "running"|"done"|"error", "result": dict, "error": str}}
+# Простой набор без persistence — статус теряется при рестарте worker'а, но это окей,
+# т.к. сами метрики персистятся в БД и UI смотрит на их наличие.
+_running_recalcs: dict[str, dict] = {}
 
 
 @asynccontextmanager
@@ -260,13 +267,74 @@ def ingest_feed(connection_id: str) -> dict:
 # Recalc jobs
 # ============================================================================
 
+def _run_recalc_bg(seller_id: str) -> None:
+    """Запуск recalc в фоне — обновляет _running_recalcs."""
+    _running_recalcs[seller_id] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "running",
+        "result": None,
+        "error": None,
+    }
+    try:
+        result = recalc_seller_all_periods(seller_id)
+        _running_recalcs[seller_id].update({
+            "status": "done",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "result": result,
+        })
+        logger.info("recalc done (bg)", extra={"seller_id": seller_id, **{k: v for k, v in result.items() if isinstance(v, (int, float))}})
+    except Exception as e:
+        _running_recalcs[seller_id].update({
+            "status": "error",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "error": str(e)[:500],
+        })
+        logger.exception("recalc failed (bg)", extra={"seller_id": seller_id})
+
+
 @app.post("/jobs/recalc/{seller_id}", dependencies=[Depends(require_worker_secret)])
-def job_recalc_seller(seller_id: str) -> dict:
-    """Пересчёт по всем периодам (7/30/90 дней) — для UI с PeriodSelector."""
-    logger.info("recalc start", extra={"seller_id": seller_id})
-    result = recalc_seller_all_periods(seller_id)
-    logger.info("recalc done", extra={"seller_id": seller_id, **{k: v for k, v in result.items() if isinstance(v, (int, float))}})
-    return result
+def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: bool = False) -> dict:
+    """Пересчёт по всем периодам (7/30/90 дней) — для UI с PeriodSelector.
+
+    По умолчанию запускается в фоне (BackgroundTasks) и сразу возвращает 202 + статус.
+    Передать ?sync=true для синхронного режима (e.g. из cron). UI должен использовать async.
+    """
+    # Дедупликация — если уже идёт recalc для этого селлера, не запускаем второй
+    existing = _running_recalcs.get(seller_id)
+    if existing and existing.get("status") == "running":
+        logger.info("recalc already running, skipping", extra={"seller_id": seller_id})
+        return {
+            "started": False,
+            "status": "running",
+            "started_at": existing.get("started_at"),
+            "message": "Расчёт уже идёт, дождитесь завершения",
+        }
+
+    if sync:
+        # Старый синхронный режим для cron/scheduler
+        logger.info("recalc start (sync)", extra={"seller_id": seller_id})
+        result = recalc_seller_all_periods(seller_id)
+        logger.info("recalc done (sync)", extra={"seller_id": seller_id, **{k: v for k, v in result.items() if isinstance(v, (int, float))}})
+        return result
+
+    # Async режим — запускаем в фоне через BackgroundTasks
+    background_tasks.add_task(_run_recalc_bg, seller_id)
+    logger.info("recalc enqueued (bg)", extra={"seller_id": seller_id})
+    return {
+        "started": True,
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "message": "Расчёт запущен в фоне, цифры появятся через несколько минут",
+    }
+
+
+@app.get("/jobs/recalc/{seller_id}/status", dependencies=[Depends(require_worker_secret)])
+def job_recalc_status(seller_id: str) -> dict:
+    """Статус последнего background-recalc для селлера."""
+    state = _running_recalcs.get(seller_id)
+    if not state:
+        return {"status": "idle", "started_at": None, "result": None, "error": None}
+    return state
 
 
 @app.post("/jobs/recalc-all", dependencies=[Depends(require_worker_secret)])
