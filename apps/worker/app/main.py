@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
 
 from app.config import settings
-from app.db import get_supabase
+from app.db import fetch_all, get_supabase
 from app.jobs.recalc import recalc_all_sellers, recalc_seller, recalc_seller_all_periods
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.logger import JsonFormatter, setup_logger
@@ -49,7 +49,6 @@ if _sentry_dsn:
         logger.warning("SENTRY_DSN set but sentry-sdk not installed — skipping")
 
 
-# In-memory state для running recalc jobs.
 _running_recalcs: dict[str, dict] = {}
 
 
@@ -79,16 +78,36 @@ def health() -> dict:
     return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat()}
 
 
+# Максимум SKU в одном `.in_(...)` запросе. PostgREST URL лимит ~8KB.
+# При средней длине sku 12 символов + JSON-escape, 500 SKU = ~7KB URL — безопасно.
+_PRODUCTS_IN_BATCH = 500
+
+
 def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
+    """Upsert products и возвращает маппинг sku -> product_id.
+
+    БАГ 15 fix: батчируем `.in_("sku", [...])` по 500 SKU. Раньше при 1879 SKU
+    URL был ~22KB > PostgREST лимита 8KB, запрос обрезался и часть SKU не возвращалась.
+    Это приводило к тому что 436 SKU создавались через upsert, но их snapshot'ы пропускались
+    в _persist_snapshots (потому что pid=None после неполного маппинга).
+    """
     if not snapshots:
         return {}
     rows = [{"seller_id": seller_id, "sku": s.sku, "product_name": s.product_name or s.sku} for s in snapshots]
     sb.table("products").upsert(rows, on_conflict="seller_id,sku").execute()
-    res = (
-        sb.table("products").select("product_id,sku").eq("seller_id", seller_id)
-        .in_("sku", [s.sku for s in snapshots]).execute()
-    )
-    return {r["sku"]: r["product_id"] for r in (res.data or [])}
+
+    # Маппинг sku -> product_id с батчингом
+    all_skus = [s.sku for s in snapshots]
+    sku_to_pid: dict[str, str] = {}
+    for i in range(0, len(all_skus), _PRODUCTS_IN_BATCH):
+        batch = all_skus[i:i + _PRODUCTS_IN_BATCH]
+        res = (
+            sb.table("products").select("product_id,sku").eq("seller_id", seller_id)
+            .in_("sku", batch).execute()
+        )
+        for r in (res.data or []):
+            sku_to_pid[r["sku"]] = r["product_id"]
+    return sku_to_pid
 
 
 def _persist_snapshots(seller_id, connection_id, source, snapshots):
@@ -103,34 +122,44 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
     sb = get_supabase()
     sku_to_pid = _ensure_products(sb, seller_id, snapshots)
 
-    # Тянем последний snapshot для каждого SKU (для дедупликации)
+    # Проверяем что маппинг полный
+    unmapped_count = sum(1 for s in snapshots if s.sku not in sku_to_pid)
+    if unmapped_count > 0:
+        logger.warning("snapshots with unmapped SKUs", extra={
+            "seller_id": seller_id, "unmapped": unmapped_count, "total": len(snapshots),
+        })
+
+    # Тянем последние snapshot'ы для каждого SKU (для дедупликации)
     pids = list(sku_to_pid.values())
     last_snapshots: dict[str, dict] = {}
     if pids:
-        # Тянем последний snapshot по каждому product_id
-        # Supabase не умеет DISTINCT ON через client API → берём все за последние 2 дня и группируем
-        from app.db import fetch_all
         from datetime import timedelta
         cutoff = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-        recent = fetch_all(
-            sb.table("inventory_snapshots")
-            .select("product_id,stock_quantity,price,snapshot_time")
-            .in_("product_id", pids)
-            .gte("snapshot_time", cutoff)
-            .order("snapshot_time", desc=True)
-        )
-        for row in recent:
-            pid = row["product_id"]
-            if pid not in last_snapshots:
-                last_snapshots[pid] = row
+        # Батчим запрос .in_(product_id) тоже — UUID 36 символов × 500 = 18KB > лимита.
+        # Безопасно: 200 UUID × 38 chars (с JSON escape) = ~7.6KB
+        IN_BATCH = 200
+        for i in range(0, len(pids), IN_BATCH):
+            batch_pids = pids[i:i + IN_BATCH]
+            recent = fetch_all(
+                sb.table("inventory_snapshots")
+                .select("product_id,stock_quantity,price,snapshot_time")
+                .in_("product_id", batch_pids)
+                .gte("snapshot_time", cutoff)
+                .order("snapshot_time", desc=True)
+            )
+            for row in recent:
+                pid = row["product_id"]
+                if pid not in last_snapshots:
+                    last_snapshots[pid] = row
 
     rows = []
     skipped_duplicates = 0
+    skipped_unmapped = 0
     for s in snapshots:
         pid = sku_to_pid.get(s.sku)
         if not pid:
+            skipped_unmapped += 1
             continue
-        # Дедупликация: сравниваем с последним snapshot
         last = last_snapshots.get(pid)
         if last is not None:
             last_stock = int(last.get("stock_quantity") or 0)
@@ -152,7 +181,7 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
     logger.info("snapshots persisted", extra={
         "seller_id": seller_id, "connection_id": connection_id,
         "inserted": len(rows), "skipped_duplicates": skipped_duplicates,
-        "total_skus": len(snapshots),
+        "skipped_unmapped": skipped_unmapped, "total_skus": len(snapshots),
     })
     return len(rows)
 
@@ -273,7 +302,6 @@ def ingest_feed(connection_id: str) -> dict:
 
 
 def _run_recalc_bg(seller_id: str) -> None:
-    """Background recalc — обновляет _running_recalcs[seller_id]['progress'] по ходу."""
     progress: dict = {
         "phase": "starting",
         "processed": 0,
