@@ -1,18 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 /**
  * POST /api/connections/[id]/upload-csv
  * multipart/form-data: file=<csv>
  *
  * Пробрасывает CSV в worker /ingest/csv?seller_id=...
+ *
+ * БАГ 38-41 fix: rate limit, лимит размера файла 20MB, timeout 120s, валидация ENV.
  */
+
+const MAX_FILE_SIZE = 20 * 1024 * 1024;  // 20MB
+const WORKER_TIMEOUT_MS = 120_000;
+
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const limited = enforceRateLimit(req, RATE_LIMITS.EXPENSIVE, user.id);
+  if (limited) return limited;
 
   const { data: conn } = await supabase
     .from("data_connections")
@@ -24,42 +34,85 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return NextResponse.json({ error: "Connection не подходит для CSV-загрузки" }, { status: 400 });
   }
 
-  const formData = await req.formData();
+  let formData: FormData;
+  try {
+    formData = await req.formData();
+  } catch {
+    return NextResponse.json({ error: "Невалидные multipart-данные" }, { status: 400 });
+  }
+
   const file = formData.get("file");
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Файл не получен" }, { status: 400 });
   }
+  if (file.size > MAX_FILE_SIZE) {
+    return NextResponse.json({
+      error: `Файл слишком большой (${(file.size / 1024 / 1024).toFixed(1)}MB > лимита ${MAX_FILE_SIZE / 1024 / 1024}MB)`
+    }, { status: 413 });
+  }
+  if (file.size === 0) {
+    return NextResponse.json({ error: "Файл пустой" }, { status: 400 });
+  }
 
-  const workerUrl = process.env.WORKER_URL!;
-  const workerSecret = process.env.WORKER_SECRET!;
+  const workerUrl = process.env.WORKER_URL;
+  const workerSecret = process.env.WORKER_SECRET;
+  if (!workerUrl || !workerSecret) {
+    return NextResponse.json({
+      error: "WORKER_URL/WORKER_SECRET не настроены"
+    }, { status: 500 });
+  }
 
   const workerForm = new FormData();
   workerForm.append("file", file);
 
-  const res = await fetch(
-    `${workerUrl}/ingest/csv?seller_id=${user.id}`,
-    {
-      method: "POST",
-      headers: { "X-Worker-Secret": workerSecret },
-      body: workerForm,
-    },
-  );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS);
+
+  let res: Response;
+  try {
+    res = await fetch(
+      `${workerUrl}/ingest/csv?seller_id=${user.id}`,
+      {
+        method: "POST",
+        headers: { "X-Worker-Secret": workerSecret },
+        body: workerForm,
+        signal: controller.signal,
+      },
+    );
+  } catch (e: any) {
+    clearTimeout(timeout);
+    if (e?.name === "AbortError") {
+      return NextResponse.json({
+        error: `Worker не ответил за ${WORKER_TIMEOUT_MS / 1000}с`
+      }, { status: 504 });
+    }
+    return NextResponse.json({
+      error: `Ошибка связи с worker: ${e?.message || String(e)}`
+    }, { status: 502 });
+  }
+  clearTimeout(timeout);
 
   if (!res.ok) {
     const text = await res.text();
     return NextResponse.json({ error: text }, { status: res.status });
   }
 
-  // После успешной загрузки — пометим коннекшн активным и пересчитаем
+  // После успешной загрузки — пометим коннекшн активным
   await supabase
     .from("data_connections")
     .update({ status: "active", last_sync_at: new Date().toISOString(), last_error: null })
     .eq("id", id);
 
-  await fetch(`${workerUrl}/jobs/recalc/${user.id}`, {
+  // Fire-and-forget пересчёт
+  const recalcController = new AbortController();
+  const recalcTimeout = setTimeout(() => recalcController.abort(), 5_000);
+  fetch(`${workerUrl}/jobs/recalc/${user.id}`, {
     method: "POST",
     headers: { "X-Worker-Secret": workerSecret },
-  }).catch(() => null);
+    signal: recalcController.signal,
+  })
+    .catch(() => null)
+    .finally(() => clearTimeout(recalcTimeout));
 
   return NextResponse.json(await res.json());
 }
