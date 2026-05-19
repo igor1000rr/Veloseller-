@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RecalcButton from "@/app/dashboard/RecalcButton";
 
@@ -10,15 +10,12 @@ vi.mock("next/navigation", () => ({
 }));
 
 beforeEach(() => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
   global.fetch = vi.fn();
   mockRefresh.mockClear();
 });
-afterEach(() => { vi.useRealTimers(); });
 
 /**
- * По умолчанию мокаем status=idle (первый fetch при mount).
- * Остальные fetch мокаются по каждому тесту индивидуально через mockImplementation.
+ * Моки ответов для /api/jobs/recalc/status и /api/jobs/recalc.
  */
 function mockStatusIdle() {
   return { ok: true, json: async () => ({ status: "idle", started_at: null, result: null, error: null }) };
@@ -37,7 +34,6 @@ describe("RecalcButton", () => {
   it("отображает исходный текст когда status=idle", async () => {
     (global.fetch as any).mockResolvedValue(mockStatusIdle());
     render(<RecalcButton />);
-    // До первого poll button виден с дефолтным текстом
     expect(screen.getByRole("button")).toHaveTextContent("Пересчитать сейчас");
   });
 
@@ -46,7 +42,7 @@ describe("RecalcButton", () => {
       if (url === "/api/jobs/recalc") return Promise.resolve(mockStartedAsync());
       return Promise.resolve(mockStatusIdle());
     });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup();
     render(<RecalcButton />);
     await user.click(screen.getByRole("button"));
     await waitFor(() => {
@@ -66,19 +62,10 @@ describe("RecalcButton", () => {
     });
   });
 
-  it("когда polling видит status=done — показывает «Готово: ...» и вызывает router.refresh", async () => {
-    // Первый poll = running, второй (через 8с) = done.
-    // Это показывает переход running→done, при котором триггерится router.refresh.
-    let callCount = 0;
-    (global.fetch as any).mockImplementation(() => {
-      callCount += 1;
-      return Promise.resolve(callCount === 1 ? mockStatusRunning() : mockStatusDone());
-    });
+  it("когда первый же polling возвращает status=done — показывает «Готово: ...» и вызывает router.refresh", async () => {
+    // Переход idle (начальный prev) → done срабатывает благодаря prev !== "done".
+    (global.fetch as any).mockResolvedValue(mockStatusDone());
     render(<RecalcButton />);
-    // Продвигаем таймер на 8с чтобы второй poll сработал
-    await act(async () => { await vi.advanceTimersByTimeAsync(8500); });
-    // Не проверяем промежуточный "Расчёт идёт" — фейк-таймеры могут пролететь
-    // сквозь него мгновенно. Проверяем важный конечный эффект: msg + router.refresh.
     await waitFor(() => {
       expect(screen.getByText(/Готово: 5 метрик, 2 алертов/)).toBeInTheDocument();
     });
@@ -92,7 +79,7 @@ describe("RecalcButton", () => {
       }
       return Promise.resolve(mockStatusIdle());
     });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup();
     render(<RecalcButton />);
     await user.click(screen.getByRole("button"));
     await waitFor(() => {
@@ -105,7 +92,7 @@ describe("RecalcButton", () => {
       if (url === "/api/jobs/recalc") return Promise.reject(new Error("Failed to fetch"));
       return Promise.resolve(mockStatusIdle());
     });
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup();
     render(<RecalcButton />);
     await user.click(screen.getByRole("button"));
     await waitFor(() => {

@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorModal } from "../_components/ErrorModal";
 import { parseApiError, type ParsedError } from "@/lib/error-parser";
@@ -12,9 +12,12 @@ export default function RecalcButton() {
   const [status, setStatus] = useState<RecalcStatus>("idle");
   const [msg, setMsg] = useState<string | null>(null);
   const [modalError, setModalError] = useState<ParsedError | null>(null);
+  // Предыдущий status храним в ref, чтобы useEffect не пересоздавался при каждом изменении status
+  // (иначе setInterval постоянно будет очищаться/пересоздаваться, растливая race condition)
+  const prevStatusRef = useRef<RecalcStatus>("idle");
 
-  // При монтировании и периодически опрашиваем статус — если расчёт идёт в фоне,
-  // покажем лабелу "Расчёт идёт…" даже если юзер его запустил в другой вкладке.
+  // Polling статуса — если recalc идёт в фоне (напр. запущен в другой вкладке),
+  // покажем лабель «Расчёт идёт…». При переходе в done — router.refresh и мессадж.
   useEffect(() => {
     let cancelled = false;
 
@@ -25,17 +28,18 @@ export default function RecalcButton() {
         const data = await res.json();
         if (cancelled) return;
 
-        const prevStatus = status;
+        const prev = prevStatusRef.current;
+        prevStatusRef.current = data.status;
         setStatus(data.status);
 
         if (data.status === "running") {
           setMsg("Расчёт идёт в фоне…");
-        } else if (data.status === "done" && prevStatus === "running") {
-          // Расчёт только что завершился — обновляем данные
+        } else if (data.status === "done" && prev !== "done") {
+          // Показываем итог и обновляем server components один раз при переходе → done.
           const r = data.result ?? {};
           setMsg(`Готово: ${r.metrics_written ?? 0} метрик, ${r.alerts_written ?? 0} алертов`);
           router.refresh();
-        } else if (data.status === "error" && prevStatus === "running") {
+        } else if (data.status === "error" && prev !== "error") {
           setModalError(parseApiError(data.error || "Расчёт упал", "Ошибка расчёта"));
         }
       } catch {
@@ -43,11 +47,12 @@ export default function RecalcButton() {
       }
     }
 
-    // Первый опрос сразу, потом каждые 8с
     pollStatus();
     const interval = setInterval(pollStatus, 8000);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [status, router]);
+  // Намеренно пустые deps: router стабилен, состояние через ref. eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function onClick() {
     setBusy(true);
@@ -66,6 +71,7 @@ export default function RecalcButton() {
       } else {
         setMsg(data.message ?? "Расчёт запущен");
       }
+      prevStatusRef.current = "running";
       setStatus("running");
     } catch (e: any) {
       setModalError(parseApiError(e?.message || "Network error", "Не удалось связаться с сервером"));
