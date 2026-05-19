@@ -9,10 +9,13 @@
 БАГ 5 (здесь): hysteresis в _write_alerts.
 БАГ 9 (здесь): median_30d_velocity отдельной колонкой, используется в SkuHealthInput.
 
-БАГ 10 (здесь, новый): pre-period дельты НОРМАЛИЗУЮТСЯ на количество дней
+БАГ 10 (здесь): pre-period дельты НОРМАЛИЗУЮТСЯ на количество дней
 между snapshot'ами. Раньше если между snapshot'ами было 5 дней пропуска,
 система видела stock 100→50 как «50 в день» вместо «10 в день × 5 дней» — это
 завышало median_30d_velocity в разы. Сейчас делим |delta| на days_gap.
+
+БАГ 11 (здесь): lost_revenue prices_during_stockout явно исключает MISSING_DATA
+дни (раньше работало по случаю через фильтр price > 0).
 
 underestimated_sku теперь требует ≥2 stockout_days (один случайный OOS не помечает).
 Прогресс: progress dict обновляется по ходу.
@@ -592,9 +595,13 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
         m = item["metric"]
         if m.adjusted_velocity <= 0 or m.stockout_days <= 0:
             continue
+        # БАГ 11 fix: явно исключаем MISSING_DATA дни (раньше срабатывал косвенно через price > 0,
+        # но это было хрупко — если бы price для MISSING_DATA когда-нибудь не был 0, баг бы вернулся).
         prices_during_stockout = [
             a.price for a in item.get("aggregates", [])
-            if not a.availability and a.price > 0
+            if not a.availability
+            and a.event_type != EventType.MISSING_DATA
+            and a.price > 0
         ]
         avg_price = average_stockout_price(prices_during_stockout, item["current_price"])
         lost_total += m.adjusted_velocity * m.stockout_days * avg_price
