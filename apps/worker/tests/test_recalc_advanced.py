@@ -21,6 +21,27 @@ def _snap(snapshot_id: str, snapshot_time: datetime, stock: int, price: float = 
     }
 
 
+def _setup_products_mock(m: MagicMock, products_data: list[dict]) -> None:
+    """Настроить mock для products таблицы, поддерживая И старую .execute() цепочку,
+    И новую .range().execute() цепочку (т.к. recalc.py теперь использует fetch_all)."""
+    response = MagicMock(data=products_data)
+    # Старая цепочка: .select().eq().execute()
+    m.select.return_value.eq.return_value.execute.return_value = response
+    # Новая цепочка: .select().eq().range().execute() — для fetch_all
+    m.select.return_value.eq.return_value.range.return_value.execute.return_value = response
+
+
+def _setup_snapshots_mock(m: MagicMock, snapshots_data: list[dict]) -> None:
+    """Аналогично для inventory_snapshots."""
+    response = MagicMock(data=snapshots_data)
+    # Старая: .select().eq().gte().lte().order().execute()
+    m.select.return_value.eq.return_value.gte.return_value.lte.return_value.order.return_value.execute.return_value = response
+    m.select.return_value.eq.return_value.gte.return_value.order.return_value.execute.return_value = response
+    # Новая с fetch_all: добавляем .range()
+    m.select.return_value.eq.return_value.gte.return_value.lte.return_value.order.return_value.range.return_value.execute.return_value = response
+    m.select.return_value.eq.return_value.gte.return_value.order.return_value.range.return_value.execute.return_value = response
+
+
 def test_build_aggregates_missing_data_for_no_snapshots():
     """Если за день не было snapshots — день получает event_type=MISSING_DATA."""
     tz = timezone.utc
@@ -125,11 +146,11 @@ def test_recalc_seller_writes_price_change_to_changelog():
         if name == "sellers":
             m.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"timezone": "UTC"}])
         elif name == "products":
-            m.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[
+            _setup_products_mock(m, [
                 {"product_id": pid, "sku": "A", "product_name": "A", "lead_time_days": None, "safety_days": None}
             ])
         elif name == "inventory_snapshots":
-            m.select.return_value.eq.return_value.gte.return_value.lte.return_value.order.return_value.execute.return_value = MagicMock(data=snapshots)
+            _setup_snapshots_mock(m, snapshots)
         elif name == "inventory_events":
             m.delete.return_value.eq.return_value.gte.return_value.lte.return_value.execute.return_value = MagicMock()
             m.insert.return_value.execute.return_value = MagicMock()
@@ -138,10 +159,13 @@ def test_recalc_seller_writes_price_change_to_changelog():
         elif name == "store_metrics":
             m.upsert.return_value.execute.return_value = MagicMock()
         elif name == "alerts":
-            m.delete.return_value.eq.return_value.execute.return_value = MagicMock()
+            # Дедупликация: select.eq().eq().eq().is_().limit().execute() + insert/update
+            m.select.return_value.eq.return_value.eq.return_value.eq.return_value.is_.return_value.limit.return_value.execute.return_value = MagicMock(data=[])
+            m.select.return_value.eq.return_value.eq.return_value.is_.return_value.execute.return_value = MagicMock(data=[])
+            m.update.return_value.eq.return_value.execute.return_value = MagicMock()
             m.insert.return_value.execute.return_value = MagicMock()
         elif name == "changelog":
-            m.delete.return_value.eq.return_value.gte.return_value.execute.return_value = MagicMock()
+            m.delete.return_value.eq.return_value.gte.return_value.lte.return_value.execute.return_value = MagicMock()
             m.insert.return_value.execute.return_value = MagicMock()
         elif name == "price_elasticity":
             m.upsert.return_value.execute.return_value = MagicMock()
@@ -153,7 +177,8 @@ def test_recalc_seller_writes_price_change_to_changelog():
     with patch("app.jobs.recalc.get_supabase", return_value=mock_sb):
         result = recalc_seller(seller_id, period_days=16)
 
-    assert result.get("changelog_written", 0) > 0 or True  # smoke test
+    # smoke: проверяем что не упало и что-то записалось
+    assert result["products"] >= 1
 
 
 def test_recalc_seller_no_snapshots_skips_product():
@@ -165,11 +190,11 @@ def test_recalc_seller_no_snapshots_skips_product():
         if name == "sellers":
             m.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"timezone": "UTC"}])
         elif name == "products":
-            m.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[
+            _setup_products_mock(m, [
                 {"product_id": "22222222-2222-2222-2222-222222222222", "sku": "A", "product_name": "A", "lead_time_days": None, "safety_days": None}
             ])
         elif name == "inventory_snapshots":
-            m.select.return_value.eq.return_value.gte.return_value.lte.return_value.order.return_value.execute.return_value = MagicMock(data=[])
+            _setup_snapshots_mock(m, [])  # пустые snapshots
         elif name == "store_metrics":
             m.upsert.return_value.execute.return_value = MagicMock()
         elif name == "alerts":
@@ -193,7 +218,7 @@ def test_recalc_seller_no_products():
         if name == "sellers":
             m.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"timezone": "UTC"}])
         elif name == "products":
-            m.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[])
+            _setup_products_mock(m, [])  # пустой список
         elif name == "store_metrics":
             m.upsert.return_value.execute.return_value = MagicMock()
         return m
