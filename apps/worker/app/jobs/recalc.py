@@ -2,9 +2,15 @@
 
 Запускается из FastAPI endpoints (/jobs/recalc/{seller_id}) и APScheduler.
 
-Прогресс: все entry-points принимают опциональный dict `progress`. По ходу обработки
-код пишет в него `phase` / `processed` / `total` / `period_days`. Endpoint
-/jobs/recalc/{seller_id}/status его возвращает. UI опрашивает и показывает прогресс-бар.
+Аудит точности:
+БАГ 1 (в pipeline.py): MISSING_DATA больше не stockout.
+БАГ 2 (здесь): предварительно вычисляем sales-like deltas из pre-period (30 дней до period_start)
+  и передаём в compute_metrics_for_sku как history_for_median. Раньше медиана была из
+  текущего периода (цикличная зависимость), что давало нестабильные результаты для 7-day periods.
+БАГ 4 (в pipeline.py): confidence штрафует за < 7 sales_like дней.
+БАГ 5 (здесь): hysteresis в _write_alerts — алерты не закрываются сразу при переходе через
+  порог, предотвращая мигание при колебаниях cov=6.9/7.1.
+Прогресс: progress dict обновляется по ходу, status endpoint возвращает для прогресс-бара в UI.
 """
 from __future__ import annotations
 
@@ -21,6 +27,10 @@ from app.engine.alerts import (
     dead_inventory_alert,
     low_stock_alert,
     repeated_stockout_alert,
+    should_keep_critical_active,
+    should_keep_dead_active,
+    should_keep_low_stock_active,
+    should_keep_repeated_stockout_active,
 )
 from app.engine.events import classify_event
 from app.engine.health import is_underestimated_sku
@@ -75,10 +85,55 @@ def _confidence_impact(et: EventType) -> float:
 
 
 def _bump_progress(progress: Optional[dict], **fields) -> None:
-    """Безопасно обновляет progress dict, если он передан."""
     if progress is None:
         return
     progress.update(fields)
+
+
+def _extract_pre_period_sales_deltas(
+    snapshots_rows: list[dict],
+    period_start: date,
+    seller_tz: pytz.tzinfo.BaseTzInfo,
+) -> list[float]:
+    """Из snapshots до period_start извлекает abs дельты sales_like-дней для медианы.
+
+    Логика упрощённая версия build_daily_aggregates: для каждого дня берём last
+    snapshot, считаем delta=stock-prev_stock. Дельта < 0 без аномалии = sales_like.
+
+    Аномалию тут не детектим (всё-равно без предыдущей истории невозможно) — выбрасываем
+    только видимые выбросы (>5x медианы когда медиана вычисляется постпоп вперед).
+
+    Результат — список |delta| для передачи в compute_metrics_for_sku.history_for_median.
+    """
+    by_day: dict[date, dict] = {}
+    for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
+        ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
+        local_day = ts.astimezone(seller_tz).date()
+        if local_day < period_start:
+            by_day[local_day] = row
+
+    if not by_day:
+        return []
+
+    sorted_days = sorted(by_day.keys())
+    deltas: list[float] = []
+    prev_stock: Optional[int] = None
+    for day in sorted_days:
+        stock = int(by_day[day]["stock_quantity"])
+        if prev_stock is not None:
+            d = stock - prev_stock
+            # sales_like: отрицательный и разумный по амплитуде
+            if d < 0:
+                deltas.append(float(abs(d)))
+        prev_stock = stock
+
+    # Фильтр выбросов: если deltas есть, убираем все > 5× median (эвристика anomaly).
+    if len(deltas) >= 3:
+        med = _median(deltas)
+        if med > 0:
+            deltas = [d for d in deltas if d <= 5 * med]
+
+    return deltas
 
 
 # ============================================================================
@@ -91,16 +146,39 @@ def build_daily_aggregates(
     period_end: date,
     seller_tz: pytz.tzinfo.BaseTzInfo,
 ) -> tuple[list[DailyAggregate], list[dict]]:
+    """Строит daily aggregates ТОЛЬКО за период [period_start, period_end].
+
+    snapshots_rows может содержать больше данных (pre-period для медианы) — их используем
+    только для prev_stock в первый день периода (чтобы первый день не был FIRST_SNAPSHOT, а сразу
+    классифицировался как sales/replenishment/no_change).
+    """
     by_day: dict[date, dict] = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
         local_day = ts.astimezone(seller_tz).date()
         by_day[local_day] = row
 
+    # Последний pre-period snapshot — служит prev_stock для period_start (БАГ 3 частично fix:
+    # первый день периода теперь не FIRST_SNAPSHOT, а нормальный день с дельтой).
+    pre_period_days = sorted([d for d in by_day if d < period_start])
     abs_deltas_history: list[int] = []
     prev_stock: Optional[int] = None
     prev_snapshot_id: Optional[str] = None
     prev_exists = False
+    if pre_period_days:
+        last_pre = pre_period_days[-1]
+        prev_stock = int(by_day[last_pre]["stock_quantity"])
+        prev_snapshot_id = by_day[last_pre].get("snapshot_id")
+        prev_exists = True
+        # Сейдим историю дельт из pre-period для anomaly detection с первого дня периода
+        prev_for_seed: Optional[int] = None
+        for d in pre_period_days:
+            s = int(by_day[d]["stock_quantity"])
+            if prev_for_seed is not None:
+                delta = s - prev_for_seed
+                if delta < 0:
+                    abs_deltas_history.append(abs(delta))
+            prev_for_seed = s
 
     aggregates: list[DailyAggregate] = []
     event_rows: list[dict] = []
@@ -242,7 +320,27 @@ def _upsert_or_skip_alert(sb, seller_id: str, product_id: str, kind: str, messag
     return True
 
 
+# Hysteresis-проверки для каждого типа алерта: стоит ли держать активным уже существующий алерт.
+# Используется в _write_alerts для auto-resolve с hysteresis.
+_HYSTERESIS_KEEP_CHECKS = {
+    "low_stock":         lambda m: should_keep_low_stock_active(m.coverage_days),
+    "critical_stock":    lambda m: should_keep_critical_active(m.coverage_days),
+    "dead_inventory":    lambda m: should_keep_dead_active(m.coverage_days),
+    "repeated_stockout": lambda m: should_keep_repeated_stockout_active(m.stockout_days),
+}
+
+
 def _write_alerts(sb, seller_id: str, product_id: str, m: TVeloMetric, underestimated: bool) -> int:
+    """Создаёт/обновляет алерты с hysteresis-защитой от флаппинга.
+
+    Логика:
+    1. Собираем список алертов по «open thresholds» (жёсткие пороги из спеки).
+    2. Для существующих активных алертов:
+         - Если он в desired (порог открытия всё ещё сработал) → обновляем message/payload
+         - Если не в desired НО «keep» (значение всё ещё в hysteresis-зоне) → ОСТАВЛЯЕМ активным
+         - Если не в desired И не «keep» → auto-resolve (закрываем)
+    3. Для новых desired алертов — создаём или обновляем.
+    """
     cov = m.coverage_days
     desired_alerts: list[tuple[str, str]] = []
     if critical_stock_alert(cov):
@@ -259,14 +357,22 @@ def _write_alerts(sb, seller_id: str, product_id: str, m: TVeloMetric, underesti
     desired_kinds = {k for k, _ in desired_alerts}
     payload = {"coverage_days": cov, "stockout_days": m.stockout_days}
 
+    # Auto-resolve с hysteresis: закрываем только если «keep»-проверка тоже провалилась.
     existing_active = sb.table("alerts").select("id,kind").eq(
         "seller_id", seller_id
     ).eq("product_id", product_id).is_("acknowledged_at", "null").execute()
     for row in (existing_active.data or []):
-        if row["kind"] not in desired_kinds:
-            sb.table("alerts").update({
-                "acknowledged_at": datetime.now(timezone.utc).isoformat(),
-            }).eq("id", row["id"]).execute()
+        kind = row["kind"]
+        if kind in desired_kinds:
+            continue  # будет обновлён ниже в _upsert_or_skip_alert
+        # Проверяем нужно ли «держать» алерт в hysteresis-зоне
+        keep_fn = _HYSTERESIS_KEEP_CHECKS.get(kind)
+        if keep_fn is not None and keep_fn(m):
+            continue  # НЕ закрываем — в hysteresis-зоне
+        # underestimated_sku и прочие типы без hysteresis — закрываем сразу
+        sb.table("alerts").update({
+            "acknowledged_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", row["id"]).execute()
 
     new_count = 0
     for kind, msg in desired_alerts:
@@ -280,14 +386,6 @@ def _write_alerts(sb, seller_id: str, product_id: str, m: TVeloMetric, underesti
 # ============================================================================
 
 def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict] = None) -> dict:
-    """Полный пересчёт метрик селлера.
-
-    progress (optional): dict который функция обновляет по ходу. Поля:
-      phase: 'loading_products' | 'processing_skus' | 'writing_metrics' | 'writing_alerts' | 'writing_store' | 'done'
-      period_days: int
-      processed: int  (текущее число обработанных SKU в этом этапе)
-      total: int      (общее число SKU)
-    """
     sb = get_supabase()
     period_end = date.today()
     period_start = period_end - timedelta(days=period_days - 1)
@@ -313,7 +411,6 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
     sku_data: list[dict] = []
     velocities_for_median: list[float] = []
 
-    # 1-й проход
     for idx, p in enumerate(products):
         pid = p["product_id"]
         history_start = (period_start - timedelta(days=30)).isoformat()
@@ -324,22 +421,28 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
             .gte("snapshot_time", history_start)
             .order("snapshot_time")
         )
-        # Обновляем прогресс каждые 20 SKU (или на последнем), чтобы не спамить dict
         if (idx + 1) % 20 == 0 or idx == total_skus - 1:
             _bump_progress(progress, processed=idx + 1)
         if not rows:
             continue
 
+        # БАГ 2 fix: вычисляем pre-period sales deltas для медианы ($estimated_continuity$).
+        # Раньше медиана бралась из текущего периода — циклично и нестабильно.
+        pre_period_history = _extract_pre_period_sales_deltas(rows, period_start, seller_tz)
+
         aggregates, event_rows = build_daily_aggregates(rows, period_start, period_end, seller_tz)
         current_stock = int(rows[-1]["stock_quantity"])
         current_price = float(rows[-1]["price"])
 
+        # Если pre-period пуст — передаём None, fallback на текущий период.
+        history_arg = pre_period_history if pre_period_history else None
         metric = compute_metrics_for_sku(
             product_id=pid,
             period_start=period_start,
             period_end=period_end,
             daily_aggregates=aggregates,
             current_stock=current_stock,
+            history_for_median=history_arg,
         )
 
         events_written += _write_inventory_events(sb, pid, event_rows, period_start, period_end)
@@ -405,7 +508,6 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
 
     median_store_velocity = _median(velocities_for_median) if velocities_for_median else 0.0
 
-    # 2-й проход: tvelo_metrics + alerts
     _bump_progress(progress, phase="writing_metrics", processed=0, total=len(sku_data))
     for idx, item in enumerate(sku_data):
         pid = item["pid"]
@@ -438,7 +540,6 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
         if (idx + 1) % 20 == 0 or idx == len(sku_data) - 1:
             _bump_progress(progress, processed=idx + 1)
 
-    # 3-й проход: store_metrics
     _bump_progress(progress, phase="writing_store")
     store_written = _write_store_metrics(sb, seller_id, sku_data, period_start, period_end)
 
@@ -522,10 +623,6 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
 
 
 def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -> dict:
-    """Пересчёт по всем периодам: 7, 30, 90 дней.
-
-    Передаёт progress в recalc_seller. Обновляет current_period_index / total_periods.
-    """
     result = {"products": 0, "metrics_written": 0, "alerts_written": 0,
               "store_metrics_written": 0, "events_written": 0, "changelog_written": 0,
               "periods": []}
