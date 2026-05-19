@@ -5,6 +5,9 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 /**
  * POST /api/jobs/recalc
  * Ручной запуск пересчёта метрик для текущего селлера.
+ *
+ * Worker запускает recalc в background, сразу возвращает status.
+ * UI поллит /api/jobs/recalc/status чтобы отображать прогресс.
  */
 export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
@@ -22,6 +25,8 @@ export async function POST(req: NextRequest) {
     const res = await fetch(`${workerUrl}/jobs/recalc/${user.id}`, {
       method: "POST",
       headers: { "X-Worker-Secret": workerSecret },
+      // Worker возвращает ответ мгновенно (BackgroundTasks), но на всякий случай ограничиваем
+      signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) {
       const body = await res.text();
