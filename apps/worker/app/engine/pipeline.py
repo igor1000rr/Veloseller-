@@ -11,9 +11,12 @@
 
 БАГ 4 исправлен: confidence теперь штрафует за малое количество sales_like дней (< 7).
 
-БАГ 2 исправлен частично: добавлен правильный prefer-historical-median через опциональный
+БАГ 2 исправлен: добавлен правильный prefer-historical-median через опциональный
 параметр history_for_median. Если вызывающий (recalc.py) передаёт 30-day pre-period sales,
 эта история используется. Иначе fallback на текущий период.
+
+БАГ 9 исправлен: TVeloMetric теперь возвращает median_30d_velocity отдельным полем.
+Раньше в store-level demand_weight подставлялся adjusted_velocity как proxy.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -99,6 +102,7 @@ def compute_metrics_for_sku(
         period_end=period_end,
         confirmed_velocity=round(conf_vel, 4),
         adjusted_velocity=round(adj_vel, 4),
+        median_30d_velocity=round(median_30d_vel, 4),
         confidence_score=confidence.final,
         confidence_breakdown=confidence,
         stockout_days=stockout_days,
