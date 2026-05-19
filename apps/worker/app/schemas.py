@@ -76,6 +76,11 @@ class TVeloMetric(BaseModel):
     period_end: date
     confirmed_velocity: float
     adjusted_velocity: float
+    # БАГ 9 fix: настоящая медиана из 30-day pre-period (Rule 5.2). Раньше в
+    # store-level demand_weight подставлялся adjusted_velocity как proxy, что
+    # занижало demand для SKU с adj=0 но историей продаж (dead inventory с историей).
+    # Optional для бэк-совместимости со старыми кодом и записями.
+    median_30d_velocity: float = 0.0
     confidence_score: float
     confidence_breakdown: Optional[ConfidenceBreakdown] = None
     stockout_days: int
