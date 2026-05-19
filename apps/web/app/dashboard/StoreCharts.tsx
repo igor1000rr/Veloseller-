@@ -27,6 +27,23 @@ const SEGMENT_LABELS: Record<string, string> = {
   insufficient_data: "Мало данных",
 };
 
+const CURRENCY_SYMBOLS: Record<string, string> = {
+  RUB: "₽", USD: "$", EUR: "€", BYN: "Br", KZT: "₸", UAH: "₴",
+};
+
+/** Компактное форматирование больших чисел: 1500000 → 1.5M. Для осей графиков. */
+function compactMoney(value: number, symbol: string = "₽"): string {
+  if (!isFinite(value)) return "—";
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M ${symbol}`;
+  if (abs >= 1_000) return `${(value / 1_000).toFixed(0)}K ${symbol}`;
+  return `${Math.round(value)} ${symbol}`;
+}
+
+function fullMoney(value: number, symbol: string = "₽"): string {
+  return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)} ${symbol}`;
+}
+
 export function HealthTrend({ history }: { history: HistoryPoint[] }) {
   const data = history.slice().reverse().map(p => ({
     date: new Date(p.period_end).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }),
@@ -43,17 +60,18 @@ export function HealthTrend({ history }: { history: HistoryPoint[] }) {
         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
         <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
         <YAxis domain={[0, 100]} stroke="#64748b" fontSize={12} />
-        <Tooltip />
+        <Tooltip formatter={(v: number) => [`${v?.toFixed(1) ?? "—"}/100`, "Health"]} />
         <Line type="monotone" dataKey="score" stroke="#0f766e" strokeWidth={2} dot={{ r: 3 }} name="Health" />
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
-export function LostRevenueTrend({ history }: { history: HistoryPoint[] }) {
+export function LostRevenueTrend({ history, currency = "RUB" }: { history: HistoryPoint[]; currency?: string }) {
+  const symbol = CURRENCY_SYMBOLS[currency] ?? currency;
   const data = history.slice().reverse().map(p => ({
     date: new Date(p.period_end).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }),
-    lost: p.lost_revenue ?? 0,
+    lost: Number(p.lost_revenue ?? 0),
   }));
 
   if (data.length < 2) {
@@ -65,8 +83,8 @@ export function LostRevenueTrend({ history }: { history: HistoryPoint[] }) {
       <LineChart data={data}>
         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
         <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
-        <YAxis stroke="#64748b" fontSize={12} />
-        <Tooltip />
+        <YAxis stroke="#64748b" fontSize={12} tickFormatter={(v) => compactMoney(v, symbol)} width={70} />
+        <Tooltip formatter={(v: number) => [fullMoney(v, symbol), "Lost revenue"]} />
         <Line type="monotone" dataKey="lost" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} name="Lost revenue" />
       </LineChart>
     </ResponsiveContainer>
@@ -94,7 +112,7 @@ export function SegmentPie({ distribution }: { distribution: Record<string, numb
             <Cell key={idx} fill={SEGMENT_COLORS[entry.name] ?? "#cbd5e1"} />
           ))}
         </Pie>
-        <Tooltip formatter={(v: number, _n, props: any) => [v, SEGMENT_LABELS[props.payload.name] ?? props.payload.name]} />
+        <Tooltip formatter={(v: number, _n, props: any) => [`${v} SKU`, SEGMENT_LABELS[props.payload.name] ?? props.payload.name]} />
         <Legend formatter={(value) => SEGMENT_LABELS[value as string] ?? value} />
       </PieChart>
     </ResponsiveContainer>
@@ -102,7 +120,8 @@ export function SegmentPie({ distribution }: { distribution: Record<string, numb
 }
 
 
-export function DeadInventoryChart({ history }: { history: any[] }) {
+export function DeadInventoryChart({ history, currency = "RUB" }: { history: any[]; currency?: string }) {
+  const symbol = CURRENCY_SYMBOLS[currency] ?? currency;
   const data = history.slice().reverse().map(p => ({
     date: new Date(p.period_end).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }),
     skus: p.dead_inventory_sku_count ?? 0,
@@ -115,11 +134,18 @@ export function DeadInventoryChart({ history }: { history: any[] }) {
         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
         <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
         <YAxis yAxisId="skus" stroke="#7c7c7c" fontSize={12} />
-        <YAxis yAxisId="money" orientation="right" stroke="#dc2626" fontSize={12} />
-        <Tooltip />
+        <YAxis yAxisId="money" orientation="right" stroke="#dc2626" fontSize={12} tickFormatter={(v) => compactMoney(v, symbol)} width={70} />
+        <Tooltip
+          formatter={(v: number, name: string) => {
+            if (name === "money" || (typeof name === "string" && name.startsWith("Заморожено"))) {
+              return [fullMoney(v, symbol), `Заморожено, ${symbol}`];
+            }
+            return [`${v} SKU`, "SKU неликвида"];
+          }}
+        />
         <Legend wrapperStyle={{ fontSize: 12 }} />
         <Bar yAxisId="skus" dataKey="skus" fill="#94a3b8" name="SKU неликвида" radius={[4,4,0,0]} />
-        <Line yAxisId="money" type="monotone" dataKey="money" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} name="Заморожено, ₽" />
+        <Line yAxisId="money" type="monotone" dataKey="money" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} name={`Заморожено, ${symbol}`} />
       </ComposedChart>
     </ResponsiveContainer>
   );
