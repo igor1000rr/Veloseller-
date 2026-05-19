@@ -1,9 +1,14 @@
 """Отправка email-уведомлений через Resend.
 
 Если RESEND_API_KEY не задан — функции no-op (логируют и возвращают False).
+
+БАГ 20 fix: все user-provided строки (sku, message, seller_name) экранируются
+через html.escape перед вставкой в HTML. Раньше SKU вида '<img src=x onerror=...>'
+вставился бы как живой HTML в email клиенту получателя.
 """
 from __future__ import annotations
 
+import html
 import logging
 import os
 from typing import Optional
@@ -39,14 +44,19 @@ def send_alert_digest(to_email: str, seller_name: Optional[str], alerts: list[di
             "dead_inventory": "⚫ Неликвид",
             "repeated_stockout": "🟠 Регулярный OOS",
             "underestimated_sku": "🟣 Недооценён",
-        }.get(a.get("kind", ""), a.get("kind", ""))
+        }.get(a.get("kind", ""), html.escape(a.get("kind", "")))
         sku = (a.get("products") or {}).get("sku", "—") if isinstance(a.get("products"), dict) else "—"
+        # БАГ 20: html.escape() для всех пользовательских данных
+        sku_safe = html.escape(str(sku))
+        message_safe = html.escape(str(a.get("message", "")))
         rows.append(f"<tr><td style='padding:6px 12px;border-bottom:1px solid #e2e8f0'>{kind_label}</td>"
-                    f"<td style='padding:6px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace'>{sku}</td>"
-                    f"<td style='padding:6px 12px;border-bottom:1px solid #e2e8f0'>{a.get('message','')}</td></tr>")
+                    f"<td style='padding:6px 12px;border-bottom:1px solid #e2e8f0;font-family:monospace'>{sku_safe}</td>"
+                    f"<td style='padding:6px 12px;border-bottom:1px solid #e2e8f0'>{message_safe}</td></tr>")
 
-    greeting = f"Привет{', ' + seller_name if seller_name else ''}!"
-    html = f"""<!DOCTYPE html><html><body style="font-family:-apple-system,sans-serif;color:#0f172a;max-width:680px;margin:0 auto;padding:24px">
+    # БАГ 20: seller_name тоже экранируем
+    safe_name = html.escape(seller_name) if seller_name else ""
+    greeting = f"Привет{', ' + safe_name if safe_name else ''}!"
+    html_body = f"""<!DOCTYPE html><html><body style="font-family:-apple-system,sans-serif;color:#0f172a;max-width:680px;margin:0 auto;padding:24px">
 <h2 style="color:#0f766e;margin:0 0 16px">Veloseller — дневной digest</h2>
 <p>{greeting}</p>
 <p>За последние 24 часа появились {len(alerts)} новых уведомлений:</p>
@@ -62,7 +72,7 @@ def send_alert_digest(to_email: str, seller_name: Optional[str], alerts: list[di
             "from": from_email,
             "to": [to_email],
             "subject": f"Veloseller: {len(alerts)} новых уведомлений",
-            "html": html,
+            "html": html_body,
         })
         return True
     except Exception as e:
