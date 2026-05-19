@@ -2,6 +2,10 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import AppHeader from "../_components/AppHeader";
 
+// Свежие данные на каждый запрос
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
   .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 

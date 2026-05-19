@@ -1,41 +1,44 @@
 "use client";
-
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Icons } from "../_components/Icons";
 
 export default function RecalcButton() {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  async function handle() {
+  async function onClick() {
     setBusy(true);
-    setMsg(null);
+    setError(null);
     try {
       const res = await fetch("/api/jobs/recalc", { method: "POST" });
-      const data = await res.json();
       if (!res.ok) {
-        setMsg(`Ошибка: ${data.error ?? res.statusText}`);
-      } else {
-        setMsg(`Готово: ${data.metrics_written} метрик, ${data.alerts_written} алертов`);
-        router.refresh();
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? `Ошибка: ${res.status}`);
+        return;
       }
+      // Форсим перезапрос всех server components — свежие метрики в dashboard сразу
+      router.refresh();
     } catch (e: any) {
-      setMsg(`Ошибка: ${e.message}`);
+      setError(e?.message || "Network error");
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   return (
-    <div className="flex items-center gap-3">
+    <div className="flex items-center gap-2">
       <button
-        onClick={handle}
+        onClick={onClick}
         disabled={busy}
-        className="rounded-lg bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white text-sm font-medium px-4 py-2"
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-line bg-paper hover:bg-bg-soft text-ink-soft text-sm font-mono uppercase tracking-wider disabled:opacity-50 transition"
+        title="Пересчитать метрики и алерты"
       >
-        {busy ? "Считаем…" : "Пересчитать сейчас"}
+        <Icons.Refresh size={12} className={busy ? "animate-spin" : ""} />
+        <span>{busy ? "Считаю…" : "Пересчёт"}</span>
       </button>
-      {msg && <span className="text-sm text-slate-600">{msg}</span>}
+      {error && <span className="text-xs text-rose font-mono">{error}</span>}
     </div>
   );
 }
