@@ -4,13 +4,18 @@
 
 Аудит точности:
 БАГ 1 (в pipeline.py): MISSING_DATA больше не stockout.
-БАГ 2 (здесь): предварительно вычисляем sales-like deltas из pre-period (30 дней до period_start)
-  и передаём в compute_metrics_for_sku как history_for_median.
+БАГ 2 (здесь): pre-period sales-like deltas передаются как history_for_median.
 БАГ 4 (в pipeline.py): confidence штрафует за < 7 sales_like дней.
-БАГ 5 (здесь): hysteresis в _write_alerts — алерты не закрываются сразу при переходе через порог.
-БАГ 9 (здесь): median_30d_velocity записывается отдельной колонкой в tvelo_metrics и используется
-  в SkuHealthInput для правильного demand_weight (был adjusted_velocity как proxy).
-Прогресс: progress dict обновляется по ходу, status endpoint возвращает для прогресс-бара в UI.
+БАГ 5 (здесь): hysteresis в _write_alerts.
+БАГ 9 (здесь): median_30d_velocity отдельной колонкой, используется в SkuHealthInput.
+
+БАГ 10 (здесь, новый): pre-period дельты НОРМАЛИЗУЮТСЯ на количество дней
+между snapshot'ами. Раньше если между snapshot'ами было 5 дней пропуска,
+система видела stock 100→50 как «50 в день» вместо «10 в день × 5 дней» — это
+завышало median_30d_velocity в разы. Сейчас делим |delta| на days_gap.
+
+underestimated_sku теперь требует ≥2 stockout_days (один случайный OOS не помечает).
+Прогресс: progress dict обновляется по ходу.
 """
 from __future__ import annotations
 
@@ -95,10 +100,11 @@ def _extract_pre_period_sales_deltas(
     period_start: date,
     seller_tz: pytz.tzinfo.BaseTzInfo,
 ) -> list[float]:
-    """Из snapshots до period_start извлекает abs дельты sales_like-дней для медианы.
+    """Из snapshots до period_start извлекает НОРМАЛИЗОВАННЫЕ по дням sales_like-дельты.
 
-    Логика: для каждого дня берём last snapshot, считаем delta=stock-prev_stock.
-    Дельта < 0 без аномалии = sales_like. Фильтр выбросов >5× медианы.
+    БАГ 10 fix: раньше функция брала last-snapshot-per-day и считала |stock - prev_stock|.
+    Если между snapshot'ами было 5 дней пропуска, дельта -50 записывалась как 50 в день
+    (вместо 10 в день × 5 дней). Сейчас делим |delta| на (день_текущий - день_предыдущий).
     """
     by_day: dict[date, dict] = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
@@ -112,15 +118,21 @@ def _extract_pre_period_sales_deltas(
 
     sorted_days = sorted(by_day.keys())
     deltas: list[float] = []
+    prev_day: Optional[date] = None
     prev_stock: Optional[int] = None
     for day in sorted_days:
         stock = int(by_day[day]["stock_quantity"])
-        if prev_stock is not None:
+        if prev_stock is not None and prev_day is not None:
             d = stock - prev_stock
             if d < 0:
-                deltas.append(float(abs(d)))
+                days_gap = max(1, (day - prev_day).days)
+                # Нормализуем: если между snapshot'ами 5 дней — делим дельту на 5
+                per_day_delta = abs(d) / days_gap
+                deltas.append(float(per_day_delta))
         prev_stock = stock
+        prev_day = day
 
+    # Фильтр выбросов: >5× median выкидываем как аномалии.
     if len(deltas) >= 3:
         med = _median(deltas)
         if med > 0:
@@ -141,8 +153,11 @@ def build_daily_aggregates(
 ) -> tuple[list[DailyAggregate], list[dict]]:
     """Строит daily aggregates ТОЛЬКО за период [period_start, period_end].
 
-    snapshots_rows может содержать больше данных (pre-period для медианы) — их используем
+    snapshots_rows может содержать больше данных (pre-period для медианы). Их используем
     для prev_stock в первый день периода и для seed anomaly history.
+
+    БАГ 10 fix: seed anomaly history тоже нормализуется на days_gap, иначе аномалии
+    некорректно детектились в начале периода (median выходил завышенным).
     """
     by_day: dict[date, dict] = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
@@ -160,14 +175,19 @@ def build_daily_aggregates(
         prev_stock = int(by_day[last_pre]["stock_quantity"])
         prev_snapshot_id = by_day[last_pre].get("snapshot_id")
         prev_exists = True
+        # Seed anomaly history с нормализацией по дням
         prev_for_seed: Optional[int] = None
+        prev_day_for_seed: Optional[date] = None
         for d in pre_period_days:
             s = int(by_day[d]["stock_quantity"])
-            if prev_for_seed is not None:
+            if prev_for_seed is not None and prev_day_for_seed is not None:
                 delta = s - prev_for_seed
                 if delta < 0:
-                    abs_deltas_history.append(abs(delta))
+                    days_gap = max(1, (d - prev_day_for_seed).days)
+                    per_day = max(1, int(round(abs(delta) / days_gap)))
+                    abs_deltas_history.append(per_day)
             prev_for_seed = s
+            prev_day_for_seed = d
 
     aggregates: list[DailyAggregate] = []
     event_rows: list[dict] = []
@@ -474,9 +494,10 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
     for idx, item in enumerate(sku_data):
         pid = item["pid"]
         m: TVeloMetric = item["metric"]
-        # Новый underestimated_sku: требует мин. 7 sales_like дней (не только confidence >= 70).
-        # Это предотвращает false-positive на SKU с 5-6 днями данных и одним stockout.
-        sales_like_days_count = (
+        # underestimated_sku: требует (а) базовые условия (stockout>0, vel>median, conf>=70),
+        # (б) ≥7 sales_like дней (low_history=0), (в) ≥2 stockout_days (один случайный
+        # OOS не достаточен для «хронической недооценки»).
+        has_enough_history = (
             m.confidence_breakdown.low_history == 0.0
             if m.confidence_breakdown else True
         )
@@ -487,7 +508,8 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
                 median_store_velocity=median_store_velocity,
                 confidence_score=m.confidence_score,
             )
-            and sales_like_days_count  # Не помечаем при нехватке истории
+            and has_enough_history
+            and m.stockout_days >= 2
         )
         sb.table("tvelo_metrics").upsert({
             "product_id": pid,
@@ -528,7 +550,7 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
 def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start: date, period_end: date) -> int:
     if not sku_data:
         return 0
-    # БАГ 9 fix: используем реальный median_30d_velocity из metric, не adjusted_velocity как proxy.
+    # БАГ 9 fix: используем реальный median_30d_velocity из metric.
     sku_health_inputs = [
         SkuHealthInput(
             product_id=item["pid"],
