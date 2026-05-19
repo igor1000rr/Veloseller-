@@ -2,11 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { batchedIn } from "@/lib/supabase/batched";
 
 /**
  * GDPR Article 20 — Data portability.
  *
  * Экспортирует все данные пользователя в JSON. Запускается из /account по кнопке.
+ *
+ * БАГ 15 fix: .in("product_id", productIds) теперь батчится — при >200 SKU
+ * URL раньше обрезался по лимиту PostgREST ~8KB, экспорт получал неполный набор.
  */
 export async function GET(req: NextRequest) {
   const sb = await createSupabaseServerClient();
@@ -27,15 +31,18 @@ export async function GET(req: NextRequest) {
 
   const [seller, snapshots, events, metrics, storeMetrics, alerts, changelog, elasticity, connections] = await Promise.all([
     admin.from("sellers").select("*").eq("id", sellerId).maybeSingle(),
-    productIds.length
-      ? admin.from("inventory_snapshots").select("*").in("product_id", productIds)
-      : Promise.resolve({ data: [] }),
-    productIds.length
-      ? admin.from("inventory_events").select("*").in("product_id", productIds)
-      : Promise.resolve({ data: [] }),
-    productIds.length
-      ? admin.from("tvelo_metrics").select("*").in("product_id", productIds)
-      : Promise.resolve({ data: [] }),
+    batchedIn(
+      (batch) => admin.from("inventory_snapshots").select("*").in("product_id", batch),
+      productIds,
+    ),
+    batchedIn(
+      (batch) => admin.from("inventory_events").select("*").in("product_id", batch),
+      productIds,
+    ),
+    batchedIn(
+      (batch) => admin.from("tvelo_metrics").select("*").in("product_id", batch),
+      productIds,
+    ),
     admin.from("store_metrics").select("*").eq("seller_id", sellerId),
     admin.from("alerts").select("*").eq("seller_id", sellerId),
     admin.from("changelog").select("*").eq("seller_id", sellerId),
@@ -53,9 +60,9 @@ export async function GET(req: NextRequest) {
     },
     seller_profile: seller.data || null,
     products: productsRes.data || [],
-    inventory_snapshots: snapshots.data || [],
-    inventory_events: events.data || [],
-    tvelo_metrics: metrics.data || [],
+    inventory_snapshots: snapshots,
+    inventory_events: events,
+    tvelo_metrics: metrics,
     store_metrics: storeMetrics.data || [],
     alerts: alerts.data || [],
     changelog: changelog.data || [],
