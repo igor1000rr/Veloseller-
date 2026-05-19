@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,8 @@ export const dynamic = "force-dynamic";
  * Включает: TVelo, confirmed/adjusted/median, OOS дни, покрытие, confidence
  * с разбивкой (initial/repl/anom/missing/low_history/final), health, segment,
  * underestimated flag, ориентировочный lost_revenue.
+ *
+ * Добавлен rate limit (EXPENSIVE — экспорт тянет много данных).
  */
 export async function GET(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
@@ -20,12 +23,13 @@ export async function GET(req: NextRequest) {
     return new Response("Unauthorized", { status: 401 });
   }
 
+  const limited = enforceRateLimit(req, RATE_LIMITS.EXPENSIVE, user.id);
+  if (limited) return limited;
+
   const url = new URL(req.url);
   const periodParam = url.searchParams.get("period") ?? "30";
   const periodDays = ["7", "30", "90"].includes(periodParam) ? parseInt(periodParam) : 30;
 
-  // Тянем продукты + метрики с пагинацией fetch_all-стилем
-  // Supabase лимит 1000 строк — пагинируем явно
   const PAGE = 1000;
   const allRows: any[] = [];
   let from = 0;
@@ -56,30 +60,15 @@ export async function GET(req: NextRequest) {
     from += PAGE;
   }
 
-  // Заголовки CSV — все важные для аудита поля
   const headers = [
-    "sku",
-    "product_name",
-    "period_days",
-    "period_start",
-    "period_end",
-    "current_stock",
-    "current_price",
-    "confirmed_velocity",
-    "adjusted_velocity",
-    "median_30d_velocity",
-    "in_stock_days",
-    "stockout_days",
-    "coverage_days",
-    "inventory_segment",
-    "sku_health_score",
-    "underestimated_sku",
-    "confidence_final",
-    "confidence_initial",
-    "confidence_replenishment",
-    "confidence_anomaly",
-    "confidence_missing",
-    "confidence_low_history",
+    "sku", "product_name", "period_days", "period_start", "period_end",
+    "current_stock", "current_price",
+    "confirmed_velocity", "adjusted_velocity", "median_30d_velocity",
+    "in_stock_days", "stockout_days", "coverage_days",
+    "inventory_segment", "sku_health_score", "underestimated_sku",
+    "confidence_final", "confidence_initial",
+    "confidence_replenishment", "confidence_anomaly",
+    "confidence_missing", "confidence_low_history",
     "lost_revenue_estimate",
   ];
 
@@ -93,7 +82,6 @@ export async function GET(req: NextRequest) {
   const lines: string[] = [headers.join(",")];
 
   for (const p of allRows) {
-    // Выбираем метрику нужного периода (если их несколько)
     const metrics = (p.tvelo_metrics as any[] | undefined) ?? [];
     const matched = metrics.find((m: any) => {
       const len = Math.round((new Date(m.period_end).getTime() - new Date(m.period_start).getTime()) / 86400_000);
@@ -101,7 +89,6 @@ export async function GET(req: NextRequest) {
     }) ?? metrics[0];
 
     if (!matched) {
-      // SKU без метрик — пустая строка с базовыми полями
       lines.push([
         csvEscape(p.sku), csvEscape(p.product_name),
         periodDays, "", "", "", "", "", "", "", "", "", "", "", "", "",
@@ -119,28 +106,16 @@ export async function GET(req: NextRequest) {
       : 0;
 
     lines.push([
-      csvEscape(p.sku),
-      csvEscape(p.product_name),
-      periodDays,
-      matched.period_start,
-      matched.period_end,
-      matched.current_stock,
-      currentPrice,
-      matched.confirmed_velocity,
-      matched.adjusted_velocity,
-      matched.median_30d_velocity ?? "",
-      matched.in_stock_days,
-      matched.stockout_days,
-      matched.coverage_days ?? "",
-      matched.inventory_segment ?? "",
-      matched.sku_health_score ?? "",
+      csvEscape(p.sku), csvEscape(p.product_name),
+      periodDays, matched.period_start, matched.period_end,
+      matched.current_stock, currentPrice,
+      matched.confirmed_velocity, matched.adjusted_velocity, matched.median_30d_velocity ?? "",
+      matched.in_stock_days, matched.stockout_days, matched.coverage_days ?? "",
+      matched.inventory_segment ?? "", matched.sku_health_score ?? "",
       matched.underestimated_sku ? "1" : "0",
       matched.confidence_score,
-      cb.initial ?? "",
-      cb.replenishment_like ?? "",
-      cb.anomaly_like ?? "",
-      cb.missing_data ?? "",
-      cb.low_history ?? "",
+      cb.initial ?? "", cb.replenishment_like ?? "", cb.anomaly_like ?? "",
+      cb.missing_data ?? "", cb.low_history ?? "",
       lostRevenue,
     ].join(","));
   }
