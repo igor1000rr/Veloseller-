@@ -33,7 +33,7 @@ export default async function SkusPage({ searchParams }: {
     .select(`
       product_id, sku, product_name,
       tvelo_metrics (
-        confirmed_velocity, adjusted_velocity, confidence_score,
+        confirmed_velocity, adjusted_velocity, median_30d_velocity, confidence_score,
         stockout_days, in_stock_days, coverage_days, current_stock,
         current_price, inventory_segment, sku_health_score, underestimated_sku,
         period_start, period_end
@@ -81,6 +81,14 @@ export default async function SkusPage({ searchParams }: {
           <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">SKU</h1>
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          <a
+            href={`/api/export/metrics?period=${periodDays}`}
+            download
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-line rounded-lg text-ink-muted hover:text-ink hover:bg-bg-soft transition"
+            title="Скачать все метрики в CSV для проверки"
+          >
+            <Icons.ArrowRight size={11} /> CSV ({periodDays}д)
+          </a>
           <form className="flex items-center gap-2 text-sm">
             <label className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Закупка на</label>
             <input
@@ -118,11 +126,11 @@ export default async function SkusPage({ searchParams }: {
         <table className="min-w-full text-sm">
           <thead className="bg-bg-soft border-b border-line">
             <tr>
-              {["SKU", "Название", "Остаток", "Цена", "TVelo", "Тренд", "Покрытие", "OOS", `Закупка (${reorderDays}д)`, "Conf", "Health", "Сегмент"].map((h, i) => (
+              {["SKU", "Название", "Остаток", "Цена", "TVelo", "Медиана", "Тренд", "Покрытие", "OOS", `Закупка (${reorderDays}д)`, "Conf", "Health", "Сегмент"].map((h, i) => (
                 <th
                   key={i}
                   className={`px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold ${
-                    [2, 3, 4, 6, 7, 8, 9, 10].includes(i) ? "text-right" : i === 5 ? "text-center" : "text-left"
+                    [2, 3, 4, 5, 7, 8, 9, 10, 11].includes(i) ? "text-right" : i === 6 ? "text-center" : "text-left"
                   }`}
                 >
                   {h}
@@ -134,6 +142,7 @@ export default async function SkusPage({ searchParams }: {
             {filtered.map((p: any) => {
               const m = (p.tvelo_metrics?.[0] ?? null) as any;
               const adjVel = m?.adjusted_velocity != null ? Number(m.adjusted_velocity) : 0;
+              const medVel = m?.median_30d_velocity != null ? Number(m.median_30d_velocity) : 0;
               const reorderQty = Math.round(adjVel * reorderDays);
               const isUnderestimated = m?.underestimated_sku;
               return (
@@ -154,9 +163,12 @@ export default async function SkusPage({ searchParams }: {
                   <td className="px-4 py-3 text-right font-semibold tabular text-ink">
                     {adjVel > 0 ? adjVel.toFixed(2) : "—"}
                   </td>
+                  <td className="px-4 py-3 text-right tabular text-ink-hush" title="Медиана из 30-day pre-period — используется для continuity correction">
+                    {medVel > 0 ? medVel.toFixed(2) : "—"}
+                  </td>
                   <td className="px-4 py-3"><VelocitySparkline points={sparkData[p.product_id] ?? []} /></td>
                   <td className="px-4 py-3 text-right tabular text-ink-soft">
-                    {m?.coverage_days != null ? `${Number(m.coverage_days).toFixed(0)} д.` : "—"}
+                    {m?.coverage_days != null ? `${Number(m.coverage_days).toFixed(0)} д.` : "—"}
                   </td>
                   <td className="px-4 py-3 text-right tabular">
                     {m?.stockout_days != null ? (
@@ -180,7 +192,7 @@ export default async function SkusPage({ searchParams }: {
             })}
             {!filtered.length && (
               <tr>
-                <td colSpan={12} className="px-4 py-12 text-center text-ink-muted text-sm">
+                <td colSpan={13} className="px-4 py-12 text-center text-ink-muted text-sm">
                   Пока нет данных или ничего не подходит под фильтр.
                 </td>
               </tr>
