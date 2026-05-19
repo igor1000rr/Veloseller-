@@ -236,30 +236,86 @@ def _write_changelog(sb, seller_id: str, product_id: str, aggregates: list[Daily
     return len(rows)
 
 
-def _write_alerts(sb, seller_id: str, product_id: str, m: TVeloMetric, underestimated: bool) -> int:
-    """Создаёт alert-записи по Rule 10.x. Дубликаты не предотвращаем — UI сам фильтрует unread."""
-    cov = m.coverage_days
-    new_alerts: list[tuple[str, str]] = []
-    if critical_stock_alert(cov):
-        new_alerts.append(("critical_stock", f"Coverage {cov:.1f} дн — критически мало"))
-    elif low_stock_alert(cov):
-        new_alerts.append(("low_stock", f"Coverage {cov:.1f} дн — мало"))
-    if dead_inventory_alert(cov):
-        new_alerts.append(("dead_inventory", f"Coverage {cov:.0f} дн — заморожен"))
-    if repeated_stockout_alert(m.stockout_days):
-        new_alerts.append(("repeated_stockout", f"{m.stockout_days} дней OOS за период"))
-    if underestimated:
-        new_alerts.append(("underestimated_sku", "Скорость SKU выше медианы при out-of-stock — недополучаете выручку"))
+def _upsert_or_skip_alert(
+    sb, seller_id: str, product_id: str, kind: str, message: str, payload: dict
+) -> bool:
+    """Создаёт alert если такого активного ещё нет.
 
-    for kind, msg in new_alerts:
-        sb.table("alerts").insert({
-            "seller_id": seller_id,
-            "product_id": product_id,
-            "kind": kind,
-            "message": msg,
-            "payload": {"coverage_days": cov, "stockout_days": m.stockout_days},
-        }).execute()
-    return len(new_alerts)
+    Защита от дубликатов через партиальный UNIQUE-индекс alerts_unique_unread
+    на (seller_id, product_id, kind) WHERE acknowledged_at IS NULL.
+
+    Если активный alert уже есть — обновляет message+payload (могут измениться
+    числа: coverage_days/stockout_days), но не плодит запись.
+
+    Возвращает True если создан НОВЫЙ alert (для счётчика alerts_written),
+    False если только обновлены данные существующего.
+    """
+    # Проверяем есть ли активный того же типа
+    existing = sb.table("alerts").select("id").eq("seller_id", seller_id).eq(
+        "product_id", product_id
+    ).eq("kind", kind).is_("acknowledged_at", "null").limit(1).execute()
+
+    if existing.data:
+        # Обновляем сообщение и payload (числа могли измениться)
+        sb.table("alerts").update({
+            "message": message,
+            "payload": payload,
+        }).eq("id", existing.data[0]["id"]).execute()
+        return False
+
+    # Создаём новый
+    sb.table("alerts").insert({
+        "seller_id": seller_id,
+        "product_id": product_id,
+        "kind": kind,
+        "message": message,
+        "payload": payload,
+    }).execute()
+    return True
+
+
+def _write_alerts(sb, seller_id: str, product_id: str, m: TVeloMetric, underestimated: bool) -> int:
+    """Создаёт alert-записи по Rule 10.x — с дедупликацией.
+
+    Если активный alert (acknowledged_at IS NULL) того же (seller, product, kind)
+    уже есть, не плодим, а только обновляем message/payload.
+
+    Также автоматически "решает" (acknowledged_at = now) старые активные алерты,
+    которые теперь не сработали (условие больше не выполняется) — чтобы inbox
+    не оставался забит устаревшими алертами.
+    """
+    cov = m.coverage_days
+    desired_alerts: list[tuple[str, str]] = []  # (kind, message)
+    if critical_stock_alert(cov):
+        desired_alerts.append(("critical_stock", f"Coverage {cov:.1f} дн — критически мало"))
+    elif low_stock_alert(cov):
+        desired_alerts.append(("low_stock", f"Coverage {cov:.1f} дн — мало"))
+    if dead_inventory_alert(cov):
+        desired_alerts.append(("dead_inventory", f"Coverage {cov:.0f} дн — заморожен"))
+    if repeated_stockout_alert(m.stockout_days):
+        desired_alerts.append(("repeated_stockout", f"{m.stockout_days} дней OOS за период"))
+    if underestimated:
+        desired_alerts.append(("underestimated_sku", "Скорость SKU выше медианы при out-of-stock — недополучаете выручку"))
+
+    desired_kinds = {k for k, _ in desired_alerts}
+    payload = {"coverage_days": cov, "stockout_days": m.stockout_days}
+
+    # Auto-resolve: алерты на этот SKU, которые ВЫ ОТКЛЮЧИЛИСЬ (условие пропало)
+    # — закрываем как auto-acknowledged.
+    existing_active = sb.table("alerts").select("id,kind").eq(
+        "seller_id", seller_id
+    ).eq("product_id", product_id).is_("acknowledged_at", "null").execute()
+    for row in (existing_active.data or []):
+        if row["kind"] not in desired_kinds:
+            sb.table("alerts").update({
+                "acknowledged_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", row["id"]).execute()
+
+    new_count = 0
+    for kind, msg in desired_alerts:
+        if _upsert_or_skip_alert(sb, seller_id, product_id, kind, msg, payload):
+            new_count += 1
+    return new_count
 
 
 # ============================================================================
