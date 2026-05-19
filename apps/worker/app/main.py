@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
@@ -51,6 +52,9 @@ if _sentry_dsn:
 
 _running_recalcs: dict[str, dict] = {}
 
+# БАГ 52: UUID regex для валидации seller_id из Telegram /start payload.
+_UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -96,7 +100,6 @@ def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict
     rows = [{"seller_id": seller_id, "sku": s.sku, "product_name": s.product_name or s.sku} for s in snapshots]
     sb.table("products").upsert(rows, on_conflict="seller_id,sku").execute()
 
-    # Маппинг sku -> product_id с батчингом
     all_skus = [s.sku for s in snapshots]
     sku_to_pid: dict[str, str] = {}
     for i in range(0, len(all_skus), _PRODUCTS_IN_BATCH):
@@ -111,32 +114,23 @@ def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict
 
 
 def _persist_snapshots(seller_id, connection_id, source, snapshots):
-    """Сохраняет snapshot'ы с дедупликацией: если stock+price совпадают с последним
-    snapshot'ом SKU — не создаём новую запись.
-
-    Дедупликация снижает количество мусорных snapshot'ов на 99% (когда sync запускается
-    несколько раз в день, а stock товаров обычно не меняется между синками).
-    """
+    """Сохраняет snapshot'ы с дедупликацией."""
     if not snapshots:
         return 0
     sb = get_supabase()
     sku_to_pid = _ensure_products(sb, seller_id, snapshots)
 
-    # Проверяем что маппинг полный
     unmapped_count = sum(1 for s in snapshots if s.sku not in sku_to_pid)
     if unmapped_count > 0:
         logger.warning("snapshots with unmapped SKUs", extra={
             "seller_id": seller_id, "unmapped": unmapped_count, "total": len(snapshots),
         })
 
-    # Тянем последние snapshot'ы для каждого SKU (для дедупликации)
     pids = list(sku_to_pid.values())
     last_snapshots: dict[str, dict] = {}
     if pids:
         from datetime import timedelta
         cutoff = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
-        # Батчим запрос .in_(product_id) тоже — UUID 36 символов × 500 = 18KB > лимита.
-        # Безопасно: 200 UUID × 38 chars (с JSON escape) = ~7.6KB
         IN_BATCH = 200
         for i in range(0, len(pids), IN_BATCH):
             batch_pids = pids[i:i + IN_BATCH]
@@ -377,8 +371,38 @@ def job_recalc_all() -> dict:
 
 
 @app.post("/telegram/webhook")
-async def telegram_webhook(request: Request) -> dict:
+async def telegram_webhook(
+    request: Request,
+    x_telegram_bot_api_secret_token: Optional[str] = Header(None),
+) -> dict:
+    """Telegram webhook handler.
+
+    БАГ 52 fix (КРИТИЧНО): проверяем X-Telegram-Bot-Api-Secret-Token header.
+    Раньше любой мог послать POST с /start <victim_seller_id> и привязать свой chat_id
+    к чужому аккаунту, получая все уведомления жертвы.
+
+    Telegram отправляет этот header, если webhook был зарегистрирован с secret_token:
+      curl -X POST https://api.telegram.org/bot<TOKEN>/setWebhook \
+        -d url=https://veloseller.ru/api/telegram/webhook \
+        -d secret_token=<RANDOM_32_CHARS>
+
+    Также добавлена UUID-валидация seller_id чтобы не делать DB-запросы с мусором.
+    """
     from app.telegram import send_message
+
+    # БАГ 52 fix: верификация что запрос реально от Telegram.
+    expected_secret = _os.environ.get("TELEGRAM_WEBHOOK_SECRET")
+    if expected_secret:
+        if x_telegram_bot_api_secret_token != expected_secret:
+            logger.warning("telegram webhook: invalid or missing secret token", extra={
+                "got_header": bool(x_telegram_bot_api_secret_token),
+            })
+            raise HTTPException(403, "Forbidden")
+    # Если secret не задан — пропускаем (dev режим), но логируем предупреждение
+    elif _os.environ.get("ENV", "development") == "production":
+        logger.error("telegram webhook: TELEGRAM_WEBHOOK_SECRET not set in production")
+        raise HTTPException(500, "Server misconfigured")
+
     try:
         update = await request.json()
     except Exception:
@@ -393,19 +417,25 @@ async def telegram_webhook(request: Request) -> dict:
         parts = text.split(maxsplit=1)
         if len(parts) == 2 and parts[1]:
             seller_id = parts[1].strip()
-            try:
-                sb = get_supabase()
-                res = sb.table("sellers").update({
-                    "telegram_chat_id": chat_id,
-                    "notify_telegram": True,
-                }).eq("id", seller_id).execute()
-                if res.data:
-                    send_message(chat_id,
-                        "✅ <b>Telegram подключён!</b>\n\nТеперь вы будете получать ежедневный digest по важным уведомлениям.")
-                    logger.info("telegram linked", extra={"seller_id": seller_id, "chat_id": chat_id})
-                    return {"ok": True, "linked": True}
-            except Exception:
-                logger.exception("telegram linking failed", extra={"chat_id": chat_id})
+            # БАГ 52: валидация UUID — не делаем DB-запросы с произвольным мусором
+            if not _UUID_RE.match(seller_id):
+                logger.warning("telegram /start with invalid seller_id format", extra={
+                    "chat_id": chat_id,
+                })
+            else:
+                try:
+                    sb = get_supabase()
+                    res = sb.table("sellers").update({
+                        "telegram_chat_id": chat_id,
+                        "notify_telegram": True,
+                    }).eq("id", seller_id).execute()
+                    if res.data:
+                        send_message(chat_id,
+                            "✅ <b>Telegram подключён!</b>\n\nТеперь вы будете получать ежедневный digest по важным уведомлениям.")
+                        logger.info("telegram linked", extra={"seller_id": seller_id, "chat_id": chat_id})
+                        return {"ok": True, "linked": True}
+                except Exception:
+                    logger.exception("telegram linking failed", extra={"chat_id": chat_id})
         send_message(chat_id,
             "Привет! Я бот <b>Veloseller</b>. Чтобы подключить уведомления, откройте Veloseller и нажмите кнопку «Подключить Telegram» в настройках.")
         return {"ok": True, "linked": False}
