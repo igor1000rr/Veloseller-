@@ -4,15 +4,28 @@
   1. /v3/product/list — все product_id (без stocks/цен)
   2. /v4/product/info/stocks — остатки (filter+cursor пагинация)
   3. /v5/product/info/prices — цены (тоже filter+cursor)
+
+БАГ 18 fix: добавили MAX_PAGES защиту от бесконечной пагинации (если Ozon API
+возвращает повторяющийся cursor с непустым items).
+
+БАГ 20 fix: для prices ловим более широкий Exception — раньше httpx.HTTPStatusError
+не покрывал timeout/network errors, sync падал на проблемах с prices API.
 """
 from __future__ import annotations
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 import httpx
 from app.schemas import SnapshotInput
 from app.sources._http import with_retry
 
+logger = logging.getLogger("veloseller.ozon")
+
 BASE = "https://api-seller.ozon.ru"
+
+# Защита от бесконечной пагинации. При 1000 items/page это >2M SKU — заведомо больше
+# чем когда-либо у одного селлера. Если такое случится — что-то не так с API.
+MAX_PAGES_PER_BATCH = 50
 
 
 def _headers(client_id: str, api_key: str) -> dict[str, str]:
@@ -39,12 +52,15 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
         # ====================================================================
         product_ids: list[str] = []
         last_id = ""
-        while True:
-            def _list_call():
+        pages = 0
+        while pages < MAX_PAGES_PER_BATCH:
+            pages += 1
+
+            def _list_call(lid=last_id):
                 resp = cli.post(
                     f"{BASE}/v3/product/list",
                     headers=_headers(client_id, api_key),
-                    json={"filter": {"visibility": "ALL"}, "last_id": last_id, "limit": page_size},
+                    json={"filter": {"visibility": "ALL"}, "last_id": lid, "limit": page_size},
                 )
                 resp.raise_for_status()
                 return resp.json()
@@ -54,9 +70,14 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
             if not items:
                 break
             product_ids.extend(str(i["product_id"]) for i in items)
-            last_id = data.get("last_id") or ""
-            if not last_id or len(items) < page_size:
+            new_last_id = data.get("last_id") or ""
+            # Защита от зацикливания: если last_id не изменился, выходим
+            if not new_last_id or new_last_id == last_id or len(items) < page_size:
                 break
+            last_id = new_last_id
+
+        if pages >= MAX_PAGES_PER_BATCH:
+            logger.warning("ozon /v3/product/list hit MAX_PAGES_PER_BATCH=%d", MAX_PAGES_PER_BATCH)
 
         if not product_ids:
             return []
@@ -64,14 +85,15 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
         # ====================================================================
         # 2. Остатки через /v4/product/info/stocks
         # ====================================================================
-        # API ожидает body = { filter: { product_id: [...], visibility }, cursor, limit }
-        stocks_by_pid: dict[str, dict] = {}  # product_id -> {offer_id, name, qty}
+        stocks_by_pid: dict[str, dict] = {}
 
         for i in range(0, len(product_ids), 1000):
             batch = product_ids[i : i + 1000]
             cursor = ""
+            pages = 0
+            while pages < MAX_PAGES_PER_BATCH:
+                pages += 1
 
-            while True:
                 def _stocks_call(b=batch, c=cursor):
                     resp = cli.post(
                         f"{BASE}/v4/product/info/stocks",
@@ -102,9 +124,14 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
                         "name": item.get("name"),
                         "qty": qty,
                     }
-                cursor = data.get("cursor") or ""
-                if not cursor or not items:
+                new_cursor = data.get("cursor") or ""
+                # Защита от зацикливания: cursor не должен повторяться
+                if not new_cursor or new_cursor == cursor or not items:
                     break
+                cursor = new_cursor
+
+            if pages >= MAX_PAGES_PER_BATCH:
+                logger.warning("ozon /v4/product/info/stocks hit MAX_PAGES_PER_BATCH=%d for batch %d", MAX_PAGES_PER_BATCH, i)
 
         # ====================================================================
         # 3. Цены через /v5/product/info/prices
@@ -114,8 +141,10 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
         for i in range(0, len(product_ids), 1000):
             batch = product_ids[i : i + 1000]
             cursor = ""
+            pages = 0
+            while pages < MAX_PAGES_PER_BATCH:
+                pages += 1
 
-            while True:
                 def _prices_call(b=batch, c=cursor):
                     resp = cli.post(
                         f"{BASE}/v5/product/info/prices",
@@ -131,8 +160,9 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
 
                 try:
                     data = with_retry(_prices_call)
-                except httpx.HTTPStatusError:
-                    # Цены не критичны для метрик stock-based; fallback на 0
+                except Exception as e:
+                    # Цены не критичны для stock-based метрик; fallback на 0 для всех SKU в батче
+                    logger.warning("ozon prices fetch failed for batch %d: %s", i, e)
                     data = {"items": [], "cursor": ""}
                 items = data.get("items", [])
                 for item in items:
@@ -140,12 +170,12 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
                     if not pid:
                         continue
                     price_info = item.get("price") or {}
-                    # marketing_price > price > min_price
                     raw = price_info.get("marketing_price") or price_info.get("price") or price_info.get("min_price") or "0"
                     prices_by_pid[pid] = _decimal(raw)
-                cursor = data.get("cursor") or ""
-                if not cursor or not items:
+                new_cursor = data.get("cursor") or ""
+                if not new_cursor or new_cursor == cursor or not items:
                     break
+                cursor = new_cursor
 
         # ====================================================================
         # 4. Собираем SnapshotInput
@@ -159,5 +189,8 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
                 price=prices_by_pid.get(pid, Decimal("0")),
                 snapshot_time=now,
             ))
+
+        logger.info("ozon fetch done: product_ids=%d, stocks=%d, prices=%d, snapshots=%d",
+                    len(product_ids), len(stocks_by_pid), len(prices_by_pid), len(out))
 
     return out
