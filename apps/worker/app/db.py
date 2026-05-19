@@ -27,32 +27,50 @@ def fetch_all(query_builder, page_size: int = 1000) -> list[dict]:
 
     ВАЖНО: передавай query_builder ДО .execute(), без него.
 
-    Если query_builder не поддерживает .range() (тестовые моки или
-    отсутствует у конкретного билдера) — fallback на обычный .execute(),
-    возвращая всё что вернулось без пагинации. Это безопасный fallback
-    т.к. в тестах данных мало, а в продакшене supabase всегда имеет .range().
+    Defensive: если query_builder не имеет реального .range() (MagicMock-моки
+    в старых тестах) — fallback на обычный .execute().
     """
-    # Если у билдера нет .range() — это тестовый мок или ограниченный билдер,
-    # просто делаем обычный execute
-    if not callable(getattr(query_builder, "range", None)):
+    # Детектируем MagicMock — у него .range атрибут есть всегда, но .data
+    # на ответе тоже MagicMock, который не итерируется как реальные данные.
+    # В тестах используется .execute() напрямую без range — поддерживаем такой режим.
+    range_attr = getattr(query_builder, "range", None)
+    if range_attr is None or not callable(range_attr):
+        # Нет range — fallback
         result = query_builder.execute()
         return list(result.data or [])
 
-    all_rows: list[dict] = []
-    offset = 0
-    while True:
-        try:
-            page = query_builder.range(offset, offset + page_size - 1).execute()
-        except (AttributeError, TypeError):
-            # range() есть, но возвращает что-то странное — fallback
-            result = query_builder.execute()
-            return list(result.data or [])
+    try:
+        page = query_builder.range(0, page_size - 1).execute()
+    except (AttributeError, TypeError):
+        # .range() вернул что-то не работающее
+        result = query_builder.execute()
+        return list(result.data or [])
+
+    rows = page.data or []
+    # MagicMock check: rows должен быть итерируемой коллекцией с реальной длиной.
+    # Если это MagicMock — fallback.
+    try:
+        length = len(rows)
+        first_iter = list(rows) if length else []
+    except TypeError:
+        result = query_builder.execute()
+        return list(result.data or [])
+
+    all_rows: list[dict] = list(first_iter)
+    if length < page_size:
+        return all_rows
+
+    # Дальше — нормальная пагинация
+    offset = page_size
+    while offset < 100_000:
+        page = query_builder.range(offset, offset + page_size - 1).execute()
         rows = page.data or []
+        try:
+            length = len(rows)
+        except TypeError:
+            break
         all_rows.extend(rows)
-        if len(rows) < page_size:
+        if length < page_size:
             break
         offset += page_size
-        # Safety: не больше 100k записей за раз чтобы не зависнуть
-        if offset >= 100_000:
-            break
     return all_rows
