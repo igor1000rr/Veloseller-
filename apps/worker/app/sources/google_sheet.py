@@ -5,6 +5,9 @@ Service Account JSON путь — settings.google_application_credentials.
 
 БАГ 62 fix: per-row error handling + дедупликация SKU + лимит строк.
 БАГ 64 fix: явная ошибка если credentials path не задан.
+БАГ 26 fix: пустой лист → возвращаем [] вместо ValueError. Раньше при загрузке
+пустого Google Sheet падало с "Из 0 строк ни одна не прошла валидацию", что лишает
+смысла — пустой лист это нормальное состояние, не ошибка.
 """
 from __future__ import annotations
 import logging
@@ -41,6 +44,11 @@ def fetch_snapshots(sheet_url_or_id: str, worksheet_index: int = 0) -> list[Snap
         sh = gc.open_by_key(sheet_url_or_id)
     ws = sh.get_worksheet(worksheet_index)
     rows = ws.get_all_records()
+
+    # БАГ 26: пустой лист — нормальное состояние, не ошибка
+    if not rows:
+        logger.info("Google Sheet is empty — returning []")
+        return []
 
     if len(rows) > MAX_ROWS:
         raise ValueError(f"Лист содержит более {MAX_ROWS} строк — слишком большой")
