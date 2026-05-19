@@ -6,15 +6,6 @@ Ozon: docs.ozon.ru/api/seller/
   - /v5/product/info/prices — цены (filter+cursor body)
 
 Wildberries: openapi.wildberries.ru/statistics/api/ru/ (supplier/stocks)
-
-Покрываем:
-  - базовый ответ → правильный SnapshotInput
-  - пагинация Ozon через last_id
-  - правильный body для stocks endpoint (regression)
-  - present-reserved для Ozon
-  - цены из /v5/product/info/prices
-  - пустые ответы
-  - WB: группировка по supplierArticle (суммируются остатки по разным складам)
 """
 from __future__ import annotations
 from decimal import Decimal
@@ -80,10 +71,8 @@ class TestOzon:
 
         assert len(snaps) == 2
         by_sku = {s.sku: s for s in snaps}
-        # present - reserved с двух складов: (50-5) + (20-0) = 65
         assert by_sku["SKU-A"].stock_quantity == 65
         assert by_sku["SKU-A"].product_name == "Item A"
-        # marketing_price имеет приоритет над price
         assert by_sku["SKU-A"].price == Decimal("1490.00")
         assert by_sku["SKU-B"].stock_quantity == 8
         assert by_sku["SKU-B"].price == Decimal("300.50")
@@ -98,12 +87,10 @@ class TestOzon:
         with patch.object(ozon.httpx, "Client", return_value=cli):
             ozon.fetch_snapshots("cid", "key")
 
-        # Проверяем body второго вызова — это stocks
         stocks_call = cli.post.call_args_list[1]
         url = stocks_call[0][0]
         body = stocks_call[1]["json"]
         assert "/v4/product/info/stocks" in url
-        # Правильный формат: filter wraps product_id
         assert "filter" in body, f"body должно содержать filter, получено: {body}"
         assert "product_id" in body["filter"]
         assert body["filter"]["product_id"] == ["1"]
@@ -121,7 +108,6 @@ class TestOzon:
         with patch.object(ozon.httpx, "Client", return_value=cli):
             ozon.fetch_snapshots("cid", "key")
 
-        # Проверяем body третьего вызова — prices
         prices_call = cli.post.call_args_list[2]
         url = prices_call[0][0]
         body = prices_call[1]["json"]
@@ -139,8 +125,6 @@ class TestOzon:
         ], "cursor": ""}
         prices = {"items": [], "cursor": ""}
 
-        # page_size=1 → первая страница вернёт ровно page_size элементов, идём дальше;
-        # вторая получит 1 item (<page_size) → break
         cli = _mock_client([_ozon_resp(page1), _ozon_resp(page2), _ozon_resp(stocks), _ozon_resp(prices)])
         with patch.object(ozon.httpx, "Client", return_value=cli):
             snaps = ozon.fetch_snapshots("cid", "key", page_size=1)
@@ -154,11 +138,9 @@ class TestOzon:
             {"product_id": 1, "offer_id": "A"},
             {"product_id": 2, "offer_id": "B"},
         ], "last_id": ""}}
-        # Первая страница stocks возвращает 1 item + cursor
         stocks_page1 = {"items": [
             {"product_id": 1, "offer_id": "A", "stocks": [{"present": 5, "reserved": 0}]},
         ], "cursor": "next-page"}
-        # Вторая страница — оставшийся item, cursor пустой
         stocks_page2 = {"items": [
             {"product_id": 2, "offer_id": "B", "stocks": [{"present": 3, "reserved": 0}]},
         ], "cursor": ""}
@@ -179,7 +161,6 @@ class TestOzon:
             snaps = ozon.fetch_snapshots("cid", "key")
 
         assert snaps == []
-        # вызвали только /v3/product/list, не stocks и не prices
         assert cli.post.call_count == 1
 
     def test_negative_qty_clamped_to_zero(self):
@@ -222,13 +203,14 @@ class TestOzon:
         )
 
         cli = _mock_client([_ozon_resp(list_resp), _ozon_resp(stocks_resp), prices_error])
-        with patch.object(ozon.httpx, "Client", return_value=cli):
+        # Отключаем retry чтобы prices_error выкинулся сразу (не 4 раза подряд)
+        with patch.object(ozon.httpx, "Client", return_value=cli), \
+             patch.object(ozon, "with_retry", side_effect=lambda fn, **kw: fn()):
             snaps = ozon.fetch_snapshots("cid", "key")
 
         assert len(snaps) == 1
         assert snaps[0].sku == "X"
         assert snaps[0].stock_quantity == 5
-        # Цены endpoint упал → fallback 0, snapshots всё равно есть
         assert snaps[0].price == Decimal("0")
 
 
@@ -281,7 +263,7 @@ class TestWildberries:
 
         assert len(snaps) == 1
         assert snaps[0].sku == "SHARED"
-        assert snaps[0].stock_quantity == 30  # 10 + 15 + 5
+        assert snaps[0].stock_quantity == 30
 
     def test_skips_empty_sku(self):
         """Строки без supplierArticle — игнорируются."""
@@ -319,11 +301,11 @@ class TestWildberries:
         assert snaps == []
 
     def test_uses_first_nonzero_price(self):
-        """Цена берётся первая ненулевая (разные склады могут вернуть разные цены)."""
+        """Цена берётся первая ненулевая."""
         wb_response = [
-            {"supplierArticle": "X", "quantityFull": 5, "Price": 0},      # первая нулевая
-            {"supplierArticle": "X", "quantityFull": 3, "Price": 1500},   # эту возьмём
-            {"supplierArticle": "X", "quantityFull": 2, "Price": 2000},   # игнор
+            {"supplierArticle": "X", "quantityFull": 5, "Price": 0},
+            {"supplierArticle": "X", "quantityFull": 3, "Price": 1500},
+            {"supplierArticle": "X", "quantityFull": 2, "Price": 2000},
         ]
         mock_client = MagicMock()
         mock_client.__enter__ = MagicMock(return_value=mock_client)
