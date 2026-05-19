@@ -56,6 +56,9 @@ class ConfidenceBreakdown(BaseModel):
     replenishment_like: float
     anomaly_like: float
     missing_data: float
+    # Штраф за малую историю: если < 7 дней sales_like — выборка непредставительна.
+    # Optional для бэк-компатибильности со старыми JSON-записями в бд.
+    low_history: float = 0.0
     final: float
 
 

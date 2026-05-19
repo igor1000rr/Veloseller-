@@ -1,6 +1,19 @@
 """Pipeline расчёта метрик для одного SKU за период.
 
 Координирует events -> velocity -> confidence -> coverage -> health.
+
+Изменения по точности (аудит):
+
+БАГ 1 исправлен: MISSING_DATA дни БОЛЬШЕ НЕ СЧИТАЮТСЯ stockout. Раньше день без snapshot‘а
+имел availability=False и считался как stockout_day → это завышало lost_revenue и может зажигать
+ложные repeated_stockout алерты. Теперь missing day — это «не знаем», вне знаменателя.
+Штраф за него в confidence остаётся.
+
+БАГ 4 исправлен: confidence теперь штрафует за малое количество sales_like дней (< 7).
+
+БАГ 2 исправлен частично: добавлен правильный prefer-historical-median через опциональный
+параметр history_for_median. Если вызывающий (recalc.py) передаёт 30-day pre-period sales,
+эта история используется. Иначе fallback на текущий период.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -36,8 +49,15 @@ def compute_metrics_for_sku(
 ) -> TVeloMetric:
     period_days = (period_end - period_start).days + 1
 
-    in_stock_days = cov_mod.count_in_stock_days(a.availability for a in daily_aggregates)
-    stockout_days = cov_mod.count_stockout_days(a.availability for a in daily_aggregates)
+    # MISSING_DATA дни исключаются из in_stock/stockout — это «не знаем», не подтверждённый OOS.
+    in_stock_days = sum(
+        1 for a in daily_aggregates
+        if a.availability and a.event_type != EventType.MISSING_DATA
+    )
+    stockout_days = sum(
+        1 for a in daily_aggregates
+        if (not a.availability) and a.event_type != EventType.MISSING_DATA
+    )
 
     repl_days = sum(1 for a in daily_aggregates if a.event_type == EventType.REPLENISHMENT_LIKE)
     anom_days = sum(1 for a in daily_aggregates if a.event_type == EventType.ANOMALY_LIKE)
@@ -52,16 +72,23 @@ def compute_metrics_for_sku(
         if a.event_type == EventType.SALES_LIKE and a.delta_stock is not None
         and not a.excluded_from_confirmed_metrics
     ]
+    sales_like_days = len(sales_like_deltas)
     consumption = vel_mod.confirmed_consumption(sales_like_deltas)
     conf_vel = vel_mod.confirmed_velocity(consumption, in_stock_days)
 
+    # Медиана для estimated_continuity:
+    # - Если вызывающий передал history_for_median (преферабльно: 30-day pre-period sales) — берём её.
+    # - Иначе fallback: текущие sales_like_deltas (циклично, но лучше чем ничего).
     if history_for_median is None:
         history_for_median = [abs(d) for d in sales_like_deltas]
     median_30d_vel = vel_mod.median_30d_velocity(history_for_median)
 
     adj_vel = vel_mod.adjusted_velocity(consumption, median_30d_vel, excluded_in_stock_days, in_stock_days)
 
-    confidence = calculate_confidence(period_days, repl_days, anom_days, miss_days)
+    confidence = calculate_confidence(
+        period_days, repl_days, anom_days, miss_days,
+        sales_like_days=sales_like_days,
+    )
     cov_days = cov_mod.coverage_days(current_stock, adj_vel)
     health = health_mod.sku_health_score(stockout_days, period_days, cov_days, confidence.final)
     segment = health_mod.inventory_segment(cov_days)
