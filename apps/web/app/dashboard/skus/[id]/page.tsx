@@ -82,6 +82,18 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     changelogByDate[day].push(e);
   }
 
+  // Сравнение adjusted vs median: насколько коррекция «вытянула» velocity
+  let adjVsMedian = "";
+  if (latest && latest.median_30d_velocity != null) {
+    const adj = Number(latest.adjusted_velocity);
+    const med = Number(latest.median_30d_velocity);
+    if (med > 0 && adj > 0) {
+      const diffPct = ((adj - med) / med) * 100;
+      const sign = diffPct >= 0 ? "+" : "";
+      adjVsMedian = `${sign}${diffPct.toFixed(0)}% от медианы`;
+    }
+  }
+
   return (
     <div className="space-y-6">
       <header>
@@ -95,8 +107,13 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
       </header>
 
       {latest && (
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <Kpi label="TVelo" value={Number(latest.adjusted_velocity).toFixed(2)} sub="ед./день" />
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+          <Kpi label="TVelo" value={Number(latest.adjusted_velocity).toFixed(2)} sub={adjVsMedian || "ед./день"} />
+          <Kpi label="Медиана 30д" value={
+            latest.median_30d_velocity != null
+              ? Number(latest.median_30d_velocity).toFixed(2)
+              : "—"
+          } sub="ед./день (история)" />
           <Kpi label="Покрытие" value={latest.coverage_days != null ? `${Number(latest.coverage_days).toFixed(0)} дн` : "—"} />
           <Kpi label="Остаток" value={latest.current_stock} sub={`× ${Number(latest.current_price).toFixed(0)}`} />
           <HealthKpi label="Confidence" value={`${Number(latest.confidence_score).toFixed(0)}%`}
