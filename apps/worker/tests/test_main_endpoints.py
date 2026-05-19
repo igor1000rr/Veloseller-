@@ -6,7 +6,7 @@
   - /ingest/csv
   - /ingest/google-sheet/{id} (404, 400, success)
   - /ingest/ozon, /ingest/wb, /ingest/feed — с mock-ами
-  - /jobs/recalc/{seller_id}, /jobs/recalc-all
+  - /jobs/recalc/{seller_id} (синхронный ?sync=true и async режимы), /jobs/recalc-all, /jobs/recalc/{id}/status
   - /telegram/webhook (/start, /start <id>, empty)
 """
 from __future__ import annotations
@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, _running_recalcs
 from app.schemas import SnapshotInput
 
 
@@ -182,14 +182,74 @@ class TestIngestFeed:
 # ============================================================================
 
 class TestRecalcJobs:
-    def test_recalc_seller(self, monkeypatch):
+    def setup_method(self):
+        # Очищаем in-memory state между тестами
+        _running_recalcs.clear()
+
+    def test_recalc_seller_sync_returns_result(self, monkeypatch):
+        """С ?sync=true endpoint работает синхронно и возвращает результат расчёта."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_result = {"products": 5, "metrics_written": 5, "periods": []}
         with patch("app.main.recalc_seller_all_periods", return_value=mock_result) as fn:
-            r = client.post("/jobs/recalc/seller-uuid-123")
+            r = client.post("/jobs/recalc/seller-uuid-123?sync=true")
         assert r.status_code == 200
         assert r.json() == mock_result
         fn.assert_called_once_with("seller-uuid-123")
+
+    def test_recalc_seller_async_returns_started(self, monkeypatch):
+        """Без sync=true endpoint работает в background и возвращает status=running."""
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_result = {"products": 5, "metrics_written": 5}
+        with patch("app.main.recalc_seller_all_periods", return_value=mock_result):
+            r = client.post("/jobs/recalc/seller-uuid-456")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["started"] is True
+        assert body["status"] == "running"
+        assert "started_at" in body
+        # С TestClient FastAPI выполняет background tasks после возврата response,
+        # поэтому к этому моменту _running_recalcs должен содержать запись
+        assert "seller-uuid-456" in _running_recalcs
+
+    def test_recalc_seller_dedup_when_running(self, monkeypatch):
+        """Если уже идёт recalc для селлера, второй запрос не запускает второй."""
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        _running_recalcs["seller-busy"] = {
+            "started_at": "2026-05-19T09:00:00Z",
+            "status": "running",
+            "result": None,
+            "error": None,
+        }
+        with patch("app.main.recalc_seller_all_periods") as fn:
+            r = client.post("/jobs/recalc/seller-busy")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["started"] is False
+        assert body["status"] == "running"
+        # Реальный recalc не был вызван
+        fn.assert_not_called()
+
+    def test_recalc_status_idle(self, monkeypatch):
+        """Status endpoint возвращает idle если ничего не запускалось."""
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        r = client.get("/jobs/recalc/some-unknown-seller/status")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["status"] == "idle"
+
+    def test_recalc_status_returns_running_state(self, monkeypatch):
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        _running_recalcs["seller-running"] = {
+            "started_at": "2026-05-19T09:00:00Z",
+            "status": "running",
+            "result": None,
+            "error": None,
+        }
+        r = client.get("/jobs/recalc/seller-running/status")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["status"] == "running"
+        assert body["started_at"] == "2026-05-19T09:00:00Z"
 
     def test_recalc_all(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")

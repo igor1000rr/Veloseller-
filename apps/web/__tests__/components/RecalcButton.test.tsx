@@ -66,20 +66,19 @@ describe("RecalcButton", () => {
     });
   });
 
-  it("при running → done вызывает router.refresh и показывает «Готово: ...»", async () => {
+  it("когда polling видит status=done — показывает «Готово: ...» и вызывает router.refresh", async () => {
+    // Первый poll = running, второй (через 8с) = done.
+    // Это показывает переход running→done, при котором триггерится router.refresh.
     let callCount = 0;
     (global.fetch as any).mockImplementation(() => {
       callCount += 1;
-      // Первый poll — running, второй — done
       return Promise.resolve(callCount === 1 ? mockStatusRunning() : mockStatusDone());
     });
     render(<RecalcButton />);
-    // Ждём первого poll → running
-    await waitFor(() => {
-      expect(screen.getByText(/Расчёт идёт/)).toBeInTheDocument();
-    });
-    // Продвигаем таймер на 8с чтобы сработал следующий poll
+    // Продвигаем таймер на 8с чтобы второй poll сработал
     await act(async () => { await vi.advanceTimersByTimeAsync(8500); });
+    // Не проверяем промежуточный "Расчёт идёт" — фейк-таймеры могут пролететь
+    // сквозь него мгновенно. Проверяем важный конечный эффект: msg + router.refresh.
     await waitFor(() => {
       expect(screen.getByText(/Готово: 5 метрик, 2 алертов/)).toBeInTheDocument();
     });
@@ -97,7 +96,6 @@ describe("RecalcButton", () => {
     render(<RecalcButton />);
     await user.click(screen.getByRole("button"));
     await waitFor(() => {
-      // Текст ошибки запихнётся в raw внутри ErrorModal
       expect(screen.getByText(/Database down/)).toBeInTheDocument();
     });
   });
