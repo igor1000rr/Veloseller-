@@ -92,19 +92,24 @@ describe("buildHealthBreakdown (формула Health score)", () => {
 });
 
 describe("buildConfidenceBreakdown", () => {
+  // ВАЖНО: ключи в JSON соответствуют app/schemas.py:ConfidenceBreakdown:
+  //   replenishment_like, anomaly_like, missing_data, low_history, initial, final
+  // Раньше тесты (и сам код) использовали несуществующий суффикс *_penalty.
   it("null → []", () => {
     expect(buildConfidenceBreakdown(null)).toEqual([]);
     expect(buildConfidenceBreakdown({})).toEqual([]);
   });
 
   it("чистый → 'Все события чистые'", () => {
-    const rows = buildConfidenceBreakdown({ confidence_breakdown: { replenishment_like_penalty: 0, anomaly_like_penalty: 0, missing_data_penalty: 0 } });
+    const rows = buildConfidenceBreakdown({ confidence_breakdown: {
+      replenishment_like: 0, anomaly_like: 0, missing_data: 0, low_history: 0,
+    }});
     expect(rows[0].label).toBe("Все события чистые");
   });
 
-  it("все три штрафа", () => {
+  it("все три штрафа из спеки", () => {
     const rows = buildConfidenceBreakdown({ confidence_breakdown: {
-      replenishment_like_penalty: 10, anomaly_like_penalty: 5, missing_data_penalty: 3.5,
+      replenishment_like: 10, anomaly_like: 5, missing_data: 3.5, low_history: 0,
     }});
     expect(rows).toHaveLength(3);
     expect(rows.find(r => r.label === "Пополнения")!.value).toBe("−10.0%");
@@ -113,8 +118,28 @@ describe("buildConfidenceBreakdown", () => {
   });
 
   it("частичный — только активные", () => {
-    const rows = buildConfidenceBreakdown({ confidence_breakdown: { replenishment_like_penalty: 7, anomaly_like_penalty: 0, missing_data_penalty: 0 } });
+    const rows = buildConfidenceBreakdown({ confidence_breakdown: {
+      replenishment_like: 7, anomaly_like: 0, missing_data: 0,
+    }});
     expect(rows).toHaveLength(1);
     expect(rows[0].label).toBe("Пополнения");
+  });
+
+  it("low_history штраф отображается (БАГ 4 fix)", () => {
+    const rows = buildConfidenceBreakdown({ confidence_breakdown: {
+      replenishment_like: 0, anomaly_like: 0, missing_data: 0, low_history: 25.0,
+    }});
+    expect(rows).toHaveLength(1);
+    expect(rows[0].label).toBe("Мало истории");
+    expect(rows[0].value).toBe("−25.0%");
+  });
+
+  it("низкий confidence: missing + low_history вместе", () => {
+    const rows = buildConfidenceBreakdown({ confidence_breakdown: {
+      replenishment_like: 0, anomaly_like: 0, missing_data: 20, low_history: 15,
+    }});
+    expect(rows).toHaveLength(2);
+    expect(rows.find(r => r.label === "Нет данных")!.value).toBe("−20.0%");
+    expect(rows.find(r => r.label === "Мало истории")!.value).toBe("−15.0%");
   });
 });
