@@ -1,22 +1,39 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { Icons } from "./Icons";
 import LogoutButton from "../dashboard/LogoutButton";
+
+const PLAN_LABEL: Record<string, string> = {
+  trial: "Trial",
+  starter: "Starter",
+  growth: "Growth",
+  pro: "Pro",
+};
+
+const PLAN_COLORS: Record<string, string> = {
+  trial: "border-line bg-bg-soft text-ink-muted",
+  starter: "border-lime-deep/40 bg-lime-soft text-lime-deep",
+  growth: "border-azure/40 bg-azure/10 text-azure",
+  pro: "border-orange/40 bg-orange/10 text-orange",
+};
 
 export default function AppHeader({
   email,
   variant,
   unreadAlerts,
   isAdmin,
+  plan,
 }: {
   email: string;
   variant: "dashboard" | "admin";
   unreadAlerts?: number;
   isAdmin?: boolean;
+  plan?: string;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -25,6 +42,13 @@ export default function AppHeader({
   }, [open]);
 
   useEffect(() => { setOpen(false); }, [pathname]);
+
+  // Тихий refresh данных при возврате на вкладку — чтобы кеш точно не висел
+  useEffect(() => {
+    const onFocus = () => router.refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [router]);
 
   const links = variant === "dashboard"
     ? [
@@ -45,6 +69,9 @@ export default function AppHeader({
         { href: "/admin/activity", label: "Активность" },
         { href: "/admin/settings", label: "Настройки" },
       ];
+
+  const planLabel = plan ? PLAN_LABEL[plan] ?? plan : null;
+  const planClass = plan ? PLAN_COLORS[plan] ?? PLAN_COLORS.trial : "";
 
   return (
     <header className="sticky top-0 z-30 backdrop-blur-md bg-paper/85 border-b border-line">
@@ -87,6 +114,17 @@ export default function AppHeader({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Badge с текущим планом — заметный, кликабельный */}
+          {planLabel && variant === "dashboard" && (
+            <Link
+              href={"/billing" as any}
+              title={`Текущий тариф: ${planLabel}`}
+              className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border ${planClass} hover:opacity-80 transition`}
+            >
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] font-semibold">{planLabel}</span>
+            </Link>
+          )}
+
           <span className="hidden md:inline font-mono text-xs text-ink-hush truncate max-w-[180px]">{email}</span>
 
           {isAdmin && variant === "dashboard" && (
@@ -134,6 +172,15 @@ export default function AppHeader({
             </button>
           </div>
           <nav className="flex-1 flex flex-col px-4 md:px-8 py-6 gap-1 overflow-y-auto">
+            {planLabel && variant === "dashboard" && (
+              <Link href={"/billing" as any} onClick={() => setOpen(false)}
+                className={`flex items-center justify-between py-3 px-3 mb-2 rounded-lg border ${planClass}`}>
+                <span className="font-mono text-[11px] uppercase tracking-[0.18em] font-semibold">
+                  Тариф: {planLabel}
+                </span>
+                <Icons.ArrowRight size={14} />
+              </Link>
+            )}
             {links.map((l) => (
               <Link
                 key={l.href}
