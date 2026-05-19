@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Icons } from "../../_components/Icons";
+import { ErrorModal } from "../../_components/ErrorModal";
+import { parseApiError, type ParsedError } from "@/lib/error-parser";
 
 type SourceKind = "csv_upload" | "google_sheet" | "ozon" | "wildberries" | "shopify" | "amazon";
 
@@ -151,7 +153,7 @@ function WipPanel({ source, onCancel }: { source: SourceMeta; onCancel: () => vo
 
 function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () => void; onDone: () => void }) {
   const [name, setName] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [modalError, setModalError] = useState<ParsedError | null>(null);
   const [loading, setLoading] = useState(false);
 
   const [sheetId, setSheetId] = useState("");
@@ -163,13 +165,16 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
+    setModalError(null);
     setLoading(true);
 
     try {
       const supabase = createSupabaseBrowserClient();
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setError("Сессия истекла"); return; }
+      if (!user) {
+        setModalError({ kind: "permission", title: "Сессия истекла", message: "Войдите заново чтобы продолжить." });
+        return;
+      }
 
       let source: string;
       let marketplace: string | null = null;
@@ -177,7 +182,10 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
 
       if (kind === "csv_upload") {
         source = "csv_upload";
-        if (!csvFile) { setError("Выбери CSV-файл"); return; }
+        if (!csvFile) {
+          setModalError({ kind: "validation", title: "Файл не выбран", message: "Выберите CSV-файл для загрузки." });
+          return;
+        }
       } else if (kind === "google_sheet") {
         source = "google_sheet";
         config = { sheet_id: sheetId, range: sheetRange };
@@ -198,7 +206,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
       });
       if (!createRes.ok) {
         const data = await createRes.json().catch(() => ({}));
-        setError(data.error ?? "Не удалось создать подключение");
+        setModalError(parseApiError(data, "Не удалось создать подключение"));
         return;
       }
       const conn = await createRes.json() as { id: string };
@@ -209,102 +217,103 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
         const res = await fetch(`/api/connections/${conn.id}/upload-csv`, { method: "POST", body: fd });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          setError(`Загрузка CSV не прошла: ${data.error ?? res.statusText}`);
+          setModalError(parseApiError(data, "Загрузка CSV не прошла"));
           return;
         }
       } else {
         const res = await fetch(`/api/connections/${conn.id}/sync`, { method: "POST" });
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
-          setError(`Первый синк не прошёл: ${data.error ?? res.statusText}`);
+          setModalError(parseApiError(data, "Первая синхронизация не прошла"));
           return;
         }
       }
       onDone();
+    } catch (err: any) {
+      // Network errors попадают сюда (fetch throws)
+      setModalError(parseApiError(err?.message || String(err), "Не удалось связаться с сервером"));
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-2xl border border-line bg-paper p-6 md:p-8 space-y-5">
-      <button type="button" onClick={onCancel} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition">
-        <span className="rotate-180"><Icons.ArrowRight size={12} /></span> К выбору
-      </button>
+    <>
+      <form onSubmit={handleSubmit} className="rounded-2xl border border-line bg-paper p-6 md:p-8 space-y-5">
+        <button type="button" onClick={onCancel} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition">
+          <span className="rotate-180"><Icons.ArrowRight size={12} /></span> К выбору
+        </button>
 
-      <h2 className="font-display text-2xl md:text-3xl tracking-tight font-medium">{sourceTitle(kind)}</h2>
+        <h2 className="font-display text-2xl md:text-3xl tracking-tight font-medium">{sourceTitle(kind)}</h2>
 
-      <div>
-        <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Название (для себя)</label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Например, Мой магазин Ozon"
-          className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition"
-        />
-      </div>
+        <div>
+          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Название (для себя)</label>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Например, Мой магазин Ozon"
+            className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition"
+          />
+        </div>
 
-      {kind === "google_sheet" && (
-        <>
+        {kind === "google_sheet" && (
+          <>
+            <div>
+              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Sheet ID</label>
+              <input required value={sheetId} onChange={(e) => setSheetId(e.target.value)} placeholder="из ссылки на таблицу"
+                className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono text-sm focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+            </div>
+            <div>
+              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Range</label>
+              <input required value={sheetRange} onChange={(e) => setSheetRange(e.target.value)}
+                className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono text-sm focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+              <p className="mt-1.5 font-mono text-[11px] text-ink-hush">Колонки: sku, product_name, price, stock_quantity, snapshot_time (опц.).</p>
+            </div>
+          </>
+        )}
+
+        {kind === "ozon" && (
+          <>
+            <div>
+              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Client-Id</label>
+              <input required value={clientId} onChange={(e) => setClientId(e.target.value)}
+                className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+            </div>
+            <div>
+              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Api-Key</label>
+              <input required type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
+                className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+              <p className="mt-1.5 text-[11px] text-orange">Создавай read-only ключ в Ozon Seller → Настройки → API.</p>
+            </div>
+          </>
+        )}
+
+        {kind === "wildberries" && (
           <div>
-            <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Sheet ID</label>
-            <input required value={sheetId} onChange={(e) => setSheetId(e.target.value)} placeholder="из ссылки на таблицу"
-              className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono text-sm focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+            <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Статистический токен</label>
+            <input required type="password" value={wbToken} onChange={(e) => setWbToken(e.target.value)}
+              className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+            <p className="mt-1.5 text-[11px] text-orange">Кабинет WB → Профиль → Доступ к API → Статистика (read-only).</p>
           </div>
+        )}
+
+        {kind === "csv_upload" && (
           <div>
-            <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Range</label>
-            <input required value={sheetRange} onChange={(e) => setSheetRange(e.target.value)}
-              className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono text-sm focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+            <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">CSV-файл</label>
+            <input required type="file" accept=".csv,text/csv" onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
+              className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-ink file:text-paper file:text-sm file:cursor-pointer" />
             <p className="mt-1.5 font-mono text-[11px] text-ink-hush">Колонки: sku, product_name, price, stock_quantity, snapshot_time (опц.).</p>
           </div>
-        </>
-      )}
+        )}
 
-      {kind === "ozon" && (
-        <>
-          <div>
-            <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Client-Id</label>
-            <input required value={clientId} onChange={(e) => setClientId(e.target.value)}
-              className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
-          </div>
-          <div>
-            <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Api-Key</label>
-            <input required type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
-              className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
-            <p className="mt-1.5 text-[11px] text-orange">Создавай read-only ключ в Ozon Seller → Настройки → API.</p>
-          </div>
-        </>
-      )}
+        <button type="submit" disabled={loading}
+          className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-ink text-paper px-4 py-3 font-semibold hover:bg-ink-soft disabled:opacity-50 transition">
+          {loading ? "Подключаем…" : (<>Подключить и синхронизировать <Icons.ArrowRight /></>)}
+        </button>
+      </form>
 
-      {kind === "wildberries" && (
-        <div>
-          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Статистический токен</label>
-          <input required type="password" value={wbToken} onChange={(e) => setWbToken(e.target.value)}
-            className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
-          <p className="mt-1.5 text-[11px] text-orange">Кабинет WB → Профиль → Доступ к API → Статистика (read-only).</p>
-        </div>
-      )}
-
-      {kind === "csv_upload" && (
-        <div>
-          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">CSV-файл</label>
-          <input required type="file" accept=".csv,text/csv" onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
-            className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-ink file:text-paper file:text-sm file:cursor-pointer" />
-          <p className="mt-1.5 font-mono text-[11px] text-ink-hush">Колонки: sku, product_name, price, stock_quantity, snapshot_time (опц.).</p>
-        </div>
-      )}
-
-      {error && (
-        <div className="rounded-lg border border-rose/30 bg-rose/10 p-3 text-sm text-rose flex items-start gap-2">
-          <span className="font-mono text-[10px] uppercase tracking-widest mt-0.5">err</span><span>{error}</span>
-        </div>
-      )}
-
-      <button type="submit" disabled={loading}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-ink text-paper px-4 py-3 font-semibold hover:bg-ink-soft disabled:opacity-50 transition">
-        {loading ? "Подключаем…" : (<>Подключить и синхронизировать <Icons.ArrowRight /></>)}
-      </button>
-    </form>
+      <ErrorModal error={modalError} onClose={() => setModalError(null)} />
+    </>
   );
 }
 
