@@ -1,14 +1,20 @@
 """Mock-тесты парсеров marketplace API на реальных форматах ответов.
 
-Ozon: docs.ozon.ru/api/seller/ (v3/product/list + v4/product/info/stocks)
+Ozon: docs.ozon.ru/api/seller/
+  - /v3/product/list — список product_id
+  - /v4/product/info/stocks — остатки (filter+cursor body)
+  - /v5/product/info/prices — цены (filter+cursor body)
+
 Wildberries: openapi.wildberries.ru/statistics/api/ru/ (supplier/stocks)
+
 Покрываем:
   - базовый ответ → правильный SnapshotInput
   - пагинация Ozon через last_id
-  - батчи stocks по 100 ID
-  - группировка WB по supplierArticle (суммируются остатки по разным складам)
+  - правильный body для stocks endpoint (regression)
   - present-reserved для Ozon
+  - цены из /v5/product/info/prices
   - пустые ответы
+  - WB: группировка по supplierArticle (суммируются остатки по разным складам)
 """
 from __future__ import annotations
 from decimal import Decimal
@@ -30,36 +36,46 @@ def _ozon_resp(json_data: dict, status: int = 200):
     return resp
 
 
+def _mock_client(responses: list):
+    """Mock httpx.Client с заданной последовательностью ответов на post()."""
+    cli = MagicMock()
+    cli.__enter__ = MagicMock(return_value=cli)
+    cli.__exit__ = MagicMock(return_value=False)
+    cli.post.side_effect = responses
+    return cli
+
+
 class TestOzon:
     def test_basic_single_page(self):
-        """Одна страница товаров + один батч stocks."""
-        list_response = {
+        """Один список → один батч stocks → один батч prices → snapshots."""
+        list_resp = {
             "result": {
                 "items": [
-                    {"product_id": 111, "offer_id": "SKU-A", "name": "Item A"},
-                    {"product_id": 222, "offer_id": "SKU-B", "name": "Item B"},
+                    {"product_id": 111, "offer_id": "SKU-A"},
+                    {"product_id": 222, "offer_id": "SKU-B"},
                 ],
                 "last_id": "",
             }
         }
-        stocks_response = {
+        stocks_resp = {
             "items": [
-                {"offer_id": "SKU-A", "name": "Item A",
+                {"product_id": 111, "offer_id": "SKU-A", "name": "Item A",
                  "stocks": [{"present": 50, "reserved": 5}, {"present": 20, "reserved": 0}]},
-                {"offer_id": "SKU-B", "name": "Item B",
+                {"product_id": 222, "offer_id": "SKU-B", "name": "Item B",
                  "stocks": [{"present": 10, "reserved": 2}]},
-            ]
+            ],
+            "cursor": "",
+        }
+        prices_resp = {
+            "items": [
+                {"product_id": 111, "price": {"price": "1500.00", "marketing_price": "1490.00"}},
+                {"product_id": 222, "price": {"price": "300.50"}},
+            ],
+            "cursor": "",
         }
 
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.post.side_effect = [
-            _ozon_resp(list_response),
-            _ozon_resp(stocks_response),
-        ]
-
-        with patch.object(ozon.httpx, "Client", return_value=mock_client):
+        cli = _mock_client([_ozon_resp(list_resp), _ozon_resp(stocks_resp), _ozon_resp(prices_resp)])
+        with patch.object(ozon.httpx, "Client", return_value=cli):
             snaps = ozon.fetch_snapshots("cid", "key")
 
         assert len(snaps) == 2
@@ -67,75 +83,153 @@ class TestOzon:
         # present - reserved с двух складов: (50-5) + (20-0) = 65
         assert by_sku["SKU-A"].stock_quantity == 65
         assert by_sku["SKU-A"].product_name == "Item A"
+        # marketing_price имеет приоритет над price
+        assert by_sku["SKU-A"].price == Decimal("1490.00")
         assert by_sku["SKU-B"].stock_quantity == 8
+        assert by_sku["SKU-B"].price == Decimal("300.50")
 
-    def test_pagination(self):
-        """Пагинация через last_id: 2 страницы товаров, потом stocks."""
-        page1 = {"result": {"items": [{"product_id": 1, "offer_id": "A"}] * 1, "last_id": "cursor-2"}}
+    def test_stocks_body_format_is_correct(self):
+        """REGRESSION: /v4/product/info/stocks ожидает filter+cursor+limit body."""
+        list_resp = {"result": {"items": [{"product_id": 1, "offer_id": "X"}], "last_id": ""}}
+        stocks_resp = {"items": [{"product_id": 1, "offer_id": "X", "stocks": [{"present": 5, "reserved": 0}]}], "cursor": ""}
+        prices_resp = {"items": [], "cursor": ""}
+
+        cli = _mock_client([_ozon_resp(list_resp), _ozon_resp(stocks_resp), _ozon_resp(prices_resp)])
+        with patch.object(ozon.httpx, "Client", return_value=cli):
+            ozon.fetch_snapshots("cid", "key")
+
+        # Проверяем body второго вызова — это stocks
+        stocks_call = cli.post.call_args_list[1]
+        url = stocks_call[0][0]
+        body = stocks_call[1]["json"]
+        assert "/v4/product/info/stocks" in url
+        # Правильный формат: filter wraps product_id
+        assert "filter" in body, f"body должно содержать filter, получено: {body}"
+        assert "product_id" in body["filter"]
+        assert body["filter"]["product_id"] == ["1"]
+        assert body["filter"]["visibility"] == "ALL"
+        assert "cursor" in body
+        assert "limit" in body
+
+    def test_prices_body_format_is_correct(self):
+        """REGRESSION: /v5/product/info/prices ожидает filter+cursor+limit body."""
+        list_resp = {"result": {"items": [{"product_id": 1, "offer_id": "X"}], "last_id": ""}}
+        stocks_resp = {"items": [{"product_id": 1, "offer_id": "X", "stocks": [{"present": 5, "reserved": 0}]}], "cursor": ""}
+        prices_resp = {"items": [], "cursor": ""}
+
+        cli = _mock_client([_ozon_resp(list_resp), _ozon_resp(stocks_resp), _ozon_resp(prices_resp)])
+        with patch.object(ozon.httpx, "Client", return_value=cli):
+            ozon.fetch_snapshots("cid", "key")
+
+        # Проверяем body третьего вызова — prices
+        prices_call = cli.post.call_args_list[2]
+        url = prices_call[0][0]
+        body = prices_call[1]["json"]
+        assert "/v5/product/info/prices" in url
+        assert "filter" in body
+        assert body["filter"]["product_id"] == ["1"]
+
+    def test_pagination_list(self):
+        """Пагинация /v3/product/list через last_id: 2 страницы товаров."""
+        page1 = {"result": {"items": [{"product_id": 1, "offer_id": "A"}], "last_id": "cursor-2"}}
         page2 = {"result": {"items": [{"product_id": 2, "offer_id": "B"}], "last_id": ""}}
         stocks = {"items": [
-            {"offer_id": "A", "stocks": [{"present": 5, "reserved": 0}]},
-            {"offer_id": "B", "stocks": [{"present": 3, "reserved": 0}]},
-        ]}
+            {"product_id": 1, "offer_id": "A", "stocks": [{"present": 5, "reserved": 0}]},
+            {"product_id": 2, "offer_id": "B", "stocks": [{"present": 3, "reserved": 0}]},
+        ], "cursor": ""}
+        prices = {"items": [], "cursor": ""}
 
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        # с page_size=1 первая страница вернёт ровно page_size элементов, идём дальше;
+        # page_size=1 → первая страница вернёт ровно page_size элементов, идём дальше;
         # вторая получит 1 item (<page_size) → break
-        mock_client.post.side_effect = [_ozon_resp(page1), _ozon_resp(page2), _ozon_resp(stocks)]
-
-        with patch.object(ozon.httpx, "Client", return_value=mock_client):
+        cli = _mock_client([_ozon_resp(page1), _ozon_resp(page2), _ozon_resp(stocks), _ozon_resp(prices)])
+        with patch.object(ozon.httpx, "Client", return_value=cli):
             snaps = ozon.fetch_snapshots("cid", "key", page_size=1)
 
         assert len(snaps) == 2
         assert {s.sku for s in snaps} == {"A", "B"}
 
-    def test_empty_catalog(self):
-        """Пустой каталог → пустой список, никаких stocks-вызовов."""
-        empty = {"result": {"items": [], "last_id": ""}}
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.post.return_value = _ozon_resp(empty)
+    def test_stocks_pagination_via_cursor(self):
+        """Пагинация stocks через cursor (если Ozon возвращает не всё за раз)."""
+        list_resp = {"result": {"items": [
+            {"product_id": 1, "offer_id": "A"},
+            {"product_id": 2, "offer_id": "B"},
+        ], "last_id": ""}}
+        # Первая страница stocks возвращает 1 item + cursor
+        stocks_page1 = {"items": [
+            {"product_id": 1, "offer_id": "A", "stocks": [{"present": 5, "reserved": 0}]},
+        ], "cursor": "next-page"}
+        # Вторая страница — оставшийся item, cursor пустой
+        stocks_page2 = {"items": [
+            {"product_id": 2, "offer_id": "B", "stocks": [{"present": 3, "reserved": 0}]},
+        ], "cursor": ""}
+        prices = {"items": [], "cursor": ""}
 
-        with patch.object(ozon.httpx, "Client", return_value=mock_client):
+        cli = _mock_client([_ozon_resp(list_resp), _ozon_resp(stocks_page1), _ozon_resp(stocks_page2), _ozon_resp(prices)])
+        with patch.object(ozon.httpx, "Client", return_value=cli):
+            snaps = ozon.fetch_snapshots("cid", "key")
+
+        assert len(snaps) == 2
+        assert {s.sku for s in snaps} == {"A", "B"}
+
+    def test_empty_catalog(self):
+        """Пустой каталог → пустой список, никаких stocks/prices-вызовов."""
+        empty = {"result": {"items": [], "last_id": ""}}
+        cli = _mock_client([_ozon_resp(empty)])
+        with patch.object(ozon.httpx, "Client", return_value=cli):
             snaps = ozon.fetch_snapshots("cid", "key")
 
         assert snaps == []
-        # вызвали только v3/product/list, не stocks
-        assert mock_client.post.call_count == 1
+        # вызвали только /v3/product/list, не stocks и не prices
+        assert cli.post.call_count == 1
 
     def test_negative_qty_clamped_to_zero(self):
         """Если reserved > present — qty=0, не отрицательное число."""
         list_resp = {"result": {"items": [{"product_id": 1, "offer_id": "NEG"}], "last_id": ""}}
-        stocks_resp = {"items": [{"offer_id": "NEG", "stocks": [{"present": 2, "reserved": 10}]}]}
+        stocks_resp = {"items": [{"product_id": 1, "offer_id": "NEG",
+                                   "stocks": [{"present": 2, "reserved": 10}]}], "cursor": ""}
+        prices_resp = {"items": [], "cursor": ""}
 
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.post.side_effect = [_ozon_resp(list_resp), _ozon_resp(stocks_resp)]
-
-        with patch.object(ozon.httpx, "Client", return_value=mock_client):
+        cli = _mock_client([_ozon_resp(list_resp), _ozon_resp(stocks_resp), _ozon_resp(prices_resp)])
+        with patch.object(ozon.httpx, "Client", return_value=cli):
             snaps = ozon.fetch_snapshots("cid", "key")
 
         assert snaps[0].stock_quantity == 0
 
     def test_missing_offer_id_uses_product_id(self):
-        """Без offer_id — фоллбэк на product_id."""
+        """Без offer_id — фоллбэк на product_id как SKU."""
         list_resp = {"result": {"items": [{"product_id": 999}], "last_id": ""}}
-        stocks_resp = {"items": [{"product_id": 999, "stocks": [{"present": 5, "reserved": 0}]}]}
+        stocks_resp = {"items": [{"product_id": 999,
+                                   "stocks": [{"present": 5, "reserved": 0}]}], "cursor": ""}
+        prices_resp = {"items": [], "cursor": ""}
 
-        mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.post.side_effect = [_ozon_resp(list_resp), _ozon_resp(stocks_resp)]
-
-        with patch.object(ozon.httpx, "Client", return_value=mock_client):
+        cli = _mock_client([_ozon_resp(list_resp), _ozon_resp(stocks_resp), _ozon_resp(prices_resp)])
+        with patch.object(ozon.httpx, "Client", return_value=cli):
             snaps = ozon.fetch_snapshots("cid", "key")
 
         assert snaps[0].sku == "999"
         assert snaps[0].stock_quantity == 5
+
+    def test_price_fallback_to_zero_when_prices_endpoint_fails(self):
+        """Если /v5/product/info/prices упал — цены = 0, остальное работает."""
+        import httpx as _httpx
+        list_resp = {"result": {"items": [{"product_id": 1, "offer_id": "X"}], "last_id": ""}}
+        stocks_resp = {"items": [{"product_id": 1, "offer_id": "X",
+                                   "stocks": [{"present": 5, "reserved": 0}]}], "cursor": ""}
+        # prices endpoint выбрасывает HTTPStatusError
+        prices_error = _ozon_resp({}, status=500)
+        prices_error.raise_for_status.side_effect = _httpx.HTTPStatusError(
+            "500", request=MagicMock(), response=MagicMock(status_code=500),
+        )
+
+        cli = _mock_client([_ozon_resp(list_resp), _ozon_resp(stocks_resp), prices_error])
+        with patch.object(ozon.httpx, "Client", return_value=cli):
+            snaps = ozon.fetch_snapshots("cid", "key")
+
+        assert len(snaps) == 1
+        assert snaps[0].sku == "X"
+        assert snaps[0].stock_quantity == 5
+        # Цены endpoint упал → fallback 0, snapshots всё равно есть
+        assert snaps[0].price == Decimal("0")
 
 
 # ============== WILDBERRIES ==============
@@ -157,7 +251,6 @@ class TestWildberries:
         mock_resp.raise_for_status = MagicMock()
         mock_client.get.return_value = mock_resp
 
-        # Патчим with_retry чтобы не ждать ретраев
         with patch.object(wildberries.httpx, "Client", return_value=mock_client), \
              patch.object(wildberries, "with_retry", side_effect=lambda fn, **kw: fn()):
             snaps = wildberries.fetch_snapshots("token")
