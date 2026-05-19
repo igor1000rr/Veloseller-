@@ -6,6 +6,7 @@ import { DayProgress } from "./DayProgress";
 import { PeriodSelector } from "./PeriodSelector";
 import { DeadInventoryChart } from "./StoreCharts";
 import { HealthScoreBlock } from "./HealthScale";
+import { formatMoney } from "@/lib/format-money";
 
 // Свежие данные на каждый запрос (после recalc нет stale UI)
 export const dynamic = "force-dynamic";
@@ -36,8 +37,15 @@ export default async function DashboardOverview({ searchParams }: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: seller } = await supabase.from("sellers").select("created_at").eq("id", user.id).maybeSingle();
+  // Читаем валюту селлера (default RUB) для форматирования денег
+  const { data: seller } = await supabase
+    .from("sellers")
+    .select("created_at,currency")
+    .eq("id", user.id)
+    .maybeSingle();
   const daysSinceSetup = seller?.created_at ? Math.floor((Date.now() - new Date(seller.created_at).getTime()) / 86400_000) : 0;
+  const currency = (seller as any)?.currency ?? "RUB";
+  const fmt = (n: number | null | undefined) => formatMoney(n, currency);
 
   const periodStartDate = new Date(Date.now() - periodDays * 86400_000);
   const periodStartIso = periodStartDate.toISOString().slice(0, 10);
@@ -62,7 +70,6 @@ export default async function DashboardOverview({ searchParams }: {
 
   // Velocity — берём только метрики ТЕКУЩЕГО селлера через JOIN с products, и
   // пагинируем т.к. может быть 5000+ строк (1879 SKU × 3 периода).
-  // Группируем по product_id, берём latest period_end.
   const tveloRows = await fetchAll<{ adjusted_velocity: number; product_id: string; period_end: string }>(
     async (from, to) => await supabase
       .from("tvelo_metrics")
@@ -146,12 +153,12 @@ export default async function DashboardOverview({ searchParams }: {
         <div className="rounded-2xl border border-line bg-paper p-6">
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">Денег в остатках</div>
           <div className="mt-3 font-display text-4xl md:text-5xl tracking-tight font-medium text-ink tabular">
-            {formatMoney(storeMetrics?.total_inventory_value)}
+            {fmt(storeMetrics?.total_inventory_value)}
           </div>
           <div className="mt-4 rounded-lg border border-orange/20 bg-orange/5 p-3 flex items-center justify-between gap-3 flex-wrap">
             <span className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold">Заморожено в неликвиде</span>
             <span className="font-display tabular text-xl text-orange font-medium">
-              {formatMoney(storeMetrics?.store_frozen_inventory_value)}
+              {fmt(storeMetrics?.store_frozen_inventory_value)}
             </span>
           </div>
         </div>
@@ -176,7 +183,7 @@ export default async function DashboardOverview({ searchParams }: {
         <div className="rounded-2xl border border-rose/30 bg-rose/5 p-5">
           <div className="font-mono text-[10px] uppercase tracking-widest text-rose font-semibold">Lost revenue</div>
           <div className="mt-2 font-display text-2xl tabular text-rose font-medium">
-            {formatMoney(storeMetrics?.lost_revenue)}
+            {fmt(storeMetrics?.lost_revenue)}
           </div>
           <div className="mt-1 text-xs text-rose/80">недополучено за период из-за OOS</div>
         </div>
@@ -209,7 +216,12 @@ export default async function DashboardOverview({ searchParams }: {
       {/* Alerts */}
       {alerts && alerts.length > 0 && (
         <div className="rounded-2xl border border-line bg-paper p-6">
-          <h2 className="font-display text-lg font-medium text-ink">Уведомления</h2>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <h2 className="font-display text-lg font-medium text-ink">Последние уведомления</h2>
+            <Link href={"/dashboard/alerts" as any} className="text-xs font-mono uppercase tracking-wider text-lime-deep hover:underline">
+              Все →
+            </Link>
+          </div>
           <ul className="mt-3 space-y-2">
             {alerts.map((a) => (
               <li key={a.id} className="rounded-lg border border-line bg-bg-soft p-3 text-sm text-ink-soft">
@@ -256,11 +268,6 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
       {children}
     </div>
   );
-}
-
-function formatMoney(n: number | null | undefined): string {
-  if (n == null) return "—";
-  return new Intl.NumberFormat("ru-RU", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
 }
 
 function kindLabel(kind: string): string {
