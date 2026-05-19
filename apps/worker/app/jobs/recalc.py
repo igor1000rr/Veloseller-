@@ -11,7 +11,7 @@ from typing import Optional
 
 import pytz
 
-from app.db import get_supabase
+from app.db import fetch_all, get_supabase
 from app.engine.alerts import (
     critical_stock_alert,
     dead_inventory_alert,
@@ -273,8 +273,12 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
     period_start = period_end - timedelta(days=period_days - 1)
     seller_tz = pytz.timezone(_seller_timezone(sb, seller_id))
 
-    products = sb.table("products").select("product_id,sku").eq("seller_id", seller_id).execute()
-    if not products.data:
+    # ВАЖНО: используем fetch_all для пагинации — иначе Supabase режет до 1000 строк,
+    # и у селлеров с 1000+ SKU считается только первая 1000 (баг был на проде).
+    products = fetch_all(
+        sb.table("products").select("product_id,sku").eq("seller_id", seller_id)
+    )
+    if not products:
         return {"products": 0, "metrics_written": 0, "alerts_written": 0, "store_metrics_written": 0}
 
     metrics_written = 0
@@ -286,18 +290,18 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
     velocities_for_median: list[float] = []
 
     # 1-й проход: собираем метрики и события
-    for p in products.data:
+    for p in products:
         pid = p["product_id"]
         history_start = (period_start - timedelta(days=30)).isoformat()
-        snaps = (
+        # У одного SKU редко бывает >1000 снапшотов за 60 дней, но на всякий случай
+        # тоже через fetch_all (max 2 snapshots/day × 60 days = 120; запас огромный)
+        rows = fetch_all(
             sb.table("inventory_snapshots")
             .select("snapshot_id,snapshot_time,stock_quantity,price,availability")
             .eq("product_id", pid)
             .gte("snapshot_time", history_start)
             .order("snapshot_time")
-            .execute()
         )
-        rows = snaps.data or []
         if not rows:
             continue
 
@@ -337,7 +341,6 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
             changelog_written += len(price_rows)
 
             # Rule 12.3: считаем elasticity для каждого ценового изменения
-            # (нужно >= 7 in-stock days до и после)
             for pc in price_changes:
                 sales_before = [
                     abs(a.delta_stock or 0) for a in aggregates
@@ -420,7 +423,7 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
     store_written = _write_store_metrics(sb, seller_id, sku_data, period_start, period_end)
 
     return {
-        "products": len(products.data),
+        "products": len(products),
         "metrics_written": metrics_written,
         "alerts_written": alerts_written,
         "events_written": events_written,
@@ -480,7 +483,6 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
     )
 
     # Lost revenue с правильной AverageStockoutPrice по Rule 9.2
-    # (берём цены из snapshots именно за дни stockout, fallback на current_price)
     lost_total = 0.0
     for item in sku_data:
         m = item["metric"]
@@ -514,17 +516,13 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
 
 
 def recalc_seller_all_periods(seller_id: str) -> dict:
-    """Пересчёт по всем периодам: 7, 30, 90 дней.
-
-    Чтобы UI с PeriodSelector мог показывать реальные числа за выбранный период.
-    """
+    """Пересчёт по всем периодам: 7, 30, 90 дней."""
     result = {"products": 0, "metrics_written": 0, "alerts_written": 0,
               "store_metrics_written": 0, "events_written": 0, "changelog_written": 0,
               "periods": []}
     for period_days in (7, 30, 90):
         r = recalc_seller(seller_id, period_days=period_days)
         result["periods"].append({"period_days": period_days, **r})
-        # Подсчёт за 30-дневный период идёт в общий итог
         if period_days == 30:
             for k in ("products", "metrics_written", "alerts_written",
                       "store_metrics_written", "events_written", "changelog_written"):
