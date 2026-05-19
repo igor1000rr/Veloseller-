@@ -1,6 +1,10 @@
 """Пересчёт метрик селлера: events, tvelo_metrics, store_metrics, alerts, changelog.
 
 Запускается из FastAPI endpoints (/jobs/recalc/{seller_id}) и APScheduler.
+
+Прогресс: все entry-points принимают опциональный dict `progress`. По ходу обработки
+код пишет в него `phase` / `processed` / `total` / `period_days`. Endpoint
+/jobs/recalc/{seller_id}/status его возвращает. UI опрашивает и показывает прогресс-бар.
 """
 from __future__ import annotations
 
@@ -47,7 +51,6 @@ def _seller_timezone(sb, seller_id: str) -> str:
 
 
 def _event_message(et: EventType, delta: Optional[int]) -> str:
-    """Сообщение для changelog (Rule 11.x)."""
     if et == EventType.SALES_LIKE:
         return f"Продажа: {abs(delta or 0)} шт."
     if et == EventType.REPLENISHMENT_LIKE:
@@ -64,12 +67,18 @@ def _event_message(et: EventType, delta: Optional[int]) -> str:
 
 
 def _confidence_impact(et: EventType) -> float:
-    """Влияние события на confidence (для отображения в changelog)."""
     return {
         EventType.REPLENISHMENT_LIKE: -3.33,
         EventType.ANOMALY_LIKE: -3.33,
         EventType.MISSING_DATA: -3.33,
     }.get(et, 0.0)
+
+
+def _bump_progress(progress: Optional[dict], **fields) -> None:
+    """Безопасно обновляет progress dict, если он передан."""
+    if progress is None:
+        return
+    progress.update(fields)
 
 
 # ============================================================================
@@ -82,10 +91,6 @@ def build_daily_aggregates(
     period_end: date,
     seller_tz: pytz.tzinfo.BaseTzInfo,
 ) -> tuple[list[DailyAggregate], list[dict]]:
-    """Из сырых snapshots собрать DailyAggregate за период.
-
-    Возвращает (aggregates, event_rows_for_db) — второй список для записи в inventory_events.
-    """
     by_day: dict[date, dict] = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
@@ -123,10 +128,8 @@ def build_daily_aggregates(
                 delta_stock=delta,
                 excluded_from_confirmed_metrics=excluded,
             ))
-
-            # Запись для inventory_events
             event_rows.append({
-                "product_id": row.get("product_id"),  # будет проставлен снаружи если None
+                "product_id": row.get("product_id"),
                 "previous_snapshot_id": prev_snapshot_id,
                 "current_snapshot_id": row.get("snapshot_id"),
                 "event_time": row["snapshot_time"],
@@ -135,7 +138,6 @@ def build_daily_aggregates(
                 "event_type": et.value,
                 "excluded_from_confirmed_metrics": excluded,
             })
-
             prev_stock = stock
             prev_snapshot_id = row.get("snapshot_id")
             prev_exists = True
@@ -149,10 +151,8 @@ def build_daily_aggregates(
                 delta_stock=None,
                 excluded_from_confirmed_metrics=True,
             ))
-            # missing_data не пишем в inventory_events (нет current_snapshot_id), но запишем в changelog
         cur = cur + timedelta(days=1)
 
-    # Rule 11.x: recount detection — ищем пары компенсирующих снапшотов в одном дне
     try:
         from app.engine.recount import Snapshot as RcSnap, detect_recount_pairs
         rc_snaps = [
@@ -168,7 +168,6 @@ def build_daily_aggregates(
             recount_days: set[date] = set()
             for snap_a, snap_b in recount_pairs:
                 recount_days.add(snap_a.snapshot_time.astimezone(seller_tz).date())
-            # Перетипируем aggregates на recount_like для тех дней
             for i, a in enumerate(aggregates):
                 if a.day in recount_days and a.event_type != EventType.MISSING_DATA:
                     aggregates[i] = DailyAggregate(
@@ -178,13 +177,12 @@ def build_daily_aggregates(
                         delta_stock=a.delta_stock,
                         excluded_from_confirmed_metrics=True,
                     )
-                    # Обновляем event_rows
                     for er in event_rows:
                         if er["event_date"] == a.day.isoformat():
                             er["event_type"] = EventType.RECOUNT_LIKE.value
                             er["excluded_from_confirmed_metrics"] = True
     except Exception:
-        pass  # recount detection — не критичная фича, ошибки не должны ломать pipeline
+        pass
 
     return aggregates, event_rows
 
@@ -194,12 +192,9 @@ def build_daily_aggregates(
 # ============================================================================
 
 def _write_inventory_events(sb, product_id: str, event_rows: list[dict], period_start: date, period_end: date) -> int:
-    """Перезаписываем inventory_events за период (idempotent)."""
     if not event_rows:
         return 0
-    # Удаляем старые за период
     sb.table("inventory_events").delete().eq("product_id", product_id).gte("event_date", period_start.isoformat()).lte("event_date", period_end.isoformat()).execute()
-    # Проставляем product_id и фильтруем строки без current_snapshot_id
     rows = []
     for r in event_rows:
         if not r.get("current_snapshot_id"):
@@ -213,11 +208,8 @@ def _write_inventory_events(sb, product_id: str, event_rows: list[dict], period_
 
 
 def _write_changelog(sb, seller_id: str, product_id: str, aggregates: list[DailyAggregate], period_start: date, period_end: date) -> int:
-    """Записывает в changelog все 'значимые' события (Rule 11.x)."""
     significant = {EventType.REPLENISHMENT_LIKE, EventType.ANOMALY_LIKE, EventType.MISSING_DATA, EventType.RECOUNT_LIKE}
-    # Удаляем старые за период
     sb.table("changelog").delete().eq("product_id", product_id).gte("event_date", period_start.isoformat()).lte("event_date", period_end.isoformat()).execute()
-
     rows = []
     for a in aggregates:
         if a.event_type not in significant:
@@ -236,56 +228,23 @@ def _write_changelog(sb, seller_id: str, product_id: str, aggregates: list[Daily
     return len(rows)
 
 
-def _upsert_or_skip_alert(
-    sb, seller_id: str, product_id: str, kind: str, message: str, payload: dict
-) -> bool:
-    """Создаёт alert если такого активного ещё нет.
-
-    Защита от дубликатов через партиальный UNIQUE-индекс alerts_unique_unread
-    на (seller_id, product_id, kind) WHERE acknowledged_at IS NULL.
-
-    Если активный alert уже есть — обновляет message+payload (могут измениться
-    числа: coverage_days/stockout_days), но не плодит запись.
-
-    Возвращает True если создан НОВЫЙ alert (для счётчика alerts_written),
-    False если только обновлены данные существующего.
-    """
-    # Проверяем есть ли активный того же типа
+def _upsert_or_skip_alert(sb, seller_id: str, product_id: str, kind: str, message: str, payload: dict) -> bool:
     existing = sb.table("alerts").select("id").eq("seller_id", seller_id).eq(
         "product_id", product_id
     ).eq("kind", kind).is_("acknowledged_at", "null").limit(1).execute()
-
     if existing.data:
-        # Обновляем сообщение и payload (числа могли измениться)
-        sb.table("alerts").update({
-            "message": message,
-            "payload": payload,
-        }).eq("id", existing.data[0]["id"]).execute()
+        sb.table("alerts").update({"message": message, "payload": payload}).eq("id", existing.data[0]["id"]).execute()
         return False
-
-    # Создаём новый
     sb.table("alerts").insert({
-        "seller_id": seller_id,
-        "product_id": product_id,
-        "kind": kind,
-        "message": message,
-        "payload": payload,
+        "seller_id": seller_id, "product_id": product_id,
+        "kind": kind, "message": message, "payload": payload,
     }).execute()
     return True
 
 
 def _write_alerts(sb, seller_id: str, product_id: str, m: TVeloMetric, underestimated: bool) -> int:
-    """Создаёт alert-записи по Rule 10.x — с дедупликацией.
-
-    Если активный alert (acknowledged_at IS NULL) того же (seller, product, kind)
-    уже есть, не плодим, а только обновляем message/payload.
-
-    Также автоматически "решает" (acknowledged_at = now) старые активные алерты,
-    которые теперь не сработали (условие больше не выполняется) — чтобы inbox
-    не оставался забит устаревшими алертами.
-    """
     cov = m.coverage_days
-    desired_alerts: list[tuple[str, str]] = []  # (kind, message)
+    desired_alerts: list[tuple[str, str]] = []
     if critical_stock_alert(cov):
         desired_alerts.append(("critical_stock", f"Coverage {cov:.1f} дн — критически мало"))
     elif low_stock_alert(cov):
@@ -300,8 +259,6 @@ def _write_alerts(sb, seller_id: str, product_id: str, m: TVeloMetric, underesti
     desired_kinds = {k for k, _ in desired_alerts}
     payload = {"coverage_days": cov, "stockout_days": m.stockout_days}
 
-    # Auto-resolve: алерты на этот SKU, которые ВЫ ОТКЛЮЧИЛИСЬ (условие пропало)
-    # — закрываем как auto-acknowledged.
     existing_active = sb.table("alerts").select("id,kind").eq(
         "seller_id", seller_id
     ).eq("product_id", product_id).is_("acknowledged_at", "null").execute()
@@ -322,20 +279,31 @@ def _write_alerts(sb, seller_id: str, product_id: str, m: TVeloMetric, underesti
 # Main entry point
 # ============================================================================
 
-def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
-    """Полный пересчёт всех метрик селлера: events, tvelo_metrics, store_metrics, alerts, changelog."""
+def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict] = None) -> dict:
+    """Полный пересчёт метрик селлера.
+
+    progress (optional): dict который функция обновляет по ходу. Поля:
+      phase: 'loading_products' | 'processing_skus' | 'writing_metrics' | 'writing_alerts' | 'writing_store' | 'done'
+      period_days: int
+      processed: int  (текущее число обработанных SKU в этом этапе)
+      total: int      (общее число SKU)
+    """
     sb = get_supabase()
     period_end = date.today()
     period_start = period_end - timedelta(days=period_days - 1)
     seller_tz = pytz.timezone(_seller_timezone(sb, seller_id))
 
-    # ВАЖНО: используем fetch_all для пагинации — иначе Supabase режет до 1000 строк,
-    # и у селлеров с 1000+ SKU считается только первая 1000 (баг был на проде).
+    _bump_progress(progress, phase="loading_products", period_days=period_days, processed=0, total=0)
+
     products = fetch_all(
         sb.table("products").select("product_id,sku").eq("seller_id", seller_id)
     )
     if not products:
+        _bump_progress(progress, phase="done")
         return {"products": 0, "metrics_written": 0, "alerts_written": 0, "store_metrics_written": 0}
+
+    total_skus = len(products)
+    _bump_progress(progress, phase="processing_skus", total=total_skus, processed=0)
 
     metrics_written = 0
     alerts_written = 0
@@ -345,12 +313,10 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
     sku_data: list[dict] = []
     velocities_for_median: list[float] = []
 
-    # 1-й проход: собираем метрики и события
-    for p in products:
+    # 1-й проход
+    for idx, p in enumerate(products):
         pid = p["product_id"]
         history_start = (period_start - timedelta(days=30)).isoformat()
-        # У одного SKU редко бывает >1000 снапшотов за 60 дней, но на всякий случай
-        # тоже через fetch_all (max 2 snapshots/day × 60 days = 120; запас огромный)
         rows = fetch_all(
             sb.table("inventory_snapshots")
             .select("snapshot_id,snapshot_time,stock_quantity,price,availability")
@@ -358,6 +324,9 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
             .gte("snapshot_time", history_start)
             .order("snapshot_time")
         )
+        # Обновляем прогресс каждые 20 SKU (или на последнем), чтобы не спамить dict
+        if (idx + 1) % 20 == 0 or idx == total_skus - 1:
+            _bump_progress(progress, processed=idx + 1)
         if not rows:
             continue
 
@@ -373,11 +342,9 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
             current_stock=current_stock,
         )
 
-        # Записываем events и changelog сразу
         events_written += _write_inventory_events(sb, pid, event_rows, period_start, period_end)
         changelog_written += _write_changelog(sb, seller_id, pid, aggregates, period_start, period_end)
 
-        # Rule 12.1: детектим изменения цены и пишем в changelog
         daily_prices = [(a.day, a.price) for a in aggregates if a.price > 0]
         price_changes = detect_price_changes(daily_prices)
         if price_changes:
@@ -386,7 +353,7 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
                     "product_id": pid,
                     "seller_id": seller_id,
                     "event_date": pc.day.isoformat(),
-                    "event_type": "recount_like",  # ближайший по семантике; UI отображает как price_change
+                    "event_type": "recount_like",
                     "delta_stock": None,
                     "message": f"Цена изменилась: {pc.previous_price:.2f} → {pc.new_price:.2f} ({pc.delta_pct:+.1f}%)",
                     "confidence_impact": 0.0,
@@ -396,7 +363,6 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
             sb.table("changelog").insert(price_rows).execute()
             changelog_written += len(price_rows)
 
-            # Rule 12.3: считаем elasticity для каждого ценового изменения
             for pc in price_changes:
                 sales_before = [
                     abs(a.delta_stock or 0) for a in aggregates
@@ -430,11 +396,8 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
                         logger.warning("elasticity write failed for %s: %s", pid, e)
 
         sku_data.append({
-            "pid": pid,
-            "metric": metric,
-            "current_stock": current_stock,
-            "current_price": current_price,
-            "availability_now": current_stock > 0,
+            "pid": pid, "metric": metric, "current_stock": current_stock,
+            "current_price": current_price, "availability_now": current_stock > 0,
             "aggregates": aggregates,
         })
         if metric.adjusted_velocity > 0:
@@ -442,18 +405,17 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
 
     median_store_velocity = _median(velocities_for_median) if velocities_for_median else 0.0
 
-    # 2-й проход: tvelo_metrics + alerts + underestimated_sku
-    for item in sku_data:
+    # 2-й проход: tvelo_metrics + alerts
+    _bump_progress(progress, phase="writing_metrics", processed=0, total=len(sku_data))
+    for idx, item in enumerate(sku_data):
         pid = item["pid"]
         m: TVeloMetric = item["metric"]
-
         underestimated = is_underestimated_sku(
             stockout_days=m.stockout_days,
             adjusted_velocity=m.adjusted_velocity,
             median_store_velocity=median_store_velocity,
             confidence_score=m.confidence_score,
         )
-
         sb.table("tvelo_metrics").upsert({
             "product_id": pid,
             "period_start": m.period_start.isoformat(),
@@ -472,10 +434,12 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
             "underestimated_sku": underestimated,
         }, on_conflict="product_id,period_start,period_end").execute()
         metrics_written += 1
-
         alerts_written += _write_alerts(sb, seller_id, pid, m, underestimated)
+        if (idx + 1) % 20 == 0 or idx == len(sku_data) - 1:
+            _bump_progress(progress, processed=idx + 1)
 
     # 3-й проход: store_metrics
+    _bump_progress(progress, phase="writing_store")
     store_written = _write_store_metrics(sb, seller_id, sku_data, period_start, period_end)
 
     return {
@@ -489,10 +453,8 @@ def recalc_seller(seller_id: str, period_days: int = 30) -> dict:
 
 
 def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start: date, period_end: date) -> int:
-    """Агрегирует и записывает store_metrics (раздел 1.5, Rule 13.2)."""
     if not sku_data:
         return 0
-
     sku_health_inputs = [
         SkuHealthInput(
             product_id=item["pid"],
@@ -500,13 +462,11 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
             stock_quantity=item["current_stock"],
             price=item["current_price"],
             adjusted_velocity=item["metric"].adjusted_velocity,
-            median_30d_velocity=item["metric"].adjusted_velocity,  # proxy
+            median_30d_velocity=item["metric"].adjusted_velocity,
             is_out_of_stock=not item["availability_now"],
         )
         for item in sku_data
     ]
-
-    # Концентрации
     inv_items = [SkuValue(s.product_id, s.stock_quantity * s.price) for s in sku_health_inputs]
     dem_items = [
         SkuValue(s.product_id, demand_weight(s.adjusted_velocity, s.median_30d_velocity, s.price))
@@ -514,20 +474,14 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
     ]
     inv_conc = concentration_50(inv_items)
     dem_conc = concentration_50(dem_items)
-
     coverage_by_sku = {item["pid"]: item["metric"].coverage_days for item in sku_data}
-
     total_value = total_inventory_value(sku_health_inputs)
     frozen_value = frozen_inventory_value(sku_health_inputs, coverage_by_sku)
     wh_score = warehouse_health_score(sku_health_inputs)
-
-    # Distribution по сегментам
     seg_distribution: dict[str, int] = {}
     for item in sku_data:
         seg = (item["metric"].segment.value if item["metric"].segment else "insufficient_data")
         seg_distribution[seg] = seg_distribution.get(seg, 0) + 1
-
-    # Подсчёт по статусам (для KPI-карточек в dashboard)
     oos_count = sum(1 for item in sku_data if not item["availability_now"])
     low_count = sum(
         1 for item in sku_data
@@ -537,8 +491,6 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
         1 for item in sku_data
         if item["metric"].coverage_days is not None and item["metric"].coverage_days > 180
     )
-
-    # Lost revenue с правильной AverageStockoutPrice по Rule 9.2
     lost_total = 0.0
     for item in sku_data:
         m = item["metric"]
@@ -550,7 +502,6 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
         ]
         avg_price = average_stockout_price(prices_during_stockout, item["current_price"])
         lost_total += m.adjusted_velocity * m.stockout_days * avg_price
-
     sb.table("store_metrics").upsert({
         "seller_id": seller_id,
         "period_start": period_start.isoformat(),
@@ -567,27 +518,32 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
         "warehouse_health_score": float(wh_score) if wh_score is not None else None,
         "demand_pattern_distribution": seg_distribution,
     }, on_conflict="seller_id,period_start,period_end").execute()
-
     return 1
 
 
-def recalc_seller_all_periods(seller_id: str) -> dict:
-    """Пересчёт по всем периодам: 7, 30, 90 дней."""
+def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -> dict:
+    """Пересчёт по всем периодам: 7, 30, 90 дней.
+
+    Передаёт progress в recalc_seller. Обновляет current_period_index / total_periods.
+    """
     result = {"products": 0, "metrics_written": 0, "alerts_written": 0,
               "store_metrics_written": 0, "events_written": 0, "changelog_written": 0,
               "periods": []}
-    for period_days in (7, 30, 90):
-        r = recalc_seller(seller_id, period_days=period_days)
+    periods_list = (7, 30, 90)
+    _bump_progress(progress, total_periods=len(periods_list), current_period_index=0)
+    for i, period_days in enumerate(periods_list):
+        _bump_progress(progress, current_period_index=i + 1)
+        r = recalc_seller(seller_id, period_days=period_days, progress=progress)
         result["periods"].append({"period_days": period_days, **r})
         if period_days == 30:
             for k in ("products", "metrics_written", "alerts_written",
                       "store_metrics_written", "events_written", "changelog_written"):
                 result[k] = r.get(k, 0)
+    _bump_progress(progress, phase="done")
     return result
 
 
 def recalc_all_sellers() -> dict:
-    """Cron: пересчёт всех селлеров по всем периодам."""
     sb = get_supabase()
     sellers = sb.table("sellers").select("id").execute()
     summary = {"sellers": 0, "metrics_written": 0, "alerts_written": 0, "store_metrics_written": 0}

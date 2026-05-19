@@ -16,8 +16,6 @@ from app.logger import JsonFormatter, setup_logger
 from app.schemas import SnapshotInput, SourceType
 from app.sources import csv_upload, feed as feed_src, google_sheet, ozon, wildberries
 
-# Настраиваем root логгер с JsonFormatter — все child логгеры (recalc/sources/jobs)
-# будут выводить свои сообщения в JSON вместо плоского текста.
 _root = logging.getLogger()
 if not any(isinstance(h.formatter, JsonFormatter) for h in _root.handlers if h.formatter):
     _root.handlers.clear()
@@ -29,7 +27,6 @@ _root.setLevel(logging.INFO)
 
 logger = setup_logger("veloseller.worker")
 
-# Sentry (опционально — активируется только при наличии SENTRY_DSN)
 import os as _os
 _sentry_dsn = _os.environ.get("SENTRY_DSN")
 if _sentry_dsn:
@@ -44,7 +41,7 @@ if _sentry_dsn:
                 LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
             ],
             environment=_os.environ.get("SENTRY_ENV", "production"),
-            traces_sample_rate=0.1,  # 10% performance traces
+            traces_sample_rate=0.1,
             release=_os.environ.get("SENTRY_RELEASE"),
         )
         logger.info("sentry initialized", extra={"env": _os.environ.get("SENTRY_ENV", "production")})
@@ -53,15 +50,12 @@ if _sentry_dsn:
 
 
 # In-memory state для running recalc jobs.
-# {seller_id: {"started_at": iso, "status": "running"|"done"|"error", "result": dict, "error": str}}
-# Простой набор без persistence — статус теряется при рестарте worker'а, но это окей,
-# т.к. сами метрики персистятся в БД и UI смотрит на их наличие.
+# {seller_id: {"started_at", "status", "result", "error", "progress": {phase, processed, total, period_days, current_period_index, total_periods}}}
 _running_recalcs: dict[str, dict] = {}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Запуск APScheduler при старте, остановка при shutdown."""
     if settings.enable_scheduler:
         start_scheduler()
         logger.info("scheduler started", extra={"event": "lifecycle"})
@@ -76,53 +70,33 @@ app = FastAPI(title="Veloseller Worker", version="0.1.0", lifespan=lifespan)
 
 def require_worker_secret(x_worker_secret: Optional[str] = Header(None)) -> None:
     if not settings.worker_secret or settings.worker_secret == "dev-secret-replace-me":
-        return  # dev mode
+        return
     if x_worker_secret != settings.worker_secret:
         raise HTTPException(401, "Invalid worker secret")
 
-
-# ============================================================================
-# Health
-# ============================================================================
 
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat()}
 
 
-# ============================================================================
-# Persistence helpers
-# ============================================================================
-
 def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
     if not snapshots:
         return {}
-    rows = [
-        {"seller_id": seller_id, "sku": s.sku, "product_name": s.product_name or s.sku}
-        for s in snapshots
-    ]
+    rows = [{"seller_id": seller_id, "sku": s.sku, "product_name": s.product_name or s.sku} for s in snapshots]
     sb.table("products").upsert(rows, on_conflict="seller_id,sku").execute()
     res = (
-        sb.table("products")
-        .select("product_id,sku")
-        .eq("seller_id", seller_id)
-        .in_("sku", [s.sku for s in snapshots])
-        .execute()
+        sb.table("products").select("product_id,sku").eq("seller_id", seller_id)
+        .in_("sku", [s.sku for s in snapshots]).execute()
     )
     return {r["sku"]: r["product_id"] for r in (res.data or [])}
 
 
-def _persist_snapshots(
-    seller_id: str,
-    connection_id: Optional[str],
-    source: SourceType,
-    snapshots: list[SnapshotInput],
-) -> int:
+def _persist_snapshots(seller_id, connection_id, source, snapshots):
     if not snapshots:
         return 0
     sb = get_supabase()
     sku_to_pid = _ensure_products(sb, seller_id, snapshots)
-
     rows = []
     for s in snapshots:
         pid = sku_to_pid.get(s.sku)
@@ -130,15 +104,11 @@ def _persist_snapshots(
             continue
         ts = s.snapshot_time or datetime.now(timezone.utc)
         rows.append({
-            "product_id": pid,
-            "connection_id": connection_id,
-            "stock_quantity": s.stock_quantity,
-            "price": float(s.price),
+            "product_id": pid, "connection_id": connection_id,
+            "stock_quantity": s.stock_quantity, "price": float(s.price),
             "availability": s.stock_quantity > 0,
-            "snapshot_time": ts.isoformat(),
-            "source": source.value,
+            "snapshot_time": ts.isoformat(), "source": source.value,
         })
-
     if rows:
         sb.table("inventory_snapshots").insert(rows).execute()
     return len(rows)
@@ -151,10 +121,6 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
         "last_error": error,
     }).eq("id", connection_id).execute()
 
-
-# ============================================================================
-# Ingest endpoints
-# ============================================================================
 
 @app.post("/ingest/csv", dependencies=[Depends(require_worker_secret)])
 async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
@@ -263,20 +229,25 @@ def ingest_feed(connection_id: str) -> dict:
     return {"inserted": inserted}
 
 
-# ============================================================================
-# Recalc jobs
-# ============================================================================
-
 def _run_recalc_bg(seller_id: str) -> None:
-    """Запуск recalc в фоне — обновляет _running_recalcs."""
+    """Background recalc — обновляет _running_recalcs[seller_id]['progress'] по ходу."""
+    progress: dict = {
+        "phase": "starting",
+        "processed": 0,
+        "total": 0,
+        "period_days": 30,
+        "current_period_index": 0,
+        "total_periods": 3,
+    }
     _running_recalcs[seller_id] = {
         "started_at": datetime.now(timezone.utc).isoformat(),
         "status": "running",
         "result": None,
         "error": None,
+        "progress": progress,
     }
     try:
-        result = recalc_seller_all_periods(seller_id)
+        result = recalc_seller_all_periods(seller_id, progress=progress)
         _running_recalcs[seller_id].update({
             "status": "done",
             "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -294,12 +265,6 @@ def _run_recalc_bg(seller_id: str) -> None:
 
 @app.post("/jobs/recalc/{seller_id}", dependencies=[Depends(require_worker_secret)])
 def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: bool = False) -> dict:
-    """Пересчёт по всем периодам (7/30/90 дней) — для UI с PeriodSelector.
-
-    По умолчанию запускается в фоне (BackgroundTasks) и сразу возвращает 202 + статус.
-    Передать ?sync=true для синхронного режима (e.g. из cron). UI должен использовать async.
-    """
-    # Дедупликация — если уже идёт recalc для этого селлера, не запускаем второй
     existing = _running_recalcs.get(seller_id)
     if existing and existing.get("status") == "running":
         logger.info("recalc already running, skipping", extra={"seller_id": seller_id})
@@ -309,15 +274,11 @@ def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: b
             "started_at": existing.get("started_at"),
             "message": "Расчёт уже идёт, дождитесь завершения",
         }
-
     if sync:
-        # Старый синхронный режим для cron/scheduler
         logger.info("recalc start (sync)", extra={"seller_id": seller_id})
         result = recalc_seller_all_periods(seller_id)
         logger.info("recalc done (sync)", extra={"seller_id": seller_id, **{k: v for k, v in result.items() if isinstance(v, (int, float))}})
         return result
-
-    # Async режим — запускаем в фоне через BackgroundTasks
     background_tasks.add_task(_run_recalc_bg, seller_id)
     logger.info("recalc enqueued (bg)", extra={"seller_id": seller_id})
     return {
@@ -330,10 +291,10 @@ def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: b
 
 @app.get("/jobs/recalc/{seller_id}/status", dependencies=[Depends(require_worker_secret)])
 def job_recalc_status(seller_id: str) -> dict:
-    """Статус последнего background-recalc для селлера."""
+    """Статус + прогресс."""
     state = _running_recalcs.get(seller_id)
     if not state:
-        return {"status": "idle", "started_at": None, "result": None, "error": None}
+        return {"status": "idle", "started_at": None, "result": None, "error": None, "progress": None}
     return state
 
 
@@ -345,28 +306,19 @@ def job_recalc_all() -> dict:
     return result
 
 
-# ============================================================================
-# Telegram webhook — обработка /start <seller_id> deeplink
-# ============================================================================
-
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request) -> dict:
-    """Telegram Bot API webhook. Обрабатывает /start <seller_id> deeplink."""
     from app.telegram import send_message
-
     try:
         update = await request.json()
     except Exception:
         return {"ok": False}
-
     msg = update.get("message") or update.get("edited_message") or {}
     text = (msg.get("text") or "").strip()
     chat = msg.get("chat") or {}
     chat_id = str(chat.get("id") or "")
-
     if not chat_id or not text:
         return {"ok": True}
-
     if text.startswith("/start"):
         parts = text.split(maxsplit=1)
         if len(parts) == 2 and parts[1]:
@@ -387,5 +339,4 @@ async def telegram_webhook(request: Request) -> dict:
         send_message(chat_id,
             "Привет! Я бот <b>Veloseller</b>. Чтобы подключить уведомления, откройте Veloseller и нажмите кнопку «Подключить Telegram» в настройках.")
         return {"ok": True, "linked": False}
-
     return {"ok": True}
