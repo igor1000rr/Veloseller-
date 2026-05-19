@@ -2,6 +2,8 @@
 
 Формат: колонки sku, product_name (опционально), stock_quantity, price.
 
+БАГ 16 fix: utf-8-sig снимает BOM в начале файла. Excel экспортирует CSV с BOM,
+из-за чего первая колонка заголовка превращалась в '\\ufeffsku' и required check проваливался.
 БАГ 56 fix: лимит на 50K строк (защита от OOM).
 БАГ 59 fix: per-row error handling — одна битая строка не валит весь impport.
 БАГ 60 fix: дедупликация SKU внутри одного файла (последняя запись побеждает).
@@ -22,29 +24,34 @@ MAX_ROWS = 50_000
 
 
 def parse_csv(content: bytes | str) -> list[SnapshotInput]:
-    text = content.decode("utf-8") if isinstance(content, bytes) else content
+    # БАГ 16: utf-8-sig чтобы убрать BOM от Excel-экспортированных CSV.
+    # Если в начале файла \ufeff — питон автоматически срежет.
+    if isinstance(content, bytes):
+        text = content.decode("utf-8-sig")
+    else:
+        text = content.lstrip("\ufeff")  # на случай если уже decoded
     reader = csv.DictReader(io.StringIO(text))
     required = {"sku", "stock_quantity", "price"}
     if not required.issubset({h.strip().lower() for h in (reader.fieldnames or [])}):
         raise ValueError(f"CSV должен содержать колонки {required}")
 
     now = datetime.now(timezone.utc)
-    seen_skus: dict[str, SnapshotInput] = {}  # sku → snapshot (последняя запись побеждает)
+    seen_skus: dict[str, SnapshotInput] = {}
     errors: list[str] = []
     row_count = 0
-    for row_idx, row in enumerate(reader, start=2):  # start=2 потому что строка 1 — заголовок
+    for row_idx, row in enumerate(reader, start=2):
         row_count += 1
         if row_count > MAX_ROWS:
             raise ValueError(f"CSV содержит более {MAX_ROWS} строк — слишком большой файл")
 
         try:
             norm = {k.strip().lower(): v for k, v in row.items() if k}
-            sku = norm["sku"].strip()
+            sku = (norm.get("sku") or "").strip()
             if not sku:
                 errors.append(f"строка {row_idx}: пустой SKU")
                 continue
 
-            stock_raw = norm["stock_quantity"].strip() if norm["stock_quantity"] else ""
+            stock_raw = (norm.get("stock_quantity") or "").strip()
             if not stock_raw:
                 errors.append(f"строка {row_idx} ({sku}): пустой stock_quantity")
                 continue
@@ -58,7 +65,7 @@ def parse_csv(content: bytes | str) -> list[SnapshotInput]:
                 errors.append(f"строка {row_idx} ({sku}): отрицательный stock {stock}")
                 continue
 
-            price_raw = (norm["price"] or "").strip().replace(",", ".")
+            price_raw = (norm.get("price") or "").strip().replace(",", ".")
             try:
                 price = Decimal(price_raw) if price_raw else Decimal("0")
             except (InvalidOperation, ValueError):
@@ -80,7 +87,6 @@ def parse_csv(content: bytes | str) -> list[SnapshotInput]:
             continue
 
     if errors:
-        # Логируем первые 10 ошибок, чтобы было что показать пользователю
         logger.warning("CSV parsing had errors", extra={
             "errors_count": len(errors),
             "first_errors": errors[:10],
