@@ -18,7 +18,10 @@ import pytest
 # ============================================================================
 
 class FakeQuery:
-    """Минимальный мок цепочки supabase: .select.eq.gte.order.execute()."""
+    """Минимальный мок цепочки supabase: .select.eq.gte.order.execute().
+
+    Поддерживает .range() (для fetch_all) и .is_() (для проверки IS NULL alerts).
+    """
 
     def __init__(self, table: "FakeTable", op: str = "select"):
         self._table = table
@@ -26,6 +29,7 @@ class FakeQuery:
         self._filters: list[tuple[str, str, object]] = []
         self._payload: object = None
         self._on_conflict: str | None = None
+        self._range: tuple[int, int] | None = None
 
     def select(self, *args, **kwargs):
         return self
@@ -66,7 +70,21 @@ class FakeQuery:
         self._filters.append(("in", key, values))
         return self
 
+    def is_(self, key, value):
+        """Поддержка .is_(field, 'null') / .is_(field, None) для IS NULL фильтров."""
+        if value == "null" or value is None:
+            self._filters.append(("is_null", key, None))
+        return self
+
     def order(self, *_a, **_kw):
+        return self
+
+    def limit(self, _n):
+        return self
+
+    def range(self, start, end):
+        """Пагинация — в моке просто запоминаем диапазон и вырезаем в _execute."""
+        self._range = (start, end)
         return self
 
     def single(self):
@@ -92,12 +110,18 @@ class FakeTable:
                 return False
             if op == "in" and row.get(k) not in v:
                 return False
+            if op == "is_null" and row.get(k) is not None:
+                return False
         return True
 
     def _execute(self, q: FakeQuery):
         rows = self._store[self.name]
         if q._op == "select":
             filtered = [r for r in rows if self._matches(r, q._filters)]
+            # Применяем range если задан (эмуляция Supabase пагинации)
+            if q._range is not None:
+                s, e = q._range
+                filtered = filtered[s : e + 1]
             return MagicMock(data=filtered)
         if q._op == "insert":
             new = q._payload if isinstance(q._payload, list) else [q._payload]
@@ -105,7 +129,6 @@ class FakeTable:
             return MagicMock(data=new)
         if q._op == "upsert":
             new = q._payload if isinstance(q._payload, list) else [q._payload]
-            # Простая логика: ищем по on_conflict ключам и заменяем; иначе добавляем
             keys = (q._on_conflict or "").split(",")
             for n in new:
                 replaced = False
@@ -128,7 +151,6 @@ class FakeTable:
             return MagicMock(data=[])
         return MagicMock(data=[])
 
-    # Несколько таблиц требуют этого
     def select(self, *args, **kwargs):
         return FakeQuery(self, "select")
 
@@ -198,14 +220,12 @@ def test_recalc_seller_e2e(fake_sb):
         from app.jobs.recalc import recalc_seller
         result = recalc_seller(seller_id, period_days=30)
 
-    # Метрики записаны
     assert result["products"] == 1
     assert result["metrics_written"] == 1
     assert result["store_metrics_written"] == 1
     assert result["events_written"] > 0
-    assert result["changelog_written"] >= 0  # после Rule 11.1: пишутся только repl/anomaly/missing
+    assert result["changelog_written"] >= 0
 
-    # Проверяем содержимое tvelo_metrics
     metrics = sb._store["tvelo_metrics"]
     assert len(metrics) == 1
     m = metrics[0]
@@ -214,11 +234,9 @@ def test_recalc_seller_e2e(fake_sb):
     assert m["in_stock_days"] > 0
     assert m["confirmed_velocity"] > 0
     assert m["adjusted_velocity"] > 0
-    # 29 продаж по 1, остаток 71 -> coverage ~70 дней
     assert m["coverage_days"] is not None
     assert m["inventory_segment"] in {"stable", "slow_movers", "fast_movers"}
 
-    # Store metrics — KPI карточки
     store = sb._store["store_metrics"]
     assert len(store) == 1
     s = store[0]
@@ -227,14 +245,9 @@ def test_recalc_seller_e2e(fake_sb):
     assert s["total_inventory_value"] > 0
     assert s["warehouse_health_score"] is not None
 
-    # Changelog — теперь пишется только для repl/anomaly/missing; в этом тесте только sales_like, так что 0 OK
     cl = sb._store["changelog"]
     assert len(cl) >= 0
-    types = {e["event_type"] for e in cl}
-    # После Rule 11.1: sales_like в changelog не попадают
-    # first_snapshot тоже не в значимых
 
-    # Inventory events
     events = sb._store["inventory_events"]
     assert len(events) > 0
 
@@ -255,7 +268,6 @@ def test_recalc_seller_with_stockout(fake_sb):
     assert m["stockout_days"] > 0
     assert m["current_stock"] == 0
 
-    # Alerts должны быть созданы (low/critical stock + repeated_stockout)
     alerts = sb._store["alerts"]
     kinds = {a["kind"] for a in alerts}
     assert "critical_stock" in kinds or "low_stock" in kinds
