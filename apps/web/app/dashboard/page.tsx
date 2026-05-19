@@ -7,12 +7,11 @@ import { PeriodSelector } from "./PeriodSelector";
 import { DeadInventoryChart } from "./StoreCharts";
 import { HealthScoreBlock } from "./HealthScale";
 import { formatMoney } from "@/lib/format-money";
+import { InfoTooltip } from "../_components/InfoTooltip";
 
-// Свежие данные на каждый запрос (после recalc нет stale UI)
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-/** Постранично загружает все строки из Supabase запроса (default режет до 1000). */
 async function fetchAll<T>(buildQuery: (from: number, to: number) => any, pageSize = 1000): Promise<T[]> {
   const all: T[] = [];
   let offset = 0;
@@ -37,7 +36,6 @@ export default async function DashboardOverview({ searchParams }: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // Читаем валюту селлера (default RUB) для форматирования денег
   const { data: seller } = await supabase
     .from("sellers")
     .select("created_at,currency")
@@ -68,8 +66,6 @@ export default async function DashboardOverview({ searchParams }: {
     .order("period_end", { ascending: false })
     .limit(14);
 
-  // Velocity — берём только метрики ТЕКУЩЕГО селлера через JOIN с products, и
-  // пагинируем т.к. может быть 5000+ строк (1879 SKU × 3 периода).
   const tveloRows = await fetchAll<{ adjusted_velocity: number; product_id: string; period_end: string }>(
     async (from, to) => await supabase
       .from("tvelo_metrics")
@@ -106,21 +102,10 @@ export default async function DashboardOverview({ searchParams }: {
         <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Подключи первый источник данных</h1>
         <p className="mx-auto mt-3 max-w-xl text-ink-muted">
           Чтобы Veloseller начал считать TVelo, нужны ежедневные snapshots по твоим SKU.
-          Это занимает 5 минут — выбери способ, как тебе удобнее.
         </p>
         <div className="mt-6 flex gap-3 justify-center flex-wrap">
-          <Link
-            href={"/onboarding" as any}
-            className="inline-flex items-center rounded-lg border border-line bg-bg-soft text-ink px-5 py-3 font-semibold hover:border-lime-deep/40 transition"
-          >
-            Гид по настройке
-          </Link>
-          <Link
-            href={"/connections/new" as any}
-            className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition"
-          >
-            Подключить источник
-          </Link>
+          <Link href={"/onboarding" as any} className="inline-flex items-center rounded-lg border border-line bg-bg-soft text-ink px-5 py-3 font-semibold hover:border-lime-deep/40 transition">Гид по настройке</Link>
+          <Link href={"/connections/new" as any} className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition">Подключить источник</Link>
         </div>
       </div>
     );
@@ -140,10 +125,29 @@ export default async function DashboardOverview({ searchParams }: {
 
       {/* KPI */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Kpi label="Всего SKU" value={storeMetrics?.total_sku_count ?? "—"} />
-        <Kpi label="Out-of-stock" value={storeMetrics?.oos_sku_count ?? "—"} tone="warn" />
-        <Kpi label="Низкий остаток" value={storeMetrics?.low_stock_sku_count ?? "—"} tone="warn" />
-        <Kpi label="Неликвид" value={storeMetrics?.dead_inventory_sku_count ?? "—"} tone="warn" />
+        <Kpi
+          label="Всего SKU"
+          tooltip="Количество товарных позиций засинкованных из подключённых источников. Считается по таблице products."
+          value={storeMetrics?.total_sku_count ?? "—"}
+        />
+        <Kpi
+          label="Out-of-stock"
+          tooltip="SKU с нулевым остатком на момент последнего синка. Прямые потери продаж — товара нет, заявки уходят к конкурентам."
+          value={storeMetrics?.oos_sku_count ?? "—"}
+          tone="warn"
+        />
+        <Kpi
+          label="Низкий остаток"
+          tooltip="SKU где coverage_days ≤ 7 — закончится за неделю при текущей скорости продаж. Сюда срочно пополнение."
+          value={storeMetrics?.low_stock_sku_count ?? "—"}
+          tone="warn"
+        />
+        <Kpi
+          label="Неликвид"
+          tooltip="SKU где coverage_days > 180 — продаваться будет дольше 6 месяцев. Деньги заморожены в товаре. Распродавать или возвращать поставщику."
+          value={storeMetrics?.dead_inventory_sku_count ?? "—"}
+          tone="warn"
+        />
       </div>
 
       {/* Health + Inventory value */}
@@ -151,12 +155,18 @@ export default async function DashboardOverview({ searchParams }: {
         <HealthScoreBlock score={storeMetrics?.warehouse_health_score} />
 
         <div className="rounded-2xl border border-line bg-paper p-6">
-          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">Денег в остатках</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold flex items-center">
+            Денег в остатках
+            <InfoTooltip text={`Σ stock_quantity × current_price по всем SKU. Сколько ${currency === "RUB" ? "рублей" : "денег"} лежит на складе в виде товара — это твой замороженный оборотный капитал.`} />
+          </div>
           <div className="mt-3 font-display text-4xl md:text-5xl tracking-tight font-medium text-ink tabular">
             {fmt(storeMetrics?.total_inventory_value)}
           </div>
           <div className="mt-4 rounded-lg border border-orange/20 bg-orange/5 p-3 flex items-center justify-between gap-3 flex-wrap">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold">Заморожено в неликвиде</span>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold flex items-center">
+              Заморожено в неликвиде
+              <InfoTooltip text="Деньги в SKU с coverage > 180 дней. Эти средства фактически не работают — товар будет продаваться полгода+. Кандидаты на распродажу, возврат поставщику или списание." />
+            </span>
             <span className="font-display tabular text-xl text-orange font-medium">
               {fmt(storeMetrics?.store_frozen_inventory_value)}
             </span>
@@ -167,21 +177,30 @@ export default async function DashboardOverview({ searchParams }: {
       {/* Concentrations */}
       <div className="grid gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-line bg-paper p-5">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Концентрация остатков</div>
+          <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
+            Концентрация остатков
+            <InfoTooltip text="Сколько топ-SKU держат 50% всех денег в остатках. Малое число (например 5-10 из 1000) = большая концентрация: потерять 1-2 ключевых SKU = потерять половину склада." />
+          </div>
           <div className="mt-2 font-display text-2xl tabular text-ink font-medium">
             {storeMetrics?.inventory_concentration_50 ?? "—"} <span className="text-base text-ink-muted">SKU</span>
           </div>
           <div className="mt-1 text-xs text-ink-muted">дают 50% остатков по деньгам</div>
         </div>
         <div className="rounded-2xl border border-line bg-paper p-5">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Концентрация спроса</div>
+          <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
+            Концентрация спроса
+            <InfoTooltip text="Сколько SKU создают 50% всего спроса (скорость × цена). Маленькое число = узкое горлышко: эти SKU критичны для выручки, дефицит по ним = крупные потери." />
+          </div>
           <div className="mt-2 font-display text-2xl tabular text-ink font-medium">
             {storeMetrics?.demand_concentration_50 ?? "—"} <span className="text-base text-ink-muted">SKU</span>
           </div>
           <div className="mt-1 text-xs text-ink-muted">дают 50% спроса</div>
         </div>
         <div className="rounded-2xl border border-rose/30 bg-rose/5 p-5">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-rose font-semibold">Lost revenue</div>
+          <div className="font-mono text-[10px] uppercase tracking-widest text-rose font-semibold flex items-center">
+            Lost revenue
+            <InfoTooltip text="Σ (adjusted_velocity × stockout_days × avg_price) по всем SKU. Сколько денег не получено за период из-за того что товар был out-of-stock — clients ушли к конкуренту." />
+          </div>
           <div className="mt-2 font-display text-2xl tabular text-rose font-medium">
             {fmt(storeMetrics?.lost_revenue)}
           </div>
@@ -189,26 +208,38 @@ export default async function DashboardOverview({ searchParams }: {
         </div>
       </div>
 
-      {/* 3 скорости продаж (Project.docx Day 7) */}
+      {/* 3 скорости продаж */}
       <div>
-        <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">Скорости продаж по SKU</h3>
+        <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3 flex items-center">
+          Скорости продаж по SKU
+          <InfoTooltip text="Распределение adjusted_velocity (штук в день) по всем SKU. Быстрая = 90-й перцентиль, Средняя = mean, Медленная = 10-й перцентиль. Помогает понять структуру ассортимента." />
+        </h3>
         <div className="grid grid-cols-3 gap-3">
-          <VelocityCard label="Быстрая" value={fastVelocity} sub="топ 10% SKU" tone="fast" />
-          <VelocityCard label="Средняя" value={avgVelocity}  sub="по всем SKU"  tone="mid" />
-          <VelocityCard label="Медленная" value={slowVelocity} sub="нижние 10%" tone="slow" />
+          <VelocityCard label="Быстрая" value={fastVelocity} sub="топ 10% SKU" tone="fast" tooltip="P90: 90% SKU продаются медленнее, 10% — быстрее. Это твои бестселлеры." />
+          <VelocityCard label="Средняя" value={avgVelocity}  sub="по всем SKU"  tone="mid"  tooltip="Арифметическое среднее скорости продаж по всем активным SKU. Хороший baseline для сравнения." />
+          <VelocityCard label="Медленная" value={slowVelocity} sub="нижние 10%" tone="slow" tooltip="P10: 90% SKU продаются быстрее. Кандидаты на оптимизацию ассортимента." />
         </div>
       </div>
 
       {/* Графики */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <ChartCard title="Health за 14 дней"><HealthTrend history={storeHistory ?? []} /></ChartCard>
-        <ChartCard title="Lost revenue за 14 дней"><LostRevenueTrend history={storeHistory ?? []} /></ChartCard>
-        <ChartCard title="Распределение по сегментам"><SegmentPie distribution={storeMetrics?.demand_pattern_distribution as any} /></ChartCard>
+        <ChartCard title="Health за 14 дней" tooltip="Изменение warehouse_health_score за последние 14 пересчётов. Тренд вверх = склад здоровеет, вниз = ухудшение.">
+          <HealthTrend history={storeHistory ?? []} />
+        </ChartCard>
+        <ChartCard title="Lost revenue за 14 дней" tooltip="Динамика потерь из-за OOS. Если растёт — нужно срочно пополнять дефицитные SKU.">
+          <LostRevenueTrend history={storeHistory ?? []} />
+        </ChartCard>
+        <ChartCard title="Распределение по сегментам" tooltip="Сегментация SKU по паттерну спроса: stable (стабильные), fast_movers (быстрые), slow_movers (медленные), seasonal, sparse_data, insufficient_data.">
+          <SegmentPie distribution={storeMetrics?.demand_pattern_distribution as any} />
+        </ChartCard>
       </div>
 
       {/* Dead inventory */}
       <div className="rounded-2xl border border-line bg-paper p-6">
-        <h3 className="font-display text-lg font-medium text-ink">Неликвид (товары &gt; 6 месяцев)</h3>
+        <h3 className="font-display text-lg font-medium text-ink flex items-center">
+          Неликвид (товары &gt; 6 месяцев)
+          <InfoTooltip text="SKU с coverage > 180 дней. Динамика количества (левая ось) и денег (правая). Если растёт — закупка неэффективна, надо разбираться." position="bottom" />
+        </h3>
         <p className="text-xs text-ink-muted mt-1 mb-4">Динамика количества SKU и замороженных денег</p>
         <DeadInventoryChart history={storeHistory ?? []} />
       </div>
@@ -236,10 +267,13 @@ export default async function DashboardOverview({ searchParams }: {
   );
 }
 
-function Kpi({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "warn" }) {
+function Kpi({ label, value, tone, tooltip }: { label: string; value: React.ReactNode; tone?: "warn"; tooltip?: string }) {
   return (
     <div className="rounded-2xl border border-line bg-paper p-4">
-      <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{label}</div>
+      <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
+        {label}
+        {tooltip && <InfoTooltip text={tooltip} />}
+      </div>
       <div className={`mt-1.5 font-display text-2xl md:text-3xl tabular font-medium tracking-tight ${tone === "warn" ? "text-orange" : "text-ink"}`}>
         {value}
       </div>
@@ -247,24 +281,30 @@ function Kpi({ label, value, tone }: { label: string; value: React.ReactNode; to
   );
 }
 
-function VelocityCard({ label, value, sub, tone }: { label: string; value: number; sub: string; tone: "fast" | "mid" | "slow" }) {
+function VelocityCard({ label, value, sub, tone, tooltip }: { label: string; value: number; sub: string; tone: "fast" | "mid" | "slow"; tooltip?: string }) {
   const cls =
     tone === "fast" ? "border-l-lime-deep text-lime-deep" :
     tone === "mid"  ? "border-l-azure text-azure" :
                       "border-l-orange text-orange";
   return (
     <div className={`bg-paper border border-line border-l-4 rounded-xl p-4 ${cls.replace("text-", "")}`}>
-      <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{label}</div>
+      <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
+        {label}
+        {tooltip && <InfoTooltip text={tooltip} />}
+      </div>
       <div className={`mt-1 font-display text-2xl tabular font-medium ${cls.split(" ")[1]}`}>{value.toFixed(2)}</div>
       <div className="text-[10px] text-ink-hush mt-0.5 font-mono uppercase tracking-wider">{sub}</div>
     </div>
   );
 }
 
-function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+function ChartCard({ title, children, tooltip }: { title: string; children: React.ReactNode; tooltip?: string }) {
   return (
     <div className="rounded-2xl border border-line bg-paper p-6">
-      <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">{title}</h3>
+      <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3 flex items-center">
+        {title}
+        {tooltip && <InfoTooltip text={tooltip} />}
+      </h3>
       {children}
     </div>
   );
