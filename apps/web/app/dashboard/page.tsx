@@ -227,7 +227,7 @@ export default async function DashboardOverview({ searchParams }: {
           <HealthTrend history={storeHistory ?? []} />
         </ChartCard>
         <ChartCard title="Lost revenue за 14 дней" tooltip="Динамика потерь из-за OOS. Если растёт — нужно срочно пополнять дефицитные SKU.">
-          <LostRevenueTrend history={storeHistory ?? []} />
+          <LostRevenueTrend history={storeHistory ?? []} currency={currency} />
         </ChartCard>
         <ChartCard title="Распределение по сегментам" tooltip="Сегментация SKU по паттерну спроса: stable (стабильные), fast_movers (быстрые), slow_movers (медленные), seasonal, sparse_data, insufficient_data.">
           <SegmentPie distribution={storeMetrics?.demand_pattern_distribution as any} />
@@ -241,7 +241,7 @@ export default async function DashboardOverview({ searchParams }: {
           <InfoTooltip text="SKU с coverage > 180 дней. Динамика количества (левая ось) и денег (правая). Если растёт — закупка неэффективна, надо разбираться." position="bottom" />
         </h3>
         <p className="text-xs text-ink-muted mt-1 mb-4">Динамика количества SKU и замороженных денег</p>
-        <DeadInventoryChart history={storeHistory ?? []} />
+        <DeadInventoryChart history={storeHistory ?? []} currency={currency} />
       </div>
 
       {/* Alerts */}
