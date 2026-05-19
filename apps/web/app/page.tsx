@@ -4,8 +4,19 @@ import HeroVeloDemo from "./HeroVeloDemo";
 import DashboardPreview from "./DashboardPreview";
 import FaqAccordion from "./FaqAccordion";
 import MobileMenu from "./_components/MobileMenu";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
-export default function LandingPage() {
+// Лендинг — server component с проверкой сессии. Авто-обновление на каждый
+// запрос гарантирует, что зашедший в свой аккаунт юзер увидит "В кабинет"
+// вместо "Войти", и наоборот.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
+export default async function LandingPage() {
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const isAuthed = !!user;
+
   return (
     <main className="relative bg-paper-warm text-ink overflow-x-hidden">
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-noise opacity-100 mix-blend-multiply" />
@@ -37,16 +48,27 @@ export default function LandingPage() {
             <a href="#faq" className="text-sm text-ink-soft hover:text-lime-deep transition">FAQ</a>
           </nav>
           <div className="flex items-center gap-2 md:gap-3">
-            <Link href={"/login" as any} className="hidden md:inline-block text-sm text-ink-soft hover:text-ink transition px-2 py-1">
-              Войти
-            </Link>
-            <Link
-              href={"/register" as any}
-              className="hidden md:inline-flex rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition"
-            >
-              Начать
-            </Link>
-            <MobileMenu />
+            {isAuthed ? (
+              <Link
+                href={"/dashboard" as any}
+                className="hidden md:inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition"
+              >
+                В кабинет <Icons.ArrowRight size={12} />
+              </Link>
+            ) : (
+              <>
+                <Link href={"/login" as any} className="hidden md:inline-block text-sm text-ink-soft hover:text-ink transition px-2 py-1">
+                  Войти
+                </Link>
+                <Link
+                  href={"/register" as any}
+                  className="hidden md:inline-flex rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition"
+                >
+                  Начать
+                </Link>
+              </>
+            )}
+            <MobileMenu isAuthed={isAuthed} />
           </div>
         </div>
       </header>
@@ -76,11 +98,11 @@ export default function LandingPage() {
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
               <Link
-                href={"/register" as any}
+                href={(isAuthed ? "/dashboard" : "/register") as any}
                 className="group inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-5 md:px-6 py-3.5 font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.4)]"
               >
-                Подключить магазин
-                <span className="font-mono text-xs opacity-60">5 мин</span>
+                {isAuthed ? "В кабинет" : "Подключить магазин"}
+                {!isAuthed && <span className="font-mono text-xs opacity-60">5 мин</span>}
                 <Icons.ArrowRight />
               </Link>
               <a href="#how" className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition px-2">
@@ -346,7 +368,7 @@ export default function LandingPage() {
             <p className="mt-3 text-ink-muted text-sm md:text-base">Первый месяц бесплатно. Без карты.</p>
           </div>
           <div className="grid md:grid-cols-3 gap-4 md:gap-6 max-w-6xl mx-auto">
-            {plans.map((p) => <PricingCard key={p.name} {...p} />)}
+            {plans.map((p) => <PricingCard key={p.name} {...p} isAuthed={isAuthed} />)}
           </div>
           <p className="mt-8 md:mt-10 text-center font-mono text-xs text-ink-hush flex items-center justify-center flex-wrap gap-x-2 gap-y-1">
             <span>Все тарифы включают:</span>
@@ -384,10 +406,10 @@ export default function LandingPage() {
               </p>
               <div className="mt-7 md:mt-8 flex flex-wrap gap-3 md:gap-4">
                 <Link
-                  href={"/register" as any}
+                  href={(isAuthed ? "/dashboard" : "/register") as any}
                   className="inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-6 md:px-7 py-3.5 md:py-4 text-base font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.4)]"
                 >
-                  Начать бесплатно <Icons.ArrowRight />
+                  {isAuthed ? "Открыть кабинет" : "Начать бесплатно"} <Icons.ArrowRight />
                 </Link>
                 <a href="#pricing" className="inline-flex items-center px-6 md:px-7 py-3.5 md:py-4 text-ink-muted hover:text-lime-deep transition">
                   Посмотреть тарифы
@@ -435,12 +457,11 @@ export default function LandingPage() {
                 </li>
               </ul>
             </div>
-            <FooterCol title="Аккаунт" items={[
-              ["/login", "Войти"],
-              ["/register", "Регистрация"],
-              ["#", "Документация"],
-              ["#", "Поддержка"],
-            ]} />
+            <FooterCol title="Аккаунт" items={
+              isAuthed
+                ? [["/dashboard", "Кабинет"], ["/billing", "Тариф"], ["/account", "Профиль"], ["#", "Поддержка"]]
+                : [["/login", "Войти"], ["/register", "Регистрация"], ["#", "Документация"], ["#", "Поддержка"]]
+            } />
             <FooterCol title="Сообщество" items={[
               ["#", "Telegram"],
               ["#", "Email"],
@@ -495,7 +516,7 @@ function BentoCard({ idx, icon, title, text, accent }: {
   );
 }
 
-function PricingCard({ name, price, skus, highlight, perks }: typeof plans[number]) {
+function PricingCard({ name, price, skus, highlight, perks, isAuthed }: typeof plans[number] & { isAuthed: boolean }) {
   return (
     <div className={`relative rounded-2xl p-6 md:p-8 transition ${
       highlight
@@ -522,14 +543,14 @@ function PricingCard({ name, price, skus, highlight, perks }: typeof plans[numbe
         ))}
       </ul>
       <Link
-        href={"/register" as any}
+        href={(isAuthed ? "/billing" : "/register") as any}
         className={`mt-7 md:mt-8 block rounded-lg px-4 py-3 text-center text-sm font-semibold transition ${
           highlight
             ? "bg-ink text-paper hover:bg-ink-soft"
             : "bg-bg-soft text-ink border border-line hover:border-lime-deep/40"
         }`}
       >
-        Начать бесплатно
+        {isAuthed ? "Управлять подпиской" : "Начать бесплатно"}
       </Link>
     </div>
   );
