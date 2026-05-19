@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { Icons } from "./Icons";
 import LogoutButton from "../dashboard/LogoutButton";
@@ -33,7 +33,6 @@ export default function AppHeader({
   plan?: string;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -43,12 +42,7 @@ export default function AppHeader({
 
   useEffect(() => { setOpen(false); }, [pathname]);
 
-  // Тихий refresh данных при возврате на вкладку — чтобы кеш точно не висел
-  useEffect(() => {
-    const onFocus = () => router.refresh();
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [router]);
+  // Note: focus/bfcache refresh вынесён в FreshDataGuard (в dashboard layout)
 
   const links = variant === "dashboard"
     ? [
@@ -114,7 +108,6 @@ export default function AppHeader({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Badge с текущим планом — заметный, кликабельный */}
           {planLabel && variant === "dashboard" && (
             <Link
               href={"/billing" as any}

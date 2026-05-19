@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import AppHeader from "../_components/AppHeader";
+import FreshDataGuard from "../_components/FreshDataGuard";
 
-// Свежие данные на каждый запрос
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -23,6 +23,7 @@ export default async function ConnectionsLayout({ children }: { children: React.
 
   return (
     <div className="min-h-screen bg-bg">
+      <FreshDataGuard />
       <AppHeader
         email={user.email || ""}
         variant="dashboard"
