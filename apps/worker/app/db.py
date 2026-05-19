@@ -14,6 +14,12 @@ def get_supabase() -> Client:
     return create_client(settings.supabase_url, settings.supabase_service_role_key)
 
 
+# Лимит на pagination: 1M строк. С 1000 на страницу это 1000 итераций — около минуты.
+# Реалистичный максимум для одного селлера: 1879 SKU × 365 дней = ~700K snapshot'ов
+# за год. БАГ 23 fix: было 100K, что обрезало большие исторические выгрузки.
+_FETCH_ALL_MAX_ROWS = 1_000_000
+
+
 def fetch_all(query_builder, page_size: int = 1000) -> list[dict]:
     """Постранично выгружает ВСЕ строки из Supabase-запроса.
 
@@ -30,25 +36,18 @@ def fetch_all(query_builder, page_size: int = 1000) -> list[dict]:
     Defensive: если query_builder не имеет реального .range() (MagicMock-моки
     в старых тестах) — fallback на обычный .execute().
     """
-    # Детектируем MagicMock — у него .range атрибут есть всегда, но .data
-    # на ответе тоже MagicMock, который не итерируется как реальные данные.
-    # В тестах используется .execute() напрямую без range — поддерживаем такой режим.
     range_attr = getattr(query_builder, "range", None)
     if range_attr is None or not callable(range_attr):
-        # Нет range — fallback
         result = query_builder.execute()
         return list(result.data or [])
 
     try:
         page = query_builder.range(0, page_size - 1).execute()
     except (AttributeError, TypeError):
-        # .range() вернул что-то не работающее
         result = query_builder.execute()
         return list(result.data or [])
 
     rows = page.data or []
-    # MagicMock check: rows должен быть итерируемой коллекцией с реальной длиной.
-    # Если это MagicMock — fallback.
     try:
         length = len(rows)
         first_iter = list(rows) if length else []
@@ -60,9 +59,8 @@ def fetch_all(query_builder, page_size: int = 1000) -> list[dict]:
     if length < page_size:
         return all_rows
 
-    # Дальше — нормальная пагинация
     offset = page_size
-    while offset < 100_000:
+    while offset < _FETCH_ALL_MAX_ROWS:
         page = query_builder.range(offset, offset + page_size - 1).execute()
         rows = page.data or []
         try:
