@@ -3,7 +3,16 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SyncButton from "@/app/connections/SyncButton";
 
-beforeEach(() => { global.fetch = vi.fn(); global.alert = vi.fn(); });
+// next/navigation мок (router.refresh)
+const mockRefresh = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: mockRefresh }),
+}));
+
+beforeEach(() => {
+  global.fetch = vi.fn();
+  mockRefresh.mockClear();
+});
 
 describe("SyncButton", () => {
   it("для csv_upload показывает текст", () => {
@@ -27,7 +36,7 @@ describe("SyncButton", () => {
     });
   });
 
-  it("при ошибке — alert", async () => {
+  it("при ошибке показывает модал с текстом ошибки", async () => {
     (global.fetch as any).mockResolvedValue({
       ok: false, statusText: "Error",
       json: async () => ({ error: "Token expired" }),
@@ -36,7 +45,8 @@ describe("SyncButton", () => {
     render(<SyncButton connectionId="c" source="feed" />);
     await user.click(screen.getByRole("button"));
     await waitFor(() => {
-      expect(global.alert).toHaveBeenCalledWith(expect.stringContaining("Token expired"));
+      // Раньше был global.alert(); теперь ошибка отображается внутри ErrorModal
+      expect(screen.getByText(/Token expired/)).toBeInTheDocument();
     });
   });
 

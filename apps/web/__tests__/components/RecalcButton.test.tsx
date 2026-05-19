@@ -1,62 +1,117 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RecalcButton from "@/app/dashboard/RecalcButton";
 
-beforeEach(() => { global.fetch = vi.fn(); });
+// next/navigation мок
+const mockRefresh = vi.fn();
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ refresh: mockRefresh }),
+}));
+
+beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  global.fetch = vi.fn();
+  mockRefresh.mockClear();
+});
+afterEach(() => { vi.useRealTimers(); });
+
+/**
+ * По умолчанию мокаем status=idle (первый fetch при mount).
+ * Остальные fetch мокаются по каждому тесту индивидуально через mockImplementation.
+ */
+function mockStatusIdle() {
+  return { ok: true, json: async () => ({ status: "idle", started_at: null, result: null, error: null }) };
+}
+function mockStatusRunning() {
+  return { ok: true, json: async () => ({ status: "running", started_at: "2026-05-19T09:00:00Z" }) };
+}
+function mockStatusDone(result = { metrics_written: 5, alerts_written: 2 }) {
+  return { ok: true, json: async () => ({ status: "done", result }) };
+}
+function mockStartedAsync() {
+  return { ok: true, json: async () => ({ started: true, status: "running", message: "Расчёт запущен в фоне" }) };
+}
 
 describe("RecalcButton", () => {
-  it("отображает текст кнопки", () => {
+  it("отображает исходный текст когда status=idle", async () => {
+    (global.fetch as any).mockResolvedValue(mockStatusIdle());
     render(<RecalcButton />);
+    // До первого poll button виден с дефолтным текстом
     expect(screen.getByRole("button")).toHaveTextContent("Пересчитать сейчас");
   });
 
-  it("показывает 'Считаем…' и блокирует во время запроса", async () => {
-    (global.fetch as any).mockImplementation(() => new Promise(() => {}));
-    const user = userEvent.setup();
+  it("при клике вызывает /api/jobs/recalc и показывает сообщение запуска", async () => {
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url === "/api/jobs/recalc") return Promise.resolve(mockStartedAsync());
+      return Promise.resolve(mockStatusIdle());
+    });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<RecalcButton />);
     await user.click(screen.getByRole("button"));
-    expect(screen.getByRole("button")).toHaveTextContent("Считаем…");
-    expect(screen.getByRole("button")).toBeDisabled();
+    await waitFor(() => {
+      expect(global.fetch).toHaveBeenCalledWith("/api/jobs/recalc", { method: "POST" });
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/Расчёт запущен в фоне/)).toBeInTheDocument();
+    });
   });
 
-  it("при успехе показывает результат", async () => {
-    (global.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ metrics_written: 5, alerts_written: 2 }) });
-    const user = userEvent.setup();
+  it("когда polling видит status=running — кнопка disabled и показывает «Расчёт идёт…»", async () => {
+    (global.fetch as any).mockResolvedValue(mockStatusRunning());
     render(<RecalcButton />);
-    await user.click(screen.getByRole("button"));
+    await waitFor(() => {
+      expect(screen.getByRole("button")).toHaveTextContent("Расчёт идёт…");
+      expect(screen.getByRole("button")).toBeDisabled();
+    });
+  });
+
+  it("при running → done вызывает router.refresh и показывает «Готово: ...»", async () => {
+    let callCount = 0;
+    (global.fetch as any).mockImplementation(() => {
+      callCount += 1;
+      // Первый poll — running, второй — done
+      return Promise.resolve(callCount === 1 ? mockStatusRunning() : mockStatusDone());
+    });
+    render(<RecalcButton />);
+    // Ждём первого poll → running
+    await waitFor(() => {
+      expect(screen.getByText(/Расчёт идёт/)).toBeInTheDocument();
+    });
+    // Продвигаем таймер на 8с чтобы сработал следующий poll
+    await act(async () => { await vi.advanceTimersByTimeAsync(8500); });
     await waitFor(() => {
       expect(screen.getByText(/Готово: 5 метрик, 2 алертов/)).toBeInTheDocument();
     });
+    expect(mockRefresh).toHaveBeenCalled();
   });
 
-  it("при ошибке показывает сообщение", async () => {
-    (global.fetch as any).mockResolvedValue({ ok: false, statusText: "Internal Error", json: async () => ({ error: "Database down" }) });
-    const user = userEvent.setup();
+  it("при HTTP-ошибке от /api/jobs/recalc показывает модал", async () => {
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url === "/api/jobs/recalc") {
+        return Promise.resolve({ ok: false, statusText: "Server Error", json: async () => ({ error: "Database down" }) });
+      }
+      return Promise.resolve(mockStatusIdle());
+    });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<RecalcButton />);
     await user.click(screen.getByRole("button"));
     await waitFor(() => {
-      expect(screen.getByText(/Ошибка: Database down/)).toBeInTheDocument();
+      // Текст ошибки запихнётся в raw внутри ErrorModal
+      expect(screen.getByText(/Database down/)).toBeInTheDocument();
     });
   });
 
-  it("network exception → Error message", async () => {
-    (global.fetch as any).mockRejectedValue(new Error("Network failed"));
-    const user = userEvent.setup();
-    render(<RecalcButton />);
-    await user.click(screen.getByRole("button"));
-    await waitFor(() => {
-      expect(screen.getByText(/Ошибка: Network failed/)).toBeInTheDocument();
+  it("network exception → модал", async () => {
+    (global.fetch as any).mockImplementation((url: string) => {
+      if (url === "/api/jobs/recalc") return Promise.reject(new Error("Failed to fetch"));
+      return Promise.resolve(mockStatusIdle());
     });
-  });
-
-  it("кнопка снова доступна после завершения", async () => {
-    (global.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ metrics_written: 0, alerts_written: 0 }) });
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<RecalcButton />);
     await user.click(screen.getByRole("button"));
     await waitFor(() => {
-      expect(screen.getByRole("button")).not.toBeDisabled();
+      expect(screen.getByText(/Не удалось связаться с сервером/i)).toBeInTheDocument();
     });
   });
 });
