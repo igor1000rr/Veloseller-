@@ -11,7 +11,7 @@ const nav = [
   { href: "#faq", label: "FAQ" },
 ];
 
-export default function MobileMenu() {
+export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -64,20 +64,32 @@ export default function MobileMenu() {
           </nav>
 
           <div className="px-6 py-6 border-t border-line space-y-3">
-            <Link
-              href={"/register" as any}
-              onClick={() => setOpen(false)}
-              className="flex items-center justify-center w-full rounded-lg bg-ink text-paper px-5 py-3.5 font-semibold"
-            >
-              Начать бесплатно
-            </Link>
-            <Link
-              href={"/login" as any}
-              onClick={() => setOpen(false)}
-              className="flex items-center justify-center w-full rounded-lg border border-line bg-paper text-ink px-5 py-3.5 font-medium"
-            >
-              Войти
-            </Link>
+            {isAuthed ? (
+              <Link
+                href={"/dashboard" as any}
+                onClick={() => setOpen(false)}
+                className="flex items-center justify-center gap-2 w-full rounded-lg bg-ink text-paper px-5 py-3.5 font-semibold"
+              >
+                В кабинет <Icons.ArrowRight />
+              </Link>
+            ) : (
+              <>
+                <Link
+                  href={"/register" as any}
+                  onClick={() => setOpen(false)}
+                  className="flex items-center justify-center w-full rounded-lg bg-ink text-paper px-5 py-3.5 font-semibold"
+                >
+                  Начать бесплатно
+                </Link>
+                <Link
+                  href={"/login" as any}
+                  onClick={() => setOpen(false)}
+                  className="flex items-center justify-center w-full rounded-lg border border-line bg-paper text-ink px-5 py-3.5 font-medium"
+                >
+                  Войти
+                </Link>
+              </>
+            )}
           </div>
         </div>
       )}
