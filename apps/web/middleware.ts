@@ -49,12 +49,14 @@ export async function middleware(request: NextRequest) {
   }
 
   // No-cache headers для приватных разделов и API.
-  // Данные пользователя должны быть свежими всегда — ни browser, ни nginx, ни CDN
-  // не должны их кешировать.
+  // private = не кешировать в shared cache (CDN, прокси)
+  // no-store = не сохранять вообще
+  // Vary: Cookie = страница зависит от cookies, не отдавай из кеша при разных пользователях
   if (isPrivate || path.startsWith("/api/")) {
-    response.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+    response.headers.set("Cache-Control", "private, no-store, no-cache, must-revalidate, max-age=0");
     response.headers.set("Pragma", "no-cache");
     response.headers.set("Expires", "0");
+    response.headers.set("Vary", "Cookie, Accept-Encoding");
   }
 
   return response;
