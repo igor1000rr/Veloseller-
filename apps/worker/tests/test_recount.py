@@ -10,6 +10,7 @@
   - Разные амплитуды больше 25% — не пара
   - Unsorted input — функция сортирует сама
   - Несколько пар в одной последовательности
+  - БАГ 6 fix: recount на большом остатке (1000 шт) с пересчётом на 150 ед
 """
 from __future__ import annotations
 from datetime import datetime, timedelta, timezone
@@ -46,8 +47,8 @@ class TestDetectRecountPairs:
         """Классика: остаток 100 → 30 → 100 в течение нескольких часов."""
         snaps = [
             _s("a", 0,  100),
-            _s("b", 1,  30),   # «удалив» 70 единиц
-            _s("c", 4,  100),  # вернули 70 единиц
+            _s("b", 1,  30),
+            _s("c", 4,  100),
         ]
         pairs = detect_recount_pairs(snaps)
         assert len(pairs) == 1
@@ -56,17 +57,16 @@ class TestDetectRecountPairs:
         assert nxt.snapshot_id == "c"
 
     def test_recover_outside_window_not_paired(self):
-        """Если «возврат» произошёл через 25ч — это уже не recount, а обычное пополнение."""
+        """Если возврат через 25ч — это пополнение, не recount."""
         snaps = [
             _s("a", 0,  100),
             _s("b", 1,  30),
             _s("c", 25, 100),
         ]
-        # Дефолтное окно = 12ч, 25ч выходит за пределы
         assert detect_recount_pairs(snaps) == []
 
     def test_small_fluctuation_ignored(self):
-        """Остаток 1000 → 999 → 1000: |delta|=1, ratio=0.001 < 0.5 — игнор."""
+        """Остаток 1000 → 999 → 1000: |delta|=1 ниже min_absolute_magnitude=10 — игнор."""
         snaps = [
             _s("a", 0,  1000),
             _s("b", 1,  999),
@@ -75,7 +75,7 @@ class TestDetectRecountPairs:
         assert detect_recount_pairs(snaps) == []
 
     def test_magnitude_mismatch_above_25_pct_not_paired(self):
-        """100 → 30 (delta=-70) → 60 (delta=+30): разница |70-30|/70 ≈ 0.57 > 0.25 — не пара."""
+        """100 → 30 (-70) → 60 (+30): разница ≈ 57% > 25% — не пара."""
         snaps = [
             _s("a", 0,  100),
             _s("b", 1,  30),
@@ -84,16 +84,15 @@ class TestDetectRecountPairs:
         assert detect_recount_pairs(snaps) == []
 
     def test_unsorted_input_is_sorted_internally(self):
-        """Функция должна сама сортировать по snapshot_time."""
+        """Функция сама сортирует по snapshot_time."""
         snaps = [
-            _s("c", 4,  100),  # позже всех
+            _s("c", 4,  100),
             _s("a", 0,  100),
             _s("b", 1,  30),
         ]
         pairs = detect_recount_pairs(snaps)
         assert len(pairs) == 1
         cur, nxt = pairs[0]
-        # После сортировки: a (0ч), b (1ч), c (4ч)
         assert cur.snapshot_id == "b"
         assert nxt.snapshot_id == "c"
 
@@ -107,7 +106,7 @@ class TestDetectRecountPairs:
         assert detect_recount_pairs(snaps) == []
 
     def test_within_25_pct_tolerance_accepted(self):
-        """100 → 30 (delta=-70) → 95 (delta=+65): разница |70-65|/70 ≈ 0.07 ≤ 0.25 — пара."""
+        """100 → 30 (-70) → 95 (+65): разница ≈ 7% ≤ 25% — пара."""
         snaps = [
             _s("a", 0,  100),
             _s("b", 1,  30),
@@ -115,3 +114,28 @@ class TestDetectRecountPairs:
         ]
         pairs = detect_recount_pairs(snaps)
         assert len(pairs) == 1
+
+    def test_large_inventory_small_recount_now_detected(self):
+        """БАГ 6 FIX: SKU с остатком 1000, recount на 150 единиц.
+
+        Раньше (min_ratio=0.5): 150 < 500 → игнор. Recount пропускался.
+        Сейчас (min_ratio=0.2, abs_floor=10): min_required=min(200,10)=10.
+        150 >= 10 → ловим. delta_in=-150, delta_out=+150 → ровно совпадает → пара.
+        """
+        snaps = [
+            _s("a", 0,  1000),
+            _s("b", 1,  850),   # recount -150
+            _s("c", 2,  1000),  # +150
+        ]
+        pairs = detect_recount_pairs(snaps)
+        assert len(pairs) == 1
+        assert pairs[0][0].snapshot_id == "b"
+
+    def test_large_inventory_tiny_change_below_abs_floor(self):
+        """SKU 5000 шт, колебание 5 единиц — ниже abs_floor=10 → игнор."""
+        snaps = [
+            _s("a", 0,  5000),
+            _s("b", 1,  4995),
+            _s("c", 2,  5000),
+        ]
+        assert detect_recount_pairs(snaps) == []
