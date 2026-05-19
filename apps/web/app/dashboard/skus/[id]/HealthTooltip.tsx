@@ -89,17 +89,27 @@ export function buildHealthBreakdown(m: any): BreakdownRow[] {
   return rows;
 }
 
+/**
+ * Confidence breakdown из tvelo_metrics.confidence_breakdown JSON.
+ *
+ * БАГ FIX: раньше использовались ключи `*_penalty` — таких полей в JSON нет, hover показывал
+ * только "Все события чистые". Реальные ключи (из app/schemas.py:ConfidenceBreakdown):
+ *   replenishment_like, anomaly_like, missing_data, low_history, initial, final
+ *
+ * Каждое значение — это уже процент штрафа (например repl=14.29 = -14.29% от initial).
+ */
 export function buildConfidenceBreakdown(m: any): BreakdownRow[] {
   const cb = m?.confidence_breakdown;
   if (!cb || typeof cb !== "object") return [];
   const rows: BreakdownRow[] = [];
-  const labels: Record<string, string> = {
-    replenishment_like_penalty: "Пополнения",
-    anomaly_like_penalty: "Аномалии",
-    missing_data_penalty: "Нет данных",
-  };
-  for (const [k, label] of Object.entries(labels)) {
-    const v = Number((cb as any)[k] ?? 0);
+  const labels: Array<[string, string]> = [
+    ["replenishment_like", "Пополнения"],
+    ["anomaly_like",       "Аномалии"],
+    ["missing_data",       "Нет данных"],
+    ["low_history",        "Мало истории"],
+  ];
+  for (const [key, label] of labels) {
+    const v = Number(cb[key] ?? 0);
     if (v > 0) {
       rows.push({ label, value: `−${v.toFixed(1)}%`, tone: "warn" });
     }
