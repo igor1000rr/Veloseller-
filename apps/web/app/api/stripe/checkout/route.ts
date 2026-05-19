@@ -1,17 +1,25 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getStripe, STRIPE_PRICES } from "@/lib/stripe";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
-export async function POST(req: Request) {
+/**
+ * POST /api/stripe/checkout — создаёт Stripe Checkout Session.
+ *
+ * БАГ 48 fix: rate limit (создание sessions стоит Stripe API calls — не даём спамить).
+ */
+export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const limited = enforceRateLimit(req, RATE_LIMITS.WRITE, user.id);
+  if (limited) return limited;
 
   const { plan } = await req.json().catch(() => ({}));
   const priceId = STRIPE_PRICES[plan as string];
   if (!priceId) return NextResponse.json({ error: `Unknown plan ${plan} or STRIPE_PRICE_${(plan ?? "").toUpperCase()} не задан` }, { status: 400 });
 
-  // Получаем/создаём stripe customer
   const { data: seller } = await supabase
     .from("sellers").select("stripe_customer_id,email").eq("id", user.id).single();
   let customerId = seller?.stripe_customer_id;
@@ -26,7 +34,7 @@ export async function POST(req: Request) {
     await supabase.from("sellers").update({ stripe_customer_id: customerId }).eq("id", user.id);
   }
 
-  const origin = req.headers.get("origin") || `https://${req.headers.get("host")}`;
+  const origin = req.headers.get("origin") || `https://${req.headers.get("host") || "veloseller.ru"}`;
 
   const session = await stripe.checkout.sessions.create({
     customer: customerId,

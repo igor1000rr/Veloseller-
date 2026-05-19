@@ -1,11 +1,20 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getStripe } from "@/lib/stripe";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
-export async function POST(req: Request) {
+/**
+ * POST /api/stripe/portal — создаёт Stripe Billing Portal Session.
+ *
+ * БАГ 49 fix: rate limit.
+ */
+export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const limited = enforceRateLimit(req, RATE_LIMITS.WRITE, user.id);
+  if (limited) return limited;
 
   const { data: seller } = await supabase
     .from("sellers").select("stripe_customer_id").eq("id", user.id).single();
@@ -13,7 +22,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Нет активной подписки" }, { status: 400 });
   }
 
-  const origin = req.headers.get("origin") || `https://${req.headers.get("host")}`;
+  const origin = req.headers.get("origin") || `https://${req.headers.get("host") || "veloseller.ru"}`;
   const session = await getStripe().billingPortal.sessions.create({
     customer: seller.stripe_customer_id,
     return_url: `${origin}/billing`,
