@@ -5,6 +5,10 @@ Recount — событие инвентаризации/пересчёта, ко
 
 Эвристика: если в течение одного дня сначала большой отрицательный delta,
 а потом большой положительный (или наоборот) того же порядка — это recount.
+
+БАГ 6 fix: понизили min_magnitude_ratio с 0.5 до 0.2 + добавили absolute floor.
+Раньше для SKU с 1000+ остатком пересчёт на 100-200 единиц не ловился (10-20%
+от остатка). Теперь срабатываем при min(20% от baseline, 10 единиц).
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -23,15 +27,17 @@ class Snapshot:
 def detect_recount_pairs(
     snapshots: list[Snapshot],
     same_day_window_hours: int = 12,
-    min_magnitude_ratio: float = 0.5,
+    min_magnitude_ratio: float = 0.2,
+    min_absolute_magnitude: int = 10,
 ) -> list[tuple[Snapshot, Snapshot]]:
     """Ищет пары снимков с компенсирующими delta — это recount.
 
     Args:
         snapshots: упорядоченные по времени снимки одного SKU.
         same_day_window_hours: пары рассматриваем только внутри этого окна.
-        min_magnitude_ratio: минимальный |delta| относительно текущего остатка
-            (отфильтровывает мелкие колебания).
+        min_magnitude_ratio: минимальный |delta| относительно baseline остатка (20%).
+        min_absolute_magnitude: дополнительный абсолютный пол (мин. 10 единиц),
+            чтобы для крупных SKU ловить пересчёты которые меньше 20% но >= 10 шт.
 
     Returns:
         Список пар (snap_a, snap_b) где snap_a "удалил" остаток,
@@ -49,9 +55,10 @@ def detect_recount_pairs(
         delta_in = cur.stock_quantity - prev.stock_quantity
         if delta_in == 0:
             continue
-        # Минимальная амплитуда относительно остатка
+        # Минимальная амплитуда: либо 20% от baseline, либо абс. порог
         baseline = max(1, prev.stock_quantity)
-        if abs(delta_in) < min_magnitude_ratio * baseline:
+        min_required = min(min_magnitude_ratio * baseline, float(min_absolute_magnitude))
+        if abs(delta_in) < min_required:
             continue
 
         # Ищем компенсирующий snapshot в пределах окна
