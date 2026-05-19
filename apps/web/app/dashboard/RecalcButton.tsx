@@ -31,6 +31,8 @@ export default function RecalcButton() {
   const [progress, setProgress] = useState<Progress | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [modalError, setModalError] = useState<ParsedError | null>(null);
+  // Ref чтобы не пересоздавать useEffect при каждой смене статуса
+  // (иначе пересоздаются интервалы и сломается определение "переход idle → done" в тестах)
   const prevStatusRef = useRef<RecalcStatus>("idle");
 
   useEffect(() => {
@@ -48,9 +50,7 @@ export default function RecalcButton() {
         setStatus(data.status);
         setProgress(data.progress ?? null);
 
-        if (data.status === "running") {
-          setMsg(null);
-        } else if (data.status === "done" && prev !== "done") {
+        if (data.status === "done" && prev !== "done") {
           const r = data.result ?? {};
           setMsg(`Готово: ${r.metrics_written ?? 0} метрик, ${r.alerts_written ?? 0} алертов`);
           router.refresh();
@@ -61,13 +61,12 @@ export default function RecalcButton() {
     }
 
     pollStatus();
-    // Чаще опрашиваем когда расчёт идёт — чтобы прогресс ощущался живым.
-    // Когда idle/done — реже, не дёргаем сервер впустую.
-    const intervalMs = status === "running" ? 3000 : 10000;
-    const interval = setInterval(pollStatus, intervalMs);
+    // Фиксированный интервал 8с — компромисс между живостью прогресса и нагрузкой на сервер.
+    // Не зависим от status чтобы не пересоздавать таймеры на каждом ререндере (это ломало тесты).
+    const interval = setInterval(pollStatus, 8000);
     return () => { cancelled = true; clearInterval(interval); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function onClick() {
     setBusy(true);
@@ -81,8 +80,9 @@ export default function RecalcButton() {
         return;
       }
       const data = await res.json();
-      if (data.started === false && data.status === "running") {
-        setMsg("Расчёт уже идёт…");
+      // Сообщение из ответа сервера — для всех случаев (started:true/false)
+      if (data.message) {
+        setMsg(data.message);
       }
       prevStatusRef.current = "running";
       setStatus("running");
@@ -100,25 +100,22 @@ export default function RecalcButton() {
       ? "Расчёт идёт…"
       : "Пересчитать сейчас";
 
-  // Вычисляем общий процент для прогресс-бара.
-  // Расчёт идёт по 3 периодам (7/30/90). Каждый период имеет 2 фазы — обработка SKU и запись метрик.
-  // Грубо: общий прогресс = (current_period_index - 1 + внутренний_прогресс_фазы) / total_periods
+  // Общий процент для прогресс-бара.
+  // Расчёт идёт по 3 периодам (7/30/90). Внутри периода: 5% loading → 65% processing → 25% writing_metrics → 5% writing_store.
   let percent: number | null = null;
   let detailLine: string | null = null;
   if (progress && status === "running") {
     const cpi = progress.current_period_index ?? 0;
     const tp = progress.total_periods ?? 3;
-    const phaseShare = progress.phase === "processing_skus" ? 0.7
-      : progress.phase === "writing_metrics" ? 0.95
-      : progress.phase === "writing_store" ? 1.0
-      : progress.phase === "loading_products" ? 0.05
-      : 0;
     const processedShare = (progress.total && progress.total > 0)
       ? Math.min(1, (progress.processed ?? 0) / progress.total)
       : 0;
-    const phasePart = progress.phase === "processing_skus" || progress.phase === "writing_metrics"
-      ? processedShare * (progress.phase === "processing_skus" ? 0.65 : 0.25) + (progress.phase === "processing_skus" ? 0.05 : 0.7)
-      : phaseShare;
+    let phasePart = 0;
+    if (progress.phase === "loading_products") phasePart = 0.05;
+    else if (progress.phase === "processing_skus") phasePart = 0.05 + processedShare * 0.65;
+    else if (progress.phase === "writing_metrics") phasePart = 0.7 + processedShare * 0.25;
+    else if (progress.phase === "writing_store") phasePart = 0.97;
+    else if (progress.phase === "done") phasePart = 1;
     const overall = ((Math.max(0, cpi - 1) + phasePart) / tp) * 100;
     percent = Math.max(2, Math.min(99, Math.round(overall)));
 
@@ -149,7 +146,7 @@ export default function RecalcButton() {
           {label}
         </button>
         {/* Прогресс-бар + детальная строка с процентами и счётчиком */}
-        {status === "running" && progress && (
+        {status === "running" && progress && progress.total ? (
           <div className="w-full min-w-[280px] max-w-sm">
             <div className="h-1.5 w-full rounded-full bg-bg-soft overflow-hidden">
               <div
@@ -162,8 +159,8 @@ export default function RecalcButton() {
               <span className="shrink-0 tabular">{percent ?? "…"}%</span>
             </div>
           </div>
-        )}
-        {msg && status !== "running" && (
+        ) : null}
+        {msg && (
           <span className="text-xs text-lime-deep font-mono">{msg}</span>
         )}
       </div>
