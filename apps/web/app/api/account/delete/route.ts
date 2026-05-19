@@ -2,9 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { batchedInDelete } from "@/lib/supabase/batched";
 
 /**
  * GDPR Article 17 — Right to erasure.
+ *
+ * БАГ 15 fix: .in("product_id", ...) теперь батчится — при >200 SKU URL раньше
+ * обрезался по лимиту PostgREST ~8KB, удаление было НЕПОЛНЫМ (часть snapshot/events
+ * оставалась в БД после удаления аккаунта).
  */
 export async function DELETE(req: NextRequest) {
   const sb = await createSupabaseServerClient();
@@ -13,7 +18,6 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Rate limit
   const limited = enforceRateLimit(req, RATE_LIMITS.SENSITIVE, user.id);
   if (limited) return limited;
 
@@ -37,10 +41,22 @@ export async function DELETE(req: NextRequest) {
     const productIds = (productsRes.data || []).map(p => p.product_id);
 
     if (productIds.length > 0) {
-      await admin.from("inventory_events").delete().in("product_id", productIds);
-      await admin.from("inventory_snapshots").delete().in("product_id", productIds);
-      await admin.from("tvelo_metrics").delete().in("product_id", productIds);
-      await admin.from("price_elasticity").delete().in("product_id", productIds);
+      await batchedInDelete(
+        (batch) => admin.from("inventory_events").delete().in("product_id", batch),
+        productIds,
+      );
+      await batchedInDelete(
+        (batch) => admin.from("inventory_snapshots").delete().in("product_id", batch),
+        productIds,
+      );
+      await batchedInDelete(
+        (batch) => admin.from("tvelo_metrics").delete().in("product_id", batch),
+        productIds,
+      );
+      await batchedInDelete(
+        (batch) => admin.from("price_elasticity").delete().in("product_id", batch),
+        productIds,
+      );
     }
 
     await admin.from("alerts").delete().eq("seller_id", sellerId);
