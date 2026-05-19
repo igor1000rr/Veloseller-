@@ -19,6 +19,10 @@ def with_retry(
     """Вызывает fn() с экспоненциальным backoff на сетевые ошибки и retry-statuses.
 
     WB rate-limit 1 req/60s — для него передавайте max_delay=120 при необходимости.
+
+    БАГ 22 fix: ловим httpx.TransportError (родитель всех transport-ошибок),
+    раньше только ConnectError/ReadTimeout/RemoteProtocolError — ConnectTimeout,
+    WriteError, PoolTimeout НЕ покрывались и пробрасывались наверх без retry.
     """
     last_exc: Exception | None = None
     for attempt in range(1, max_attempts + 1):
@@ -31,7 +35,9 @@ def with_retry(
             retry_after = e.response.headers.get("Retry-After")
             delay = float(retry_after) if retry_after else min(max_delay, base_delay * (2 ** (attempt - 1)))
             logger.warning(f"HTTP {e.response.status_code}, retry {attempt}/{max_attempts} after {delay:.1f}s")
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
+        except httpx.TransportError as e:
+            # TransportError — родитель ConnectError, ReadError, WriteError, ConnectTimeout,
+            # ReadTimeout, WriteTimeout, PoolTimeout, RemoteProtocolError, ProxyError и т.д.
             last_exc = e
             delay = min(max_delay, base_delay * (2 ** (attempt - 1)))
             logger.warning(f"Network error {type(e).__name__}, retry {attempt}/{max_attempts} after {delay:.1f}s")
