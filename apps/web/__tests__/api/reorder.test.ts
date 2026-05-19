@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { _resetRateLimits } from "@/lib/rate-limit";
 
 const getUserMock = vi.fn();
 const updateChainMock = vi.fn();
@@ -19,6 +20,7 @@ beforeEach(() => {
   getUserMock.mockReset();
   updateChainMock.mockReset();
   capturedUpdate = null;
+  _resetRateLimits();
 });
 
 function makeReq(body: any) {
@@ -35,52 +37,56 @@ describe("PATCH /api/products/[id]/reorder", () => {
 
   it("валидные значения обновляются", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    updateChainMock.mockResolvedValue({ error: null });
+    updateChainMock.mockResolvedValue({ error: null, count: 1 });
     const { PATCH } = await import("@/app/api/products/[id]/reorder/route");
     const res = await PATCH(makeReq({ lead_time_days: 14, safety_days: 7 }), { params: Promise.resolve({ id: "p1" }) });
     expect(res.status).toBe(200);
     expect(capturedUpdate).toEqual({ lead_time_days: 14, safety_days: 7 });
   });
 
-  it("значения вне 0-365 игнорируются", async () => {
+  it("значения вне 0-365 игнорируются, пустой update — 400", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    updateChainMock.mockResolvedValue({ error: null });
     const { PATCH } = await import("@/app/api/products/[id]/reorder/route");
-    await PATCH(makeReq({ lead_time_days: 400, safety_days: -1 }), { params: Promise.resolve({ id: "p1" }) });
-    expect(capturedUpdate).toEqual({});
+    const res = await PATCH(makeReq({ lead_time_days: 400, safety_days: -1 }), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(400);
   });
 
   it("null/empty сохраняют null", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    updateChainMock.mockResolvedValue({ error: null });
+    updateChainMock.mockResolvedValue({ error: null, count: 1 });
     const { PATCH } = await import("@/app/api/products/[id]/reorder/route");
     await PATCH(makeReq({ lead_time_days: null, safety_days: "" }), { params: Promise.resolve({ id: "p1" }) });
     expect(capturedUpdate).toEqual({ lead_time_days: null, safety_days: null });
   });
 
-  it("нечисловой ввод игнорируется", async () => {
+  it("нечисловой ввод — пустой update — 400", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    updateChainMock.mockResolvedValue({ error: null });
     const { PATCH } = await import("@/app/api/products/[id]/reorder/route");
-    await PATCH(makeReq({ lead_time_days: "abc" }), { params: Promise.resolve({ id: "p1" }) });
-    expect(capturedUpdate).toEqual({});
-  });
-
-  it("при ошибке БД — 400", async () => {
-    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    updateChainMock.mockResolvedValue({ error: { message: "rls violation" } });
-    const { PATCH } = await import("@/app/api/products/[id]/reorder/route");
-    const res = await PATCH(makeReq({ lead_time_days: 7 }), { params: Promise.resolve({ id: "p1" }) });
+    const res = await PATCH(makeReq({ lead_time_days: "abc" }), { params: Promise.resolve({ id: "p1" }) });
     expect(res.status).toBe(400);
   });
 
-  it("невалидный JSON в body — пустой update", async () => {
+  it("при ошибке БД — 500", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    updateChainMock.mockResolvedValue({ error: null });
+    updateChainMock.mockResolvedValue({ error: { message: "rls violation" }, count: null });
+    const { PATCH } = await import("@/app/api/products/[id]/reorder/route");
+    const res = await PATCH(makeReq({ lead_time_days: 7 }), { params: Promise.resolve({ id: "p1" }) });
+    expect(res.status).toBe(500);
+  });
+
+  it("невалидный JSON в body — пустой update — 400", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     const req = new Request("http://x", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "not-json" });
     const { PATCH } = await import("@/app/api/products/[id]/reorder/route");
     const res = await PATCH(req, { params: Promise.resolve({ id: "p1" }) });
-    expect(res.status).toBe(200);
-    expect(capturedUpdate).toEqual({});
+    expect(res.status).toBe(400);
+  });
+
+  it("product не найден — 404", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
+    updateChainMock.mockResolvedValue({ error: null, count: 0 });
+    const { PATCH } = await import("@/app/api/products/[id]/reorder/route");
+    const res = await PATCH(makeReq({ lead_time_days: 7 }), { params: Promise.resolve({ id: "other-user-product" }) });
+    expect(res.status).toBe(404);
   });
 });

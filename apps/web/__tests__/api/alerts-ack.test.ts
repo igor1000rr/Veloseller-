@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { _resetRateLimits } from "@/lib/rate-limit";
 
 const getUserMock = vi.fn();
 const updateChainMock = vi.fn();
@@ -18,6 +19,7 @@ vi.mock("@/lib/supabase/server", () => ({
 beforeEach(() => {
   getUserMock.mockReset();
   updateChainMock.mockReset();
+  _resetRateLimits();
 });
 
 describe("POST /api/alerts/[id]/ack", () => {
@@ -28,18 +30,26 @@ describe("POST /api/alerts/[id]/ack", () => {
     expect(res.status).toBe(401);
   });
 
-  it("при ошибке БД — 400 с message", async () => {
+  it("при ошибке БД — 500", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    updateChainMock.mockResolvedValue({ error: { message: "permission denied" } });
+    updateChainMock.mockResolvedValue({ error: { message: "permission denied" }, count: null });
     const { POST } = await import("@/app/api/alerts/[id]/ack/route");
     const res = await POST(new Request("http://x"), { params: Promise.resolve({ id: "a1" }) });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(500);
     expect((await res.json()).error).toBe("permission denied");
+  });
+
+  it("если alert не найден — 404", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
+    updateChainMock.mockResolvedValue({ error: null, count: 0 });
+    const { POST } = await import("@/app/api/alerts/[id]/ack/route");
+    const res = await POST(new Request("http://x"), { params: Promise.resolve({ id: "a1" }) });
+    expect(res.status).toBe(404);
   });
 
   it("успех — { ok: true }", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    updateChainMock.mockResolvedValue({ error: null });
+    updateChainMock.mockResolvedValue({ error: null, count: 1 });
     const { POST } = await import("@/app/api/alerts/[id]/ack/route");
     const res = await POST(new Request("http://x"), { params: Promise.resolve({ id: "a1" }) });
     expect(res.status).toBe(200);

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { _resetRateLimits } from "@/lib/rate-limit";
 
 const getUserMock = vi.fn();
 const updateChainMock = vi.fn();
@@ -19,6 +20,7 @@ beforeEach(() => {
   getUserMock.mockReset();
   updateChainMock.mockReset();
   capturedUpdate = null;
+  _resetRateLimits();
 });
 
 function req(body: any) {
@@ -67,12 +69,26 @@ describe("POST /api/notifications", () => {
     expect(capturedUpdate).not.toHaveProperty("id");
   });
 
-  it("при ошибке БД — 400", async () => {
+  it("при ошибке БД — 500", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    updateChainMock.mockResolvedValue({ error: { message: "tz invalid" } });
+    updateChainMock.mockResolvedValue({ error: { message: "db error" } });
     const { POST } = await import("@/app/api/notifications/route");
-    const res = await POST(req({ timezone: "X/Y" }));
+    const res = await POST(req({ timezone: "Europe/Minsk" }));
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe("db error");
+  });
+
+  it("невалидный timezone — 400", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
+    const { POST } = await import("@/app/api/notifications/route");
+    const res = await POST(req({ timezone: "Москва с пробелами!" }));
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("tz invalid");
+  });
+
+  it("notify_email не boolean — 400", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
+    const { POST } = await import("@/app/api/notifications/route");
+    const res = await POST(req({ notify_email: "yes" }));
+    expect(res.status).toBe(400);
   });
 });
