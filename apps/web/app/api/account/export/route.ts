@@ -9,8 +9,9 @@ import { batchedIn } from "@/lib/supabase/batched";
  *
  * Экспортирует все данные пользователя в JSON. Запускается из /account по кнопке.
  *
- * БАГ 15 fix: .in("product_id", productIds) теперь батчится — при >200 SKU
- * URL раньше обрезался по лимиту PostgREST ~8KB, экспорт получал неполный набор.
+ * БАГ 15 fix: .in("product_id", productIds) теперь батчится.
+ * БАГ 58 fix: data_connections.select содержал колонку 'kind' которой нет —
+ *   реально есть 'source' и 'marketplace'. Экспорт падал с 500. GDPR Art. 20 violation.
  */
 export async function GET(req: NextRequest) {
   const sb = await createSupabaseServerClient();
@@ -47,7 +48,10 @@ export async function GET(req: NextRequest) {
     admin.from("alerts").select("*").eq("seller_id", sellerId),
     admin.from("changelog").select("*").eq("seller_id", sellerId),
     admin.from("price_elasticity").select("*").eq("seller_id", sellerId),
-    admin.from("data_connections").select("id,kind,status,last_sync_at,last_error,created_at").eq("seller_id", sellerId),
+    // БАГ 58: используем правильные колонки (source/marketplace вместо kind)
+    admin.from("data_connections")
+      .select("id,source,marketplace,name,status,last_sync_at,last_error,created_at")
+      .eq("seller_id", sellerId),
   ]);
 
   const exportData = {
