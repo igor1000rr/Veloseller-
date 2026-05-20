@@ -10,15 +10,14 @@
 БАГ 9 (здесь): median_30d_velocity отдельной колонкой, используется в SkuHealthInput.
 
 БАГ 10 (здесь): pre-period дельты НОРМАЛИЗУЮТСЯ на количество дней
-между snapshot'ами. Раньше если между snapshot'ами было 5 дней пропуска,
-система видела stock 100→50 как «50 в день» вместо «10 в день × 5 дней» — это
-завышало median_30d_velocity в разы. Сейчас делим |delta| на days_gap.
+между snapshot'ами.
 
-БАГ 11 (здесь): lost_revenue prices_during_stockout явно исключает MISSING_DATA
-дни (раньше работало по случаю через фильтр price > 0).
+БАГ 11 (здесь): lost_revenue prices_during_stockout явно исключает MISSING_DATA.
 
-underestimated_sku теперь требует ≥2 stockout_days (один случайный OOS не помечает).
-Прогресс: progress dict обновляется по ходу.
+БАГ 32 (здесь): recalc_all_sellers использует fetch_all (раньше обрезался на 1000).
+БАГ 33 (здесь): _upsert_or_skip_alert ловит race condition через unique index.
+
+underestimated_sku требует ≥2 stockout_days.
 """
 from __future__ import annotations
 
@@ -105,9 +104,7 @@ def _extract_pre_period_sales_deltas(
 ) -> list[float]:
     """Из snapshots до period_start извлекает НОРМАЛИЗОВАННЫЕ по дням sales_like-дельты.
 
-    БАГ 10 fix: раньше функция брала last-snapshot-per-day и считала |stock - prev_stock|.
-    Если между snapshot'ами было 5 дней пропуска, дельта -50 записывалась как 50 в день
-    (вместо 10 в день × 5 дней). Сейчас делим |delta| на (день_текущий - день_предыдущий).
+    БАГ 10 fix: делим |delta| на (день_текущий - день_предыдущий).
     """
     by_day: dict[date, dict] = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
@@ -129,13 +126,11 @@ def _extract_pre_period_sales_deltas(
             d = stock - prev_stock
             if d < 0:
                 days_gap = max(1, (day - prev_day).days)
-                # Нормализуем: если между snapshot'ами 5 дней — делим дельту на 5
                 per_day_delta = abs(d) / days_gap
                 deltas.append(float(per_day_delta))
         prev_stock = stock
         prev_day = day
 
-    # Фильтр выбросов: >5× median выкидываем как аномалии.
     if len(deltas) >= 3:
         med = _median(deltas)
         if med > 0:
@@ -154,14 +149,7 @@ def build_daily_aggregates(
     period_end: date,
     seller_tz: pytz.tzinfo.BaseTzInfo,
 ) -> tuple[list[DailyAggregate], list[dict]]:
-    """Строит daily aggregates ТОЛЬКО за период [period_start, period_end].
-
-    snapshots_rows может содержать больше данных (pre-period для медианы). Их используем
-    для prev_stock в первый день периода и для seed anomaly history.
-
-    БАГ 10 fix: seed anomaly history тоже нормализуется на days_gap, иначе аномалии
-    некорректно детектились в начале периода (median выходил завышенным).
-    """
+    """Строит daily aggregates ТОЛЬКО за период [period_start, period_end]."""
     by_day: dict[date, dict] = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
@@ -178,7 +166,6 @@ def build_daily_aggregates(
         prev_stock = int(by_day[last_pre]["stock_quantity"])
         prev_snapshot_id = by_day[last_pre].get("snapshot_id")
         prev_exists = True
-        # Seed anomaly history с нормализацией по дням
         prev_for_seed: Optional[int] = None
         prev_day_for_seed: Optional[date] = None
         for d in pre_period_days:
@@ -310,17 +297,39 @@ def _write_changelog(sb, seller_id: str, product_id: str, aggregates: list[Daily
 
 
 def _upsert_or_skip_alert(sb, seller_id: str, product_id: str, kind: str, message: str, payload: dict) -> bool:
+    """Создаёт новый alert или обновляет существующий unread alert того же kind.
+
+    БАГ 33 fix: ловим race condition через partial unique index alerts_unique_unread.
+    Между нашим SELECT и INSERT другой процесс мог вставить такой же alert.
+    Unique index на (seller_id, product_id, kind) WHERE acknowledged_at IS NULL не позволит дубль.
+    Если поймали ошибку — это значит другой процесс уже вставил, делаем UPDATE на найденную запись.
+    """
     existing = sb.table("alerts").select("id").eq("seller_id", seller_id).eq(
         "product_id", product_id
     ).eq("kind", kind).is_("acknowledged_at", "null").limit(1).execute()
     if existing.data:
         sb.table("alerts").update({"message": message, "payload": payload}).eq("id", existing.data[0]["id"]).execute()
         return False
-    sb.table("alerts").insert({
-        "seller_id": seller_id, "product_id": product_id,
-        "kind": kind, "message": message, "payload": payload,
-    }).execute()
-    return True
+    try:
+        sb.table("alerts").insert({
+            "seller_id": seller_id, "product_id": product_id,
+            "kind": kind, "message": message, "payload": payload,
+        }).execute()
+        return True
+    except Exception as e:
+        # БАГ 33: race condition — между SELECT и INSERT другой процесс вставил.
+        # Логируем и делаем повторный SELECT+UPDATE для актуализации message.
+        err_str = str(e).lower()
+        if "duplicate" in err_str or "unique" in err_str or "23505" in err_str:
+            logger.info("alert race condition resolved via update",
+                        extra={"seller_id": seller_id, "product_id": product_id, "kind": kind})
+            existing2 = sb.table("alerts").select("id").eq("seller_id", seller_id).eq(
+                "product_id", product_id
+            ).eq("kind", kind).is_("acknowledged_at", "null").limit(1).execute()
+            if existing2.data:
+                sb.table("alerts").update({"message": message, "payload": payload}).eq("id", existing2.data[0]["id"]).execute()
+            return False
+        raise
 
 
 _HYSTERESIS_KEEP_CHECKS = {
@@ -497,9 +506,6 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
     for idx, item in enumerate(sku_data):
         pid = item["pid"]
         m: TVeloMetric = item["metric"]
-        # underestimated_sku: требует (а) базовые условия (stockout>0, vel>median, conf>=70),
-        # (б) ≥7 sales_like дней (low_history=0), (в) ≥2 stockout_days (один случайный
-        # OOS не достаточен для «хронической недооценки»).
         has_enough_history = (
             m.confidence_breakdown.low_history == 0.0
             if m.confidence_breakdown else True
@@ -553,7 +559,6 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
 def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start: date, period_end: date) -> int:
     if not sku_data:
         return 0
-    # БАГ 9 fix: используем реальный median_30d_velocity из metric.
     sku_health_inputs = [
         SkuHealthInput(
             product_id=item["pid"],
@@ -595,8 +600,6 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
         m = item["metric"]
         if m.adjusted_velocity <= 0 or m.stockout_days <= 0:
             continue
-        # БАГ 11 fix: явно исключаем MISSING_DATA дни (раньше срабатывал косвенно через price > 0,
-        # но это было хрупко — если бы price для MISSING_DATA когда-нибудь не был 0, баг бы вернулся).
         prices_during_stockout = [
             a.price for a in item.get("aggregates", [])
             if not a.availability
@@ -643,10 +646,14 @@ def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -
 
 
 def recalc_all_sellers() -> dict:
+    """Запускает recalc для всех sellers.
+
+    БАГ 32 fix: пагинация через fetch_all — раньше при ≥1000 sellers обрезался.
+    """
     sb = get_supabase()
-    sellers = sb.table("sellers").select("id").execute()
+    sellers = fetch_all(sb.table("sellers").select("id"))
     summary = {"sellers": 0, "metrics_written": 0, "alerts_written": 0, "store_metrics_written": 0}
-    for s in (sellers.data or []):
+    for s in sellers:
         try:
             r = recalc_seller_all_periods(s["id"])
             summary["sellers"] += 1
