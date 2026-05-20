@@ -62,6 +62,38 @@ def test_send_api_error(monkeypatch):
 
 
 # ============================================================================
+# БАГ 51: проверка APP_URL в email/telegram links
+# ============================================================================
+
+
+def test_email_link_uses_app_url_env(monkeypatch):
+    """БАГ 51: ссылка в email берётся из APP_URL env, не hardcoded."""
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_123")
+    monkeypatch.setenv("APP_URL", "https://test-domain.example.com")
+    mock_resend = MagicMock()
+    with patch.dict("sys.modules", {"resend": mock_resend}):
+        from app.notifications import send_alert_digest
+        send_alert_digest("u@e.com", "Igor",
+                          [{"kind": "low_stock", "message": "x", "products": {"sku": "S"}}])
+    html = mock_resend.Emails.send.call_args[0][0]["html"]
+    assert 'https://test-domain.example.com/dashboard/alerts' in html
+    assert 'veloseller.app' not in html
+
+
+def test_email_link_default_to_veloseller_ru(monkeypatch):
+    """Если APP_URL не задан — дефолт veloseller.ru."""
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_123")
+    monkeypatch.delenv("APP_URL", raising=False)
+    mock_resend = MagicMock()
+    with patch.dict("sys.modules", {"resend": mock_resend}):
+        from app.notifications import send_alert_digest
+        send_alert_digest("u@e.com", "Igor",
+                          [{"kind": "low_stock", "message": "x", "products": {"sku": "S"}}])
+    html = mock_resend.Emails.send.call_args[0][0]["html"]
+    assert 'https://veloseller.ru/dashboard/alerts' in html
+
+
+# ============================================================================
 # БАГ 20: HTML injection защита в email digest
 # ============================================================================
 
@@ -135,11 +167,15 @@ class TestTelegramHtmlEscape:
         assert "<b>BOLD</b>" not in result
         assert "&lt;b&gt;BOLD" in result
 
-    def test_legitimate_html_kept(self):
-        """Наши собственные <b>, <code>, <a> в шаблоне остаются."""
+    def test_legitimate_html_kept(self, monkeypatch):
+        """Наши собственные <b>, <code>, <a> в шаблоне остаются.
+
+        БАГ 51: ссылка теперь из APP_URL env.
+        """
+        monkeypatch.setenv("APP_URL", "https://veloseller.ru")
         from app.telegram import format_alerts_digest
         alerts = [{"kind": "low_stock", "message": "x", "products": {"sku": "OK"}}]
         result = format_alerts_digest(alerts)
         assert "<b>Veloseller" in result
         assert "<code>OK</code>" in result
-        assert '<a href="https://veloseller.app' in result
+        assert '<a href="https://veloseller.ru/dashboard/alerts"' in result
