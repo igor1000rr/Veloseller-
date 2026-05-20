@@ -14,6 +14,10 @@ from app.db import fetch_all, get_supabase
 from app.jobs.recalc import recalc_all_sellers, recalc_seller, recalc_seller_all_periods
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.logger import JsonFormatter, setup_logger
+from app.recalc_lock import (
+    get_recalc_state, mark_recalc_done, mark_recalc_error,
+    try_acquire_recalc_lock, update_recalc_progress,
+)
 from app.schemas import SnapshotInput, SourceType
 from app.sources import csv_upload, feed as feed_src, google_sheet, ozon, wildberries
 
@@ -86,30 +90,10 @@ if _sentry_dsn:
         logger.warning("sentry init failed: %s", _e)
 
 
-_running_recalcs: dict[str, dict] = {}
-_RECALC_STATE_TTL = timedelta(hours=24)
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
 # БАГ 96: лимит размера CSV upload — 50K SKU × 200 байт = 10MB. Защита от OOM-атаки.
 _CSV_MAX_SIZE_BYTES = 20 * 1024 * 1024  # 20 МБ запас
-
-
-def _cleanup_old_recalcs() -> None:
-    cutoff = datetime.now(timezone.utc) - _RECALC_STATE_TTL
-    stale = []
-    for sid, state in _running_recalcs.items():
-        if state.get("status") in ("done", "error"):
-            finished = state.get("finished_at")
-            if finished:
-                try:
-                    if datetime.fromisoformat(finished.replace("Z", "+00:00")) < cutoff:
-                        stale.append(sid)
-                except (ValueError, AttributeError):
-                    stale.append(sid)
-    for sid in stale:
-        del _running_recalcs[sid]
-    if stale:
-        logger.info("cleaned up stale recalc states", extra={"count": len(stale)})
 
 
 @asynccontextmanager
@@ -243,14 +227,7 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
 
 
 def _try_acquire_sync_lock(sb, connection_id: str) -> bool:
-    """Атомарный лок через БД: пытаемся UPDATE статус на 'syncing'
-    ТОЛЬКО если сейчас НЕ 'syncing'. PostgreSQL UPDATE WHERE атомарен.
-
-    Защищает от multi-worker race: 2 uvicorn worker'а могут получить sync
-    реквест для одного connection одновременно, но только один выиграет lock.
-
-    Returns True если lock acquired, False если уже syncing.
-    """
+    """Атомарный лок через БД — для DATA SYNC (не recalc)."""
     try:
         res = (sb.table("data_connections")
                .update({"status": "syncing", "last_error": None})
@@ -317,17 +294,10 @@ def _run_feed_sync_bg(connection_id: str, seller_id: str, feed_url: str) -> None
 
 @app.post("/ingest/csv", dependencies=[Depends(require_worker_secret)])
 async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
-    """CSV ingest — sync.
-
-    БАГ 96: проверяем размер файла ДО чтения в память (OOM защита).
-    БАГ 97: валидируем seller_id формат (UUID) — иначе FK constraint violation
-            возвращает 500 вместо понятного 400 пользователю.
-    """
+    """CSV ingest — sync. БАГ 96+97: size limit + UUID validation."""
     if not _UUID_RE.match(seller_id or ""):
         raise HTTPException(400, "seller_id должен быть UUID")
 
-    # Проверяем размер ДО загрузки в память.
-    # UploadFile.size доступен в FastAPI ≥0.66 (берём с Content-Length).
     declared_size = getattr(file, "size", None)
     if declared_size is not None and declared_size > _CSV_MAX_SIZE_BYTES:
         raise HTTPException(
@@ -336,7 +306,6 @@ async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
         )
 
     content = await file.read()
-    # Дополнительная проверка после чтения (Content-Length может врать).
     if len(content) > _CSV_MAX_SIZE_BYTES:
         raise HTTPException(
             413,
@@ -355,7 +324,6 @@ async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
 
 @app.post("/ingest/google-sheet/{connection_id}", dependencies=[Depends(require_worker_secret)])
 def ingest_google_sheet(connection_id: str, background_tasks: BackgroundTasks) -> dict:
-    """БАГ 85: валидация sync, sync в BackgroundTask, immediate 200."""
     sb = get_supabase()
     conn = sb.table("data_connections").select("*").eq("id", connection_id).single().execute()
     if not conn.data:
@@ -375,7 +343,6 @@ def ingest_google_sheet(connection_id: str, background_tasks: BackgroundTasks) -
 
 @app.post("/ingest/ozon/{connection_id}", dependencies=[Depends(require_worker_secret)])
 def ingest_ozon(connection_id: str, background_tasks: BackgroundTasks) -> dict:
-    """БАГ 85: валидация sync, sync в BackgroundTask, immediate 200."""
     sb = get_supabase()
     conn = sb.table("data_connections").select("*").eq("id", connection_id).single().execute()
     if not conn.data:
@@ -399,7 +366,6 @@ def ingest_ozon(connection_id: str, background_tasks: BackgroundTasks) -> dict:
 
 @app.post("/ingest/wb/{connection_id}", dependencies=[Depends(require_worker_secret)])
 def ingest_wb(connection_id: str, background_tasks: BackgroundTasks) -> dict:
-    """БАГ 85: валидация sync, sync в BackgroundTask, immediate 200."""
     sb = get_supabase()
     conn = sb.table("data_connections").select("*").eq("id", connection_id).single().execute()
     if not conn.data:
@@ -419,7 +385,6 @@ def ingest_wb(connection_id: str, background_tasks: BackgroundTasks) -> dict:
 
 @app.post("/ingest/feed/{connection_id}", dependencies=[Depends(require_worker_secret)])
 def ingest_feed(connection_id: str, background_tasks: BackgroundTasks) -> dict:
-    """БАГ 85: валидация sync, sync в BackgroundTask, immediate 200."""
     sb = get_supabase()
     conn = sb.table("data_connections").select("*").eq("id", connection_id).single().execute()
     if not conn.data:
@@ -435,7 +400,17 @@ def ingest_feed(connection_id: str, background_tasks: BackgroundTasks) -> dict:
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
+# ============================================================================
+# RECALC: БАГ 95 — DB-based lock через recalc_jobs table
+# ============================================================================
+
 def _run_recalc_bg(seller_id: str) -> None:
+    """БАГ 95: state хранится в recalc_jobs table, не in-memory dict.
+
+    Lock уже acquired в job_recalc_seller перед добавлением task'а.
+    Здесь только выполняем работу и помечаем результат done/error.
+    """
+    sb = get_supabase()
     progress: dict = {
         "phase": "starting",
         "processed": 0,
@@ -444,48 +419,46 @@ def _run_recalc_bg(seller_id: str) -> None:
         "current_period_index": 0,
         "total_periods": 3,
     }
-    _running_recalcs[seller_id] = {
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "status": "running",
-        "result": None,
-        "error": None,
-        "progress": progress,
-    }
     try:
         result = recalc_seller_all_periods(seller_id, progress=progress)
-        _running_recalcs[seller_id].update({
-            "status": "done",
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "result": result,
+        mark_recalc_done(sb, seller_id, result)
+        logger.info("recalc done (bg)", extra={
+            "seller_id": seller_id,
+            **{k: v for k, v in result.items() if isinstance(v, (int, float))},
         })
-        logger.info("recalc done (bg)", extra={"seller_id": seller_id, **{k: v for k, v in result.items() if isinstance(v, (int, float))}})
     except Exception as e:
-        _running_recalcs[seller_id].update({
-            "status": "error",
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "error": str(e)[:500],
-        })
+        mark_recalc_error(sb, seller_id, str(e))
         logger.exception("recalc failed (bg)", extra={"seller_id": seller_id})
 
 
 @app.post("/jobs/recalc/{seller_id}", dependencies=[Depends(require_worker_secret)])
 def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: bool = False) -> dict:
-    _cleanup_old_recalcs()
+    """БАГ 95: атомарный DB lock вместо in-memory dict."""
+    sb = get_supabase()
 
-    existing = _running_recalcs.get(seller_id)
-    if existing and existing.get("status") == "running":
+    if sync:
+        # sync режим — для тестов/dev. Не использует lock.
+        logger.info("recalc start (sync)", extra={"seller_id": seller_id})
+        result = recalc_seller_all_periods(seller_id)
+        logger.info("recalc done (sync)", extra={
+            "seller_id": seller_id,
+            **{k: v for k, v in result.items() if isinstance(v, (int, float))},
+        })
+        return result
+
+    # Атомарный захват lock'а через RPC. True = взяли, False = уже идёт.
+    acquired = try_acquire_recalc_lock(sb, seller_id)
+    if not acquired:
+        existing = get_recalc_state(sb, seller_id)
+        started_at = (existing or {}).get("started_at")
         logger.info("recalc already running, skipping", extra={"seller_id": seller_id})
         return {
             "started": False,
             "status": "running",
-            "started_at": existing.get("started_at"),
+            "started_at": started_at,
             "message": "Расчёт уже идёт, дождитесь завершения",
         }
-    if sync:
-        logger.info("recalc start (sync)", extra={"seller_id": seller_id})
-        result = recalc_seller_all_periods(seller_id)
-        logger.info("recalc done (sync)", extra={"seller_id": seller_id, **{k: v for k, v in result.items() if isinstance(v, (int, float))}})
-        return result
+
     background_tasks.add_task(_run_recalc_bg, seller_id)
     logger.info("recalc enqueued (bg)", extra={"seller_id": seller_id})
     return {
@@ -498,10 +471,27 @@ def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: b
 
 @app.get("/jobs/recalc/{seller_id}/status", dependencies=[Depends(require_worker_secret)])
 def job_recalc_status(seller_id: str) -> dict:
-    state = _running_recalcs.get(seller_id)
+    """БАГ 95: статус читается из recalc_jobs table.
+
+    Маппинг полей для backwards-compat с UI:
+    - error_text (DB) → error (response)
+    - остальное one-to-one.
+    """
+    sb = get_supabase()
+    state = get_recalc_state(sb, seller_id)
     if not state:
-        return {"status": "idle", "started_at": None, "result": None, "error": None, "progress": None}
-    return state
+        return {
+            "status": "idle", "started_at": None,
+            "result": None, "error": None, "progress": None,
+        }
+    return {
+        "status": state.get("status"),
+        "started_at": state.get("started_at"),
+        "finished_at": state.get("finished_at"),
+        "result": state.get("result"),
+        "error": state.get("error_text"),
+        "progress": state.get("progress"),
+    }
 
 
 @app.post("/jobs/recalc-all", dependencies=[Depends(require_worker_secret)])

@@ -6,7 +6,8 @@
   - /ingest/csv (success, invalid CSV, БАГ 96 size limit, БАГ 97 UUID validation)
   - /ingest/google-sheet/{id} (404, 400, success)
   - /ingest/ozon, /ingest/wb, /ingest/feed — с mock-ами
-  - /jobs/recalc/{seller_id} (синхронный ?sync=true и async режимы), /jobs/recalc-all, /jobs/recalc/{id}/status
+  - /jobs/recalc/{seller_id} (БАГ 95: DB-based lock через mock recalc_lock)
+  - /jobs/recalc-all, /jobs/recalc/{id}/status
   - /telegram/webhook (/start, /start <uuid>, empty, БАГ 52 — secret token)
 """
 from __future__ import annotations
@@ -19,7 +20,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app, _running_recalcs
+from app.main import app
 from app.schemas import SnapshotInput
 
 
@@ -96,7 +97,6 @@ class TestIngestCsvValidation:
     """БАГ 96 + 97: UUID validation + размер файла."""
 
     def test_rejects_non_uuid_seller_id(self, monkeypatch):
-        """БАГ 97: seller_id не-UUID → 400 БЕЗ обращения к БД."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_sb = MagicMock()
         with patch("app.main.get_supabase", return_value=mock_sb):
@@ -106,11 +106,9 @@ class TestIngestCsvValidation:
             )
         assert r.status_code == 400
         assert "UUID" in r.json()["detail"]
-        # DB calls не должны были произойти
         mock_sb.table.assert_not_called()
 
     def test_rejects_sql_injection_in_seller_id(self, monkeypatch):
-        """БАГ 97: SQL injection в seller_id отрезается на validation."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_sb = MagicMock()
         with patch("app.main.get_supabase", return_value=mock_sb):
@@ -122,30 +120,19 @@ class TestIngestCsvValidation:
         mock_sb.table.assert_not_called()
 
     def test_rejects_oversized_file_with_lowered_limit(self, monkeypatch):
-        """БАГ 96: подменяем _CSV_MAX_SIZE_BYTES на 50 байт → 100-байт файл = 413.
-
-        Использует подмену константы вместо создания реального 20MB файла —
-        тест работает быстро и не создаёт OOM-риска в CI.
-        """
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        # Подменяем лимит на 50 байт (CSV хедер сам по себе ~25 байт)
         monkeypatch.setattr("app.main._CSV_MAX_SIZE_BYTES", 50)
-
-        # 100-байт файл — точно > 50
         content = b"sku,stock_quantity,price\n" + b"A1,10,100\n" * 10
         assert len(content) > 50
-
         r = client.post(
             f"/ingest/csv?seller_id={VALID_UUID}",
             files={"file": ("big.csv", content, "text/csv")},
         )
-        # 413 Payload Too Large
         assert r.status_code == 413
         detail = r.json()["detail"].lower()
         assert "слишком" in detail or "max" in detail or "большой" in detail
 
     def test_accepts_normal_size_file(self, monkeypatch):
-        """Sanity: файл меньше лимита проходит размер-проверку."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_sb = MagicMock()
         mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
@@ -163,7 +150,7 @@ class TestIngestCsvValidation:
         assert r.status_code == 200
 
 
-def _mock_supabase_for_connection(connection_data: dict | None) -> MagicMock:
+def _mock_supabase_for_connection(connection_data):
     mock_sb = MagicMock()
     chain = mock_sb.table.return_value.select.return_value.eq.return_value.single.return_value
     chain.execute.return_value = MagicMock(data=connection_data)
@@ -234,66 +221,110 @@ class TestIngestFeed:
 
 
 class TestRecalcJobs:
-    def setup_method(self):
-        _running_recalcs.clear()
+    """БАГ 95: lock через recalc_lock module, не in-memory dict."""
 
     def test_recalc_seller_sync_returns_result(self, monkeypatch):
+        """sync режим не использует lock — для dev/тестов."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_result = {"products": 5, "metrics_written": 5, "periods": []}
         with patch("app.main.recalc_seller_all_periods", return_value=mock_result) as fn:
-            r = client.post("/jobs/recalc/seller-uuid-123?sync=true")
+            r = client.post(f"/jobs/recalc/{VALID_UUID}?sync=true")
         assert r.status_code == 200
         assert r.json() == mock_result
-        fn.assert_called_once_with("seller-uuid-123")
+        fn.assert_called_once_with(VALID_UUID)
 
-    def test_recalc_seller_async_returns_started(self, monkeypatch):
+    def test_recalc_seller_async_acquires_lock_and_returns_started(self, monkeypatch):
+        """async: try_acquire_recalc_lock=True → запускается task."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_result = {"products": 5, "metrics_written": 5}
-        with patch("app.main.recalc_seller_all_periods", return_value=mock_result):
-            r = client.post("/jobs/recalc/seller-uuid-456")
+        mock_sb = MagicMock()
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.main.try_acquire_recalc_lock", return_value=True) as lock_fn:
+            r = client.post(f"/jobs/recalc/{VALID_UUID}")
         assert r.status_code == 200
         body = r.json()
         assert body["started"] is True
         assert body["status"] == "running"
         assert "started_at" in body
-        assert "seller-uuid-456" in _running_recalcs
+        # lock acquire вызван
+        lock_fn.assert_called_once()
+        # Аргументы: первым sb, вторым seller_id
+        call_args = lock_fn.call_args[0]
+        assert call_args[1] == VALID_UUID
 
-    def test_recalc_seller_dedup_when_running(self, monkeypatch):
+    def test_recalc_seller_dedup_when_lock_already_held(self, monkeypatch):
+        """БАГ 95: try_acquire_recalc_lock=False → возвращаем started=False."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        _running_recalcs["seller-busy"] = {
-            "started_at": "2026-05-19T09:00:00Z",
+        mock_sb = MagicMock()
+        existing_state = {
             "status": "running",
-            "result": None,
-            "error": None,
+            "started_at": "2026-05-19T09:00:00+00:00",
+            "worker_id": "host1:1234",
         }
-        with patch("app.main.recalc_seller_all_periods") as fn:
-            r = client.post("/jobs/recalc/seller-busy")
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.main.try_acquire_recalc_lock", return_value=False), \
+             patch("app.main.get_recalc_state", return_value=existing_state):
+            r = client.post(f"/jobs/recalc/{VALID_UUID}")
         assert r.status_code == 200
         body = r.json()
         assert body["started"] is False
         assert body["status"] == "running"
-        fn.assert_not_called()
+        assert body["started_at"] == "2026-05-19T09:00:00+00:00"
 
     def test_recalc_status_idle(self, monkeypatch):
+        """get_recalc_state=None → status='idle'."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        r = client.get("/jobs/recalc/some-unknown-seller/status")
+        mock_sb = MagicMock()
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.main.get_recalc_state", return_value=None):
+            r = client.get(f"/jobs/recalc/{VALID_UUID}/status")
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "idle"
+        assert body["started_at"] is None
 
     def test_recalc_status_returns_running_state(self, monkeypatch):
+        """DB state маппится на response с error_text → error."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        _running_recalcs["seller-running"] = {
-            "started_at": "2026-05-19T09:00:00Z",
+        mock_sb = MagicMock()
+        db_state = {
+            "seller_id": VALID_UUID,
             "status": "running",
+            "started_at": "2026-05-19T09:00:00+00:00",
+            "finished_at": None,
             "result": None,
-            "error": None,
+            "error_text": None,
+            "progress": {"phase": "loading"},
         }
-        r = client.get("/jobs/recalc/seller-running/status")
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.main.get_recalc_state", return_value=db_state):
+            r = client.get(f"/jobs/recalc/{VALID_UUID}/status")
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "running"
-        assert body["started_at"] == "2026-05-19T09:00:00Z"
+        assert body["started_at"] == "2026-05-19T09:00:00+00:00"
+        # БАГ 95: error_text в DB → error в ответе
+        assert body["error"] is None
+        assert body["progress"] == {"phase": "loading"}
+
+    def test_recalc_status_returns_error_text_as_error(self, monkeypatch):
+        """DB.error_text → response.error для UI совместимости."""
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = MagicMock()
+        db_state = {
+            "seller_id": VALID_UUID,
+            "status": "error",
+            "started_at": "2026-05-19T09:00:00+00:00",
+            "finished_at": "2026-05-19T09:05:00+00:00",
+            "result": None,
+            "error_text": "OOM killed",
+            "progress": None,
+        }
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.main.get_recalc_state", return_value=db_state):
+            r = client.get(f"/jobs/recalc/{VALID_UUID}/status")
+        body = r.json()
+        assert body["status"] == "error"
+        assert body["error"] == "OOM killed"
 
     def test_recalc_all(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
@@ -305,13 +336,12 @@ class TestRecalcJobs:
 
 
 # ============================================================================
-# Telegram webhook (БАГ 52: secret token verification + UUID validation)
+# Telegram webhook (БАГ 52)
 # ============================================================================
 
 
 class TestTelegramWebhook:
     def setup_method(self):
-        # По умолчанию в тестах secret не задан → проверка пропускается
         for var in ("TELEGRAM_WEBHOOK_SECRET", "ENV"):
             os.environ.pop(var, None)
 
@@ -346,7 +376,6 @@ class TestTelegramWebhook:
         assert "Veloseller" in call_args[1]
 
     def test_start_with_valid_uuid_links_account(self):
-        """/start <valid_uuid> — линкует chat_id к sellers.telegram_chat_id."""
         mock_sb = MagicMock()
         mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
             data=[{"id": VALID_UUID, "telegram_chat_id": "777"}]
@@ -365,7 +394,6 @@ class TestTelegramWebhook:
         assert "подключ" in msg.lower()
 
     def test_start_with_invalid_uuid_shows_help(self):
-        """БАГ 52: /start с невалидным UUID НЕ делает DB-запрос, показывает help."""
         mock_sb = MagicMock()
         with patch("app.main.get_supabase", return_value=mock_sb), \
              patch("app.telegram.send_message", return_value=True) as send:
@@ -375,7 +403,6 @@ class TestTelegramWebhook:
         assert r.status_code == 200
         body = r.json()
         assert body["linked"] is False
-        # Update НЕ должен был быть вызван
         mock_sb.table.assert_not_called()
 
     def test_unknown_command_returns_ok(self):
@@ -393,14 +420,11 @@ class TestTelegramWebhook:
         assert r.json() == {"ok": True}
 
     def test_secret_token_required_when_env_set(self, monkeypatch):
-        """БАГ 52: если TELEGRAM_WEBHOOK_SECRET задан, требуем header."""
         monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "my-secret")
-        # Без header
         r = client.post("/telegram/webhook", json={"update_id": 1})
         assert r.status_code == 403
 
     def test_secret_token_accepted_when_correct(self, monkeypatch):
-        """С правильным header работает."""
         monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "my-secret")
         r = client.post(
             "/telegram/webhook",
@@ -419,9 +443,7 @@ class TestTelegramWebhook:
         assert r.status_code == 403
 
     def test_production_without_secret_returns_500(self, monkeypatch):
-        """БАГ 52: в production без TELEGRAM_WEBHOOK_SECRET → 500 (misconfigured)."""
         monkeypatch.setenv("ENV", "production")
-        # Убеждаемся что TELEGRAM_WEBHOOK_SECRET точно не задан
         monkeypatch.delenv("TELEGRAM_WEBHOOK_SECRET", raising=False)
         r = client.post("/telegram/webhook", json={"update_id": 1})
         assert r.status_code == 500
