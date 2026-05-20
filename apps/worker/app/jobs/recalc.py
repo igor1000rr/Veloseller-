@@ -16,13 +16,12 @@
 БАГ 50 (здесь): recalc_all_sellers пропускает sellers с активным manual recalc
   (избегаем deadlock'ов в inventory_events delete+insert при concurrent запуске).
 
-БАГ 92 (здесь): batched fetch snapshots для ВСЕХ продуктов одним запросом — было
-  per-SKU = 1879 запросов, стало ceil(1879/200) = 10 запросов. Радикально снижает
-  время recalc'а и шанс попасть в keep-alive race с Postgrest (БАГ 91).
-БАГ 93 (здесь): try/except на per-SKU loop — если один SKU падает на pure-compute
-  или DB write, не теряем весь recalc. Логируем failed_skus в результате.
+БАГ 92 (здесь): batched fetch snapshots для ВСЕХ продуктов одним запросом.
+БАГ 93 (здесь): try/except на per-SKU loop — если один SKU падает, не теряем весь recalc.
 
-underestimated_sku требует ≥2 stockout_days.
+БАГ 94 (здесь): детальное логирование failed_skus с exception text. Без этого
+  невозможно найти причину фейлов в проде. Также пишем первые 3 фейла полностью
+  с product_id + error type + error msg в WARNING лог (видны в journalctl без grep -A).
 """
 from __future__ import annotations
 
@@ -65,6 +64,10 @@ logger = logging.getLogger("veloseller.recalc")
 # БАГ 92: размер батча для .in_() — PostgREST безопасно держит ~200 ID в URL.
 _PRODUCT_IN_BATCH = 200
 
+# БАГ 94: первые N фейлов в одном recalc логируем как WARNING с полной инфой,
+# остальные — DEBUG (чтобы не флудить логи при массовом сбое).
+_VERBOSE_FAILURES_PER_RECALC = 3
+
 
 # ============================================================================
 # Helpers
@@ -105,17 +108,48 @@ def _bump_progress(progress: Optional[dict], **fields) -> None:
     progress.update(fields)
 
 
+def _log_failed_sku(
+    phase: str,
+    seller_id: str,
+    product_id: str,
+    period_days: int,
+    exc: BaseException,
+    verbose_remaining: int,
+) -> None:
+    """БАГ 94: логируем failed SKU так чтобы было ВИДНО в journalctl.
+
+    Первые N фейлов в одном recalc — как WARNING с msg = str(exc).
+    Остальные — INFO (короткий маркер), чтобы не флудить.
+    """
+    err_type = type(exc).__name__
+    err_msg = str(exc)[:300]
+    if verbose_remaining > 0:
+        logger.warning(
+            "recalc SKU failed: %s: %s [phase=%s pid=%s period=%d]",
+            err_type, err_msg, phase, product_id, period_days,
+            extra={
+                "seller_id": seller_id, "product_id": product_id,
+                "phase": phase, "period_days": period_days,
+                "error_type": err_type, "error_msg": err_msg,
+            }
+        )
+    else:
+        logger.info(
+            "recalc SKU failed: %s [phase=%s pid=%s]",
+            err_type, phase, product_id,
+            extra={
+                "seller_id": seller_id, "product_id": product_id,
+                "phase": phase, "error_type": err_type,
+            }
+        )
+
+
 def _fetch_snapshots_batched(
     sb,
     product_ids: list[str],
     history_start: str,
 ) -> dict[str, list[dict]]:
-    """БАГ 92: один batched fetch вместо per-SKU N запросов.
-
-    Возвращает маппинг product_id → list[snapshot rows] (отсортированные по времени).
-    Snapshots группируются in-memory, потому что PostgREST не позволяет per-key sort
-    в одном IN запросе. Это всё равно радикально быстрее N отдельных запросов.
-    """
+    """БАГ 92: один batched fetch вместо per-SKU N запросов."""
     if not product_ids:
         return {}
     result: dict[str, list[dict]] = {pid: [] for pid in product_ids}
@@ -131,8 +165,6 @@ def _fetch_snapshots_batched(
             pid = r.get("product_id")
             if pid in result:
                 result[pid].append(r)
-    # Сортируем in-memory (фетч мог вернуть в любом порядке, но build_daily_aggregates
-    # сортирует сам — это для defensive consistency)
     for pid in result:
         result[pid].sort(key=lambda r: r["snapshot_time"])
     return result
@@ -143,10 +175,7 @@ def _extract_pre_period_sales_deltas(
     period_start: date,
     seller_tz: pytz.tzinfo.BaseTzInfo,
 ) -> list[float]:
-    """Из snapshots до period_start извлекает НОРМАЛИЗОВАННЫЕ по дням sales_like-дельты.
-
-    БАГ 10 fix: делим |delta| на (день_текущий - день_предыдущий).
-    """
+    """БАГ 10 fix: делим |delta| на (день_текущий - день_предыдущий)."""
     by_day: dict[date, dict] = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
@@ -435,9 +464,7 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
     total_skus = len(products)
     history_start = (period_start - timedelta(days=30)).isoformat()
 
-    # БАГ 92: один batched fetch вместо per-SKU N запросов.
-    # До: 1879 запросов GET inventory_snapshots, ~3 минуты + риск keep-alive race.
-    # После: ceil(1879/200) = 10 запросов, ~5 секунд.
+    # БАГ 92: один batched fetch.
     _bump_progress(progress, phase="fetching_snapshots", total=total_skus, processed=0)
     all_pids = [p["product_id"] for p in products]
     snapshots_by_pid = _fetch_snapshots_batched(sb, all_pids, history_start)
@@ -458,9 +485,10 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
     sku_data: list[dict] = []
     velocities_for_median: list[float] = []
 
-    # ВНУТРЕННИЙ ЦИКЛ per-SKU: каждый SKU обёрнут в try/except (БАГ 93).
-    # Если один SKU падает — логируем и продолжаем со следующим.
-    # Идемпотентность гарантируется upsert'ом tvelo_metrics и DELETE+INSERT events/changelog.
+    # БАГ 94: счётчик verbose-логов в этом recalc (первые N — WARNING, остальные — INFO).
+    verbose_failures_left = _VERBOSE_FAILURES_PER_RECALC
+
+    # БАГ 93: per-SKU try/except в Loop 1
     for idx, p in enumerate(products):
         pid = p["product_id"]
         try:
@@ -545,20 +573,25 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
             })
             if metric.adjusted_velocity > 0:
                 velocities_for_median.append(metric.adjusted_velocity)
-        except Exception:
+        except Exception as e:
             failed_skus += 1
-            logger.exception("recalc SKU failed (БАГ 93: skip and continue)", extra={
-                "seller_id": seller_id, "product_id": pid, "period_days": period_days,
-            })
+            _log_failed_sku("loop1_compute", seller_id, pid, period_days, e, verbose_failures_left)
+            if verbose_failures_left > 0:
+                verbose_failures_left -= 1
             continue
 
     if failed_skus > 0:
-        logger.warning("recalc: some SKUs failed", extra={
+        logger.warning("recalc Loop 1 finished with failures", extra={
             "seller_id": seller_id, "period_days": period_days,
             "failed_skus": failed_skus, "total_skus": total_skus,
+            "sku_data_size": len(sku_data),
         })
 
     median_store_velocity = _median(velocities_for_median) if velocities_for_median else 0.0
+
+    # БАГ 94: Loop 2 verbose ограничение отдельно (даём шанс увидеть фейлы Loop 2 даже если Loop 1 не имел)
+    verbose_failures_left_l2 = _VERBOSE_FAILURES_PER_RECALC
+    loop2_failures = 0
 
     _bump_progress(progress, phase="writing_metrics", processed=0, total=len(sku_data))
     for idx, item in enumerate(sku_data):
@@ -599,13 +632,20 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
             }, on_conflict="product_id,period_start,period_end").execute()
             metrics_written += 1
             alerts_written += _write_alerts(sb, seller_id, pid, m, underestimated)
-        except Exception:
+        except Exception as e:
             failed_skus += 1
-            logger.exception("recalc metric/alert write failed", extra={
-                "seller_id": seller_id, "product_id": pid,
-            })
+            loop2_failures += 1
+            _log_failed_sku("loop2_write", seller_id, pid, period_days, e, verbose_failures_left_l2)
+            if verbose_failures_left_l2 > 0:
+                verbose_failures_left_l2 -= 1
         if (idx + 1) % 50 == 0 or idx == len(sku_data) - 1:
             _bump_progress(progress, processed=idx + 1)
+
+    if loop2_failures > 0:
+        logger.warning("recalc Loop 2 finished with failures", extra={
+            "seller_id": seller_id, "period_days": period_days,
+            "loop2_failures": loop2_failures, "metrics_written": metrics_written,
+        })
 
     _bump_progress(progress, phase="writing_store")
     try:
@@ -722,7 +762,6 @@ def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -
                  "events_written": 0, "changelog_written": 0, "store_metrics_written": 0,
                  "error": "period failed"}
         result["periods"].append({"period_days": period_days, **r})
-        # Главным считаем 30-day (как было раньше — на dashboard основной период)
         if period_days == 30:
             for k in ("products", "metrics_written", "alerts_written",
                       "store_metrics_written", "events_written", "changelog_written",
@@ -733,14 +772,7 @@ def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -
 
 
 def recalc_all_sellers() -> dict:
-    """Запускает recalc для всех sellers.
-
-    БАГ 32 fix: пагинация через fetch_all.
-    БАГ 50 fix: пропускаем sellers с активным manual recalc'ом (status='running'
-    в _running_recalcs из main.py). Иначе cron параллельно с manual recalc создавал
-    race condition в inventory_events.delete()+insert() для одного product_id,
-    что приводило к deadlock'ам PostgreSQL и/или временному отсутствию events.
-    """
+    """БАГ 32: пагинация. БАГ 50: пропускаем sellers с активным manual recalc."""
     sb = get_supabase()
     sellers = fetch_all(sb.table("sellers").select("id"))
     summary = {"sellers": 0, "skipped_concurrent": 0, "metrics_written": 0,
