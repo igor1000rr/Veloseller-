@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// БАГ 29: тесты обновлены под whitelist origin. Дефолт APP_URL = первый из списка.
+process.env.APP_URL = "https://veloseller.ru,https://app.veloseller.com";
+
 const getUserMock = vi.fn();
 const selectChainMock = vi.fn();
 const portalCreate = vi.fn();
@@ -39,13 +42,29 @@ describe("POST /api/stripe/portal", () => {
     expect((await POST(req())).status).toBe(400);
   });
 
-  it("успешно — возвращает url", async () => {
+  it("успешно — возвращает url (whitelisted origin)", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     selectChainMock.mockResolvedValue({ data: { stripe_customer_id: "cus_abc" } });
     portalCreate.mockResolvedValue({ url: "https://billing.stripe.com/xyz" });
     const { POST } = await import("@/app/api/stripe/portal/route");
-    const res = await POST(req());
+    const res = await POST(req("https://app.veloseller.com"));
     expect(res.status).toBe(200);
-    expect(portalCreate).toHaveBeenCalledWith({ customer: "cus_abc", return_url: "https://app.veloseller.com/billing" });
+    expect(portalCreate).toHaveBeenCalledWith({
+      customer: "cus_abc",
+      return_url: "https://app.veloseller.com/billing",
+    });
+  });
+
+  // БАГ 29: атакер с произвольным origin не может перенаправить
+  it("non-whitelist origin → fallback на дефолт", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
+    selectChainMock.mockResolvedValue({ data: { stripe_customer_id: "cus_abc" } });
+    portalCreate.mockResolvedValue({ url: "https://billing.stripe.com/xyz" });
+    const { POST } = await import("@/app/api/stripe/portal/route");
+    await POST(req("https://evil.com"));
+    expect(portalCreate).toHaveBeenCalledWith({
+      customer: "cus_abc",
+      return_url: "https://veloseller.ru/billing",
+    });
   });
 });
