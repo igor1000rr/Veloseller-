@@ -35,6 +35,9 @@ if _sentry_dsn:
         import sentry_sdk
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.logging import LoggingIntegration
+        # БАГ 67 fix: with_locals=False — не отправлять локальные переменные в stack traces.
+        # Они могут содержать api_key, token, client_id из decrypt_if_encrypted и т.д.
+        # send_default_pii=False — не отправлять request body и user info автоматически.
         sentry_sdk.init(
             dsn=_sentry_dsn,
             integrations=[
@@ -44,17 +47,37 @@ if _sentry_dsn:
             environment=_os.environ.get("SENTRY_ENV", "production"),
             traces_sample_rate=0.1,
             release=_os.environ.get("SENTRY_RELEASE"),
+            send_default_pii=False,
+            with_locals=False,
+            # Дополнительный фильтр: scrub потенциально sensitive поля по имени
+            before_send=lambda event, hint: _scrub_sentry_event(event),
         )
         logger.info("sentry initialized", extra={"env": _os.environ.get("SENTRY_ENV", "production")})
     except ImportError:
         logger.warning("SENTRY_DSN set but sentry-sdk not installed — skipping")
 
 
+def _scrub_sentry_event(event: dict) -> Optional[dict]:
+    """БАГ 67: дополнительная очистка Sentry events от sensitive полей.
+
+    Удаляет api_key, token, client_id, password из любых nested dict-полей.
+    """
+    SENSITIVE_KEYS = {"api_key", "token", "client_id", "password", "secret", "x-worker-secret",
+                       "authorization", "stripe_subscription_id", "stripe_customer_id"}
+
+    def _scrub(obj):
+        if isinstance(obj, dict):
+            return {k: ("[REDACTED]" if k.lower() in SENSITIVE_KEYS else _scrub(v)) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [_scrub(i) for i in obj]
+        return obj
+
+    return _scrub(event)
+
+
 _running_recalcs: dict[str, dict] = {}
 
-# БАГ 27: TTL для finished/error tasks. Без этого _running_recalcs растёт бесконечно
-# (каждый seller добавляет запись, которая никогда не удаляется). За год при 1000 sellers
-# и 24 recalc'ах в сутки это ~8.7M записей — memory leak.
+# БАГ 27: TTL для finished/error tasks. Без этого _running_recalcs растёт бесконечно.
 _RECALC_STATE_TTL = timedelta(hours=24)
 
 # БАГ 52: UUID regex для валидации seller_id из Telegram /start payload.
@@ -62,10 +85,7 @@ _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 
 
 def _cleanup_old_recalcs() -> None:
-    """Удаляет завершённые задачи старше _RECALC_STATE_TTL.
-
-    Вызывается при каждом новом recalc — амортизированно O(N) где N = кол-во tasks.
-    """
+    """Удаляет завершённые задачи старше _RECALC_STATE_TTL."""
     cutoff = datetime.now(timezone.utc) - _RECALC_STATE_TTL
     stale = []
     for sid, state in _running_recalcs.items():
@@ -76,7 +96,6 @@ def _cleanup_old_recalcs() -> None:
                     if datetime.fromisoformat(finished.replace("Z", "+00:00")) < cutoff:
                         stale.append(sid)
                 except (ValueError, AttributeError):
-                    # Поломанный timestamp — лучше удалить
                     stale.append(sid)
     for sid in stale:
         del _running_recalcs[sid]
@@ -352,7 +371,6 @@ def _run_recalc_bg(seller_id: str) -> None:
 
 @app.post("/jobs/recalc/{seller_id}", dependencies=[Depends(require_worker_secret)])
 def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: bool = False) -> dict:
-    # БАГ 27: cleanup старых finished задач, чтобы _running_recalcs не рос бесконечно
     _cleanup_old_recalcs()
 
     existing = _running_recalcs.get(seller_id)
@@ -402,9 +420,7 @@ async def telegram_webhook(
 ) -> dict:
     """Telegram webhook handler.
 
-    БАГ 52 fix (КРИТИЧНО): проверяем X-Telegram-Bot-Api-Secret-Token header.
-    Раньше любой мог послать POST с /start <victim_seller_id> и привязать свой chat_id
-    к чужому аккаунту, получая все уведомления жертвы.
+    БАГ 52 fix: проверяем X-Telegram-Bot-Api-Secret-Token header.
     """
     from app.telegram import send_message
 
