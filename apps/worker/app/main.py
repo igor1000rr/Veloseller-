@@ -139,7 +139,11 @@ def health() -> dict:
     return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat()}
 
 
+# Размер батча для запросов в Supabase. БАГ 88: батчируем upsert/insert/in_
+# чтобы не упереться в лимит body size (~10MB) и не делать одну гигантскую
+# транзакцию при 5K+ SKU.
 _PRODUCTS_IN_BATCH = 500
+_INSERT_BATCH = 500
 
 # БАГ 83 fix: окно дедупликации snapshot'ов.
 # Было: 48 часов — слишком агрессивно. При daily sync'e большинство SKU
@@ -151,11 +155,16 @@ _DEDUP_WINDOW_HOURS = 20
 
 
 def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
-    """Upsert products и возвращает маппинг sku -> product_id."""
+    """Upsert products и возвращает маппинг sku -> product_id.
+
+    БАГ 88 fix: upsert батчируется по _PRODUCTS_IN_BATCH чтобы не упасть
+    на больших каталогах (10K+ SKU = ~5MB body, лимит PostgREST 10MB).
+    """
     if not snapshots:
         return {}
     rows = [{"seller_id": seller_id, "sku": s.sku, "product_name": s.product_name or s.sku} for s in snapshots]
-    sb.table("products").upsert(rows, on_conflict="seller_id,sku").execute()
+    for i in range(0, len(rows), _PRODUCTS_IN_BATCH):
+        sb.table("products").upsert(rows[i:i + _PRODUCTS_IN_BATCH], on_conflict="seller_id,sku").execute()
 
     all_skus = [s.sku for s in snapshots]
     sku_to_pid: dict[str, str] = {}
@@ -177,6 +186,9 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
     Если последний snapshot этого SKU был >20 часов назад — пишем новый даже если
     stock/price не изменились. Это гарантирует ≥1 snapshot/день для каждого SKU,
     что необходимо для корректной работы engine (velocity, coverage, alerts).
+
+    БАГ 88 fix: INSERT снапшотов теперь батчится по _INSERT_BATCH строк.
+    При 5K+ SKU один INSERT мог упасть на body size limit / statement timeout.
     """
     if not snapshots:
         return 0
@@ -192,8 +204,6 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
     pids = list(sku_to_pid.values())
     last_snapshots: dict[str, dict] = {}
     if pids:
-        # БАГ 83: окно дедупликации — _DEDUP_WINDOW_HOURS вместо days=2.
-        # Нужно тянуть последний snapshot за это окно, чтобы решить пропускать или нет.
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=_DEDUP_WINDOW_HOURS)).isoformat()
         IN_BATCH = 200
         for i in range(0, len(pids), IN_BATCH):
@@ -220,9 +230,6 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
             continue
         last = last_snapshots.get(pid)
         if last is not None:
-            # Если последний snapshot этого SKU был в окне дедупликации
-            # И stock+price не изменились — пропускаем. Иначе всегда пишем
-            # (даже если значения те же — для engine'а нужен ежедневный snapshot).
             last_stock = int(last.get("stock_quantity") or 0)
             last_price = float(last.get("price") or 0)
             cur_stock = int(s.stock_quantity)
@@ -237,12 +244,15 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
             "availability": s.stock_quantity > 0,
             "snapshot_time": ts.isoformat(), "source": source.value,
         })
+    # БАГ 88 fix: батчируем INSERT'ы
     if rows:
-        sb.table("inventory_snapshots").insert(rows).execute()
+        for i in range(0, len(rows), _INSERT_BATCH):
+            sb.table("inventory_snapshots").insert(rows[i:i + _INSERT_BATCH]).execute()
     logger.info("snapshots persisted", extra={
         "seller_id": seller_id, "connection_id": connection_id,
         "inserted": len(rows), "skipped_duplicates": skipped_duplicates,
         "skipped_unmapped": skipped_unmapped, "total_skus": len(snapshots),
+        "batches": (len(rows) + _INSERT_BATCH - 1) // _INSERT_BATCH if rows else 0,
     })
     return len(rows)
 

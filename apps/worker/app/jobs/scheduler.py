@@ -3,10 +3,13 @@
 - recalc-all каждый час
 - sync активных marketplace-connections РАЗ В СУТКИ в 02:00 UTC
 - daily digest в 09:00 UTC
+- snapshots retention в 04:00 UTC (БАГ 89)
 
 БАГ 30 fix: per-seller try/catch в _job_send_daily_digests + пагинация sellers
 (раньше при ≥1000 sellers digest получали только первые 1000).
 БАГ 31 fix: пагинация data_connections в _job_sync_active_connections.
+БАГ 89: retention job — удаляем snapshots старше 180 дней (engine использует
+максимум 120 дней истории: 90-day period + 30-day pre-period для медианы).
 """
 from __future__ import annotations
 
@@ -20,11 +23,16 @@ from app.db import fetch_all, get_supabase
 from app.jobs.recalc import recalc_all_sellers
 from app.schemas import SourceType
 from app.sources import google_sheet, ozon, wildberries
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger("veloseller.scheduler")
 
 _scheduler: BackgroundScheduler | None = None
+
+# БАГ 89: глубина истории inventory_snapshots в днях.
+# Engine берёт: 90-day period + 30-day pre-period для медианы = 120 дней.
+# Запас 60 дней на случай если selлер не пересчитывал долго → 180 дней.
+_SNAPSHOTS_RETENTION_DAYS = 180
 
 
 def _job_recalc_all() -> None:
@@ -83,7 +91,6 @@ def _job_sync_active_connections() -> None:
                         "last_error": str(e)[:500],
                     }).eq("id", conn["id"]).execute()
                 except Exception:
-                    # Если даже статус не записался — не падаем, идём дальше
                     logger.exception("Failed to mark connection error", extra={"connection_id": conn["id"]})
     except Exception as e:
         logger.exception("Cron sync_active_connections failed: %s", e)
@@ -96,7 +103,6 @@ def _job_send_daily_digests() -> None:
     для остальных. Также пагинация sellers через fetch_all (раньше при ≥1000
     sellers digest получали только первые 1000).
     """
-    from datetime import timedelta
     from app.notifications import send_alert_digest
     from app.telegram import send_message as tg_send, format_alerts_digest
     try:
@@ -110,7 +116,6 @@ def _job_send_daily_digests() -> None:
         skipped = 0
         for s in sellers:
             try:
-                # Подавляем пользователей, у которых обе нотификации выключены
                 if not s.get("notify_email", True) and not s.get("notify_telegram", True):
                     skipped += 1
                     continue
@@ -151,6 +156,39 @@ def _job_send_daily_digests() -> None:
         logger.exception("Daily digest job failed: %s", e)
 
 
+def _job_snapshots_retention() -> None:
+    """БАГ 89: удаляем inventory_snapshots старше _SNAPSHOTS_RETENTION_DAYS.
+
+    Без retention при ежедневном snapshot'е (БАГ 83 fix) база растёт ~1879 строк
+    /день на одного селлера = ~700K строк/год. Это не критично для Supabase Pro,
+    но через несколько лет станет дорого и медленно.
+
+    Engine использует максимум 120 дней истории (90-day period + 30-day pre-period
+    для медианы). Держим 180 дней с запасом.
+
+    Запускаем раз в сутки в 04:00 UTC — после ночного sync (02:00) и до утреннего
+    digest (09:00).
+    """
+    try:
+        sb = get_supabase()
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=_SNAPSHOTS_RETENTION_DAYS)).isoformat()
+        # Сначала смотрим сколько удалим (для логирования и safety)
+        count_q = sb.table("inventory_snapshots").select("snapshot_id", count="exact").lt(
+            "snapshot_time", cutoff
+        ).limit(1).execute()
+        to_delete = getattr(count_q, "count", None) or 0
+        if to_delete == 0:
+            logger.info("snapshots retention: nothing to delete")
+            return
+        # Delete по фильтру snapshot_time < cutoff. PostgREST позволяет DELETE
+        # без LIMIT — для retention это OK (180 дней — стабильная граница).
+        sb.table("inventory_snapshots").delete().lt("snapshot_time", cutoff).execute()
+        logger.info("snapshots retention: deleted %d rows older than %d days",
+                    to_delete, _SNAPSHOTS_RETENTION_DAYS)
+    except Exception as e:
+        logger.exception("snapshots retention job failed: %s", e)
+
+
 def _persist_via_main(seller_id, connection_id, source_str, snapshots):
     """Импорт из main отложенный во избежание циклов."""
     from app.main import _persist_snapshots
@@ -167,6 +205,12 @@ def start_scheduler() -> None:
         _job_sync_active_connections,
         CronTrigger(hour=2, minute=0),
         id="sync-active-connections",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        _job_snapshots_retention,
+        CronTrigger(hour=4, minute=0),
+        id="snapshots-retention",
         replace_existing=True,
     )
     _scheduler.add_job(
