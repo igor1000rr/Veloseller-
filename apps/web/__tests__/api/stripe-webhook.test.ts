@@ -6,7 +6,7 @@ const updateChainMock = vi.fn();
 const fromMock = vi.fn();
 const eqMock = vi.fn();
 
-// Для select(...).eq(...).maybeSingle() chain (БАГ 62)
+// Для select(...).eq(...).maybeSingle() chain (БАГ 62 + БАГ 103)
 const selectMock = vi.fn();
 const selectEqMock = vi.fn();
 const maybeSingleMock = vi.fn();
@@ -102,7 +102,6 @@ describe("POST /api/stripe/webhook", () => {
   });
 
   it("subscription.deleted — на trial, обнуляет sub_id (нет активной в БД)", async () => {
-    // Имитируем что в БД ничего нет (либо это та же sub_id, либо null)
     maybeSingleMock.mockResolvedValue({ data: null, error: null });
     constructEventMock.mockReturnValue({
       type: "customer.subscription.deleted",
@@ -115,7 +114,6 @@ describe("POST /api/stripe/webhook", () => {
   });
 
   it("subscription.deleted — обновляет если sub.id совпадает с текущим в БД", async () => {
-    // БАГ 62: проверяем что deleted ОБНОВЛЯЕТ если та же подписка
     maybeSingleMock.mockResolvedValue({
       data: { stripe_subscription_id: "sub_789" }, error: null,
     });
@@ -130,7 +128,6 @@ describe("POST /api/stripe/webhook", () => {
   });
 
   it("БАГ 62: subscription.deleted IGNORED если seller имеет другую активную подписку", async () => {
-    // Out-of-order: пришёл deleted для старой подписки, у seller'а уже новая
     maybeSingleMock.mockResolvedValue({
       data: { stripe_subscription_id: "sub_NEW" }, error: null,
     });
@@ -139,7 +136,6 @@ describe("POST /api/stripe/webhook", () => {
       data: { object: { id: "sub_OLD", metadata: { seller_id: "seller-3" } } },
     });
     await callWebhook("{}", "sig");
-    // update НЕ должен быть вызван — старый deleted игнорится
     expect(updateChainMock).not.toHaveBeenCalled();
   });
 
@@ -183,10 +179,155 @@ describe("POST /api/stripe/webhook", () => {
   });
 
   it("unknown event — 200 received:true", async () => {
-    constructEventMock.mockReturnValue({ type: "invoice.payment_failed", data: { object: {} } });
+    // Реально unknown event (БАГ 103: invoice.payment_failed теперь обрабатывается)
+    constructEventMock.mockReturnValue({ type: "customer.discount.created", data: { object: {} } });
     const res = await callWebhook("{}", "sig");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ received: true });
     expect(updateChainMock).not.toHaveBeenCalled();
+  });
+
+  // ==========================================================================
+  // БАГ 103: invoice.payment_failed / invoice.payment_succeeded handlers
+  // ==========================================================================
+
+  describe("БАГ 103: invoice.payment_failed", () => {
+    it("инкрементирует payment_failure_count и пишет timestamp", async () => {
+      // Setup: invoice → subscription_details.metadata.seller_id (Stripe 2024+)
+      // Текущий count = 1
+      maybeSingleMock.mockResolvedValue({
+        data: { payment_failure_count: 1 }, error: null,
+      });
+      constructEventMock.mockReturnValue({
+        type: "invoice.payment_failed",
+        data: { object: {
+          id: "in_001",
+          subscription_details: { metadata: { seller_id: "seller-pf" } },
+          billing_reason: "subscription_cycle",
+          last_finalization_error: { message: "Your card was declined." },
+        }},
+      });
+      const res = await callWebhook("{}", "sig");
+      expect(res.status).toBe(200);
+
+      // Должен быть UPDATE с инкрементированным counter
+      expect(updateChainMock).toHaveBeenCalled();
+      const payload = updateChainMock.mock.calls[0][0];
+      expect(payload.payment_failure_count).toBe(2);  // 1 + 1
+      expect(payload.last_payment_failed_reason).toContain("declined");
+      expect(payload.last_payment_failed_at).toBeTruthy();
+    });
+
+    it("сохраняет billing_reason если last_finalization_error пустой", async () => {
+      maybeSingleMock.mockResolvedValue({
+        data: { payment_failure_count: 0 }, error: null,
+      });
+      constructEventMock.mockReturnValue({
+        type: "invoice.payment_failed",
+        data: { object: {
+          id: "in_002",
+          subscription_details: { metadata: { seller_id: "seller-pf2" } },
+          billing_reason: "automatic_pending_invoice_item_invoice",
+          // last_finalization_error отсутствует
+        }},
+      });
+      await callWebhook("{}", "sig");
+      const payload = updateChainMock.mock.calls[0][0];
+      expect(payload.last_payment_failed_reason).toBe("automatic_pending_invoice_item_invoice");
+      expect(payload.payment_failure_count).toBe(1);
+    });
+
+    it("fallback: retrieve subscription для seller_id если invoice не содержит metadata", async () => {
+      maybeSingleMock.mockResolvedValue({
+        data: { payment_failure_count: 0 }, error: null,
+      });
+      // invoice без subscription_details.metadata, но с subscription id
+      constructEventMock.mockReturnValue({
+        type: "invoice.payment_failed",
+        data: { object: {
+          id: "in_003",
+          subscription: "sub_lookup",
+          billing_reason: "subscription_cycle",
+        }},
+      });
+      subscriptionsRetrieveMock.mockResolvedValue({
+        id: "sub_lookup",
+        metadata: { seller_id: "seller-from-sub" },
+      });
+      await callWebhook("{}", "sig");
+      expect(subscriptionsRetrieveMock).toHaveBeenCalledWith("sub_lookup");
+      expect(updateChainMock).toHaveBeenCalled();
+    });
+
+    it("fallback: lookup seller по stripe_customer_id если subscription отсутствует", async () => {
+      // Первый maybeSingle для select(id).eq(stripe_customer_id) → seller найден
+      maybeSingleMock
+        .mockResolvedValueOnce({ data: { id: "seller-by-customer" }, error: null })
+        // Второй для select(payment_failure_count).eq(id) → текущий counter
+        .mockResolvedValueOnce({ data: { payment_failure_count: 0 }, error: null });
+
+      constructEventMock.mockReturnValue({
+        type: "invoice.payment_failed",
+        data: { object: {
+          id: "in_004",
+          customer: "cus_abc",
+          billing_reason: "subscription_cycle",
+        }},
+      });
+      await callWebhook("{}", "sig");
+      // Should have looked up by customer
+      expect(fromMock).toHaveBeenCalledWith("sellers");
+      expect(updateChainMock).toHaveBeenCalled();
+    });
+
+    it("если seller не найден — silently ignore (warn в логе)", async () => {
+      maybeSingleMock.mockResolvedValue({ data: null, error: null });
+      constructEventMock.mockReturnValue({
+        type: "invoice.payment_failed",
+        data: { object: {
+          id: "in_005",
+          customer: "cus_unknown",
+          billing_reason: "subscription_cycle",
+        }},
+      });
+      const res = await callWebhook("{}", "sig");
+      // 200 — Stripe не retry'ит
+      expect(res.status).toBe(200);
+      // UPDATE НЕ вызван — нечего обновлять
+      expect(updateChainMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("БАГ 103: invoice.payment_succeeded", () => {
+    it("сбрасывает payment_failure_count и last_payment_failed_*", async () => {
+      constructEventMock.mockReturnValue({
+        type: "invoice.payment_succeeded",
+        data: { object: {
+          id: "in_ok_001",
+          subscription_details: { metadata: { seller_id: "seller-ok" } },
+        }},
+      });
+      await callWebhook("{}", "sig");
+
+      const payload = updateChainMock.mock.calls[0][0];
+      expect(payload.payment_failure_count).toBe(0);
+      expect(payload.last_payment_failed_at).toBeNull();
+      expect(payload.last_payment_failed_reason).toBeNull();
+      expect(payload.last_payment_succeeded_at).toBeTruthy();
+    });
+
+    it("если seller не найден — silently ignore (без warn)", async () => {
+      maybeSingleMock.mockResolvedValue({ data: null, error: null });
+      constructEventMock.mockReturnValue({
+        type: "invoice.payment_succeeded",
+        data: { object: {
+          id: "in_ok_002",
+          customer: "cus_unknown",
+        }},
+      });
+      const res = await callWebhook("{}", "sig");
+      expect(res.status).toBe(200);
+      expect(updateChainMock).not.toHaveBeenCalled();
+    });
   });
 });
