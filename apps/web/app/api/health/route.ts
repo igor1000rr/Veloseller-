@@ -8,12 +8,21 @@
  *
  * Возвращает 200 если всё живо, 503 если что-то в down state.
  * Не требует auth — это инфраструктурный endpoint.
+ *
+ * БАГ 74 fix: не отдаём детальные error messages (internal info disclosure).
+ *   Логируем подробно в console, наружу — только ok/false.
+ * БАГ 75 fix: rate limit чтобы не было amplification (каждый запрос делает DB + worker hit).
  */
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
-export async function GET() {
-  const checks: Record<string, { ok: boolean; latency_ms?: number; error?: string }> = {};
+export async function GET(req: NextRequest) {
+  // БАГ 75: лимит 60 запросов в минуту с IP (UptimeRobot шлёт каждые 5 мин, для healthcheck'а с запасом)
+  const limited = enforceRateLimit(req, { max: 60, windowMs: 60_000 });
+  if (limited) return limited;
+
+  const checks: Record<string, { ok: boolean; latency_ms?: number }> = {};
   const start = Date.now();
 
   // Supabase ping
@@ -24,7 +33,8 @@ export async function GET() {
     if (error) throw new Error(error.message);
     checks.supabase = { ok: true, latency_ms: Date.now() - t0 };
   } catch (e: any) {
-    checks.supabase = { ok: false, error: e?.message || String(e) };
+    console.error("[health] supabase down:", e?.message);
+    checks.supabase = { ok: false };  // БАГ 74: без детального error
   }
 
   // Worker ping
@@ -38,7 +48,8 @@ export async function GET() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     checks.worker = { ok: true, latency_ms: Date.now() - t0 };
   } catch (e: any) {
-    checks.worker = { ok: false, error: e?.message || String(e) };
+    console.error("[health] worker down:", e?.message);
+    checks.worker = { ok: false };  // БАГ 74: без детального error
   }
 
   // Env vars
@@ -50,7 +61,10 @@ export async function GET() {
     "WORKER_SECRET",
   ];
   const missing = requiredEnv.filter(k => !process.env[k]);
-  checks.env = { ok: missing.length === 0, error: missing.length ? `Missing: ${missing.join(", ")}` : undefined };
+  if (missing.length > 0) {
+    console.error("[health] missing env:", missing.join(", "));
+  }
+  checks.env = { ok: missing.length === 0 };
 
   const allOk = Object.values(checks).every(c => c.ok);
 
