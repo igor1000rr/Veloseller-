@@ -10,6 +10,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  * данные продуктов остаются, а вот связь со снапшотами обрывается.
  *
  * БАГ 35 fix: добавлен rate limit на оба метода.
+ * БАГ 78 fix: не светим error.message в response.
  */
 
 export async function GET(
@@ -31,7 +32,10 @@ export async function GET(
     .eq("seller_id", user.id)
     .maybeSingle();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("[connection-get] DB error:", error.message);
+    return NextResponse.json({ error: "DB error" }, { status: 500 });
+  }
   if (!data)  return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   // Скрываем секреты в config, оставляем только non-sensitive
@@ -65,7 +69,10 @@ export async function DELETE(
     .eq("id", id)
     .eq("seller_id", user.id);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("[connection-delete] DB error:", error.message);
+    return NextResponse.json({ error: "Не удалось удалить" }, { status: 500 });
+  }
   if (count === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ deleted: true });
 }

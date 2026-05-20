@@ -7,6 +7,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  * Обновляет lead_time_days и safety_days для SKU.
  *
  * БАГ 45 fix: rate limit + empty update check.
+ * БАГ 78 fix: не светим error.message в response.
  */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -38,7 +39,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     .update(update, { count: "exact" })
     .eq("product_id", id)
     .eq("seller_id", user.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("[reorder] DB error:", error.message);
+    return NextResponse.json({ error: "Не удалось обновить" }, { status: 500 });
+  }
   if (count === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }

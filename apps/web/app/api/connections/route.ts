@@ -12,6 +12,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  *
  * БАГ 27-30 fix: добавлены rate limit, валидация source/marketplace, лимит размера config,
  * максимум connections per seller.
+ * БАГ 78 fix: не светим error.message в response.
  */
 const SENSITIVE_KEYS_BY_MARKETPLACE: Record<string, string[]> = {
   ozon: ["client_id", "api_key"],
@@ -83,7 +84,8 @@ export async function POST(req: NextRequest) {
     .select("id", { count: "exact", head: true })
     .eq("seller_id", user.id);
   if (countErr) {
-    return NextResponse.json({ error: countErr.message }, { status: 500 });
+    console.error("[connections-create] count error:", countErr.message);
+    return NextResponse.json({ error: "DB error" }, { status: 500 });
   }
   if ((existingCount ?? 0) >= MAX_CONNECTIONS_PER_SELLER) {
     return NextResponse.json({
@@ -115,6 +117,9 @@ export async function POST(req: NextRequest) {
     .select("id")
     .single();
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  if (error) {
+    console.error("[connections-create] insert error:", error.message);
+    return NextResponse.json({ error: "Не удалось создать подключение" }, { status: 400 });
+  }
   return NextResponse.json({ id: data.id });
 }

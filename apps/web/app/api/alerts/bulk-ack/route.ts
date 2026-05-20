@@ -10,6 +10,8 @@ const ALLOWED_KINDS = new Set([
 /**
  * POST /api/alerts/bulk-ack
  * Body: { kind?: string }  — если передан тип, ack всех активных этого типа. Без типа — все активные.
+ *
+ * БАГ 78 fix: не светим error.message в response.
  */
 export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
@@ -38,6 +40,9 @@ export async function POST(req: NextRequest) {
   }
 
   const { error, count } = await query;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("[bulk-ack] DB error:", error.message);
+    return NextResponse.json({ error: "Не удалось обновить" }, { status: 500 });
+  }
   return NextResponse.json({ acknowledged: count ?? 0 });
 }

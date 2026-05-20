@@ -7,6 +7,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  * RLS гарантирует что юзер может изменить только свои.
  *
  * БАГ 44 fix: возвращаем 404 если alert не найден (раньше всегда ok:true).
+ * БАГ 78 fix: не светим error.message в response.
  */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -23,7 +24,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     .eq("id", id)
     .eq("seller_id", user.id);
 
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    console.error("[alerts-ack] DB error:", error.message);
+    return NextResponse.json({ error: "Не удалось обновить" }, { status: 500 });
+  }
   if (count === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
   return NextResponse.json({ ok: true });
 }
