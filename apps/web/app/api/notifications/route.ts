@@ -6,6 +6,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  * POST /api/notifications — обновляет seller profile.
  *
  * БАГ 42-43 fix: rate limit + строгая валидация типов полей.
+ * БАГ 78 fix: не светим Supabase error.message наружу — может содержать SQL detail.
  */
 export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
@@ -57,6 +58,10 @@ export async function POST(req: NextRequest) {
   }
 
   const { error } = await supabase.from("sellers").update(update).eq("id", user.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) {
+    // БАГ 78: detail в console, наружу — generic
+    console.error("[notifications] DB update failed:", error.message);
+    return NextResponse.json({ error: "Не удалось сохранить настройки" }, { status: 500 });
+  }
   return NextResponse.json({ ok: true });
 }
