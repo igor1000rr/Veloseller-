@@ -28,40 +28,22 @@ _root.setLevel(logging.INFO)
 
 logger = setup_logger("veloseller.worker")
 
+
+# ============================================================================
+# Sentry init (БАГ 67)
+# ============================================================================
+# Sentry не в requirements.txt — устанавливается в production отдельно.
+# Если SENTRY_DSN не задан или SDK не установлен — пропускаем.
+# Если установлен — настраиваем максимально безопасно:
+#   - локальные переменные в stacktrace НЕ отправляются (могут содержать api_key/token)
+#   - send_default_pii=False (не отправлять email, IP)
+#   - before_send scrub'ит sensitive поля по имени
+
 import os as _os
-_sentry_dsn = _os.environ.get("SENTRY_DSN")
-if _sentry_dsn:
-    try:
-        import sentry_sdk
-        from sentry_sdk.integrations.fastapi import FastApiIntegration
-        from sentry_sdk.integrations.logging import LoggingIntegration
-        # БАГ 67 fix: with_locals=False — не отправлять локальные переменные в stack traces.
-        # Они могут содержать api_key, token, client_id из decrypt_if_encrypted и т.д.
-        # send_default_pii=False — не отправлять request body и user info автоматически.
-        sentry_sdk.init(
-            dsn=_sentry_dsn,
-            integrations=[
-                FastApiIntegration(),
-                LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
-            ],
-            environment=_os.environ.get("SENTRY_ENV", "production"),
-            traces_sample_rate=0.1,
-            release=_os.environ.get("SENTRY_RELEASE"),
-            send_default_pii=False,
-            with_locals=False,
-            # Дополнительный фильтр: scrub потенциально sensitive поля по имени
-            before_send=lambda event, hint: _scrub_sentry_event(event),
-        )
-        logger.info("sentry initialized", extra={"env": _os.environ.get("SENTRY_ENV", "production")})
-    except ImportError:
-        logger.warning("SENTRY_DSN set but sentry-sdk not installed — skipping")
 
 
-def _scrub_sentry_event(event: dict) -> Optional[dict]:
-    """БАГ 67: дополнительная очистка Sentry events от sensitive полей.
-
-    Удаляет api_key, token, client_id, password из любых nested dict-полей.
-    """
+def _scrub_sentry_event(event: dict, hint=None) -> Optional[dict]:
+    """БАГ 67: дополнительная очистка Sentry events от sensitive полей."""
     SENSITIVE_KEYS = {"api_key", "token", "client_id", "password", "secret", "x-worker-secret",
                        "authorization", "stripe_subscription_id", "stripe_customer_id"}
 
@@ -75,9 +57,51 @@ def _scrub_sentry_event(event: dict) -> Optional[dict]:
     return _scrub(event)
 
 
+_sentry_dsn = _os.environ.get("SENTRY_DSN")
+if _sentry_dsn:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.logging import LoggingIntegration
+
+        # Параметр имени локальных переменных отличается в sentry-sdk v1 vs v2:
+        #   v1: with_locals=False
+        #   v2: include_local_variables=False
+        # Пробуем оба — что не поддерживается, отфильтруется через TypeError.
+        init_kwargs = {
+            "dsn": _sentry_dsn,
+            "integrations": [
+                FastApiIntegration(),
+                LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+            ],
+            "environment": _os.environ.get("SENTRY_ENV", "production"),
+            "traces_sample_rate": 0.1,
+            "release": _os.environ.get("SENTRY_RELEASE"),
+            "send_default_pii": False,
+            "before_send": _scrub_sentry_event,
+        }
+        # Определяем версию по signature
+        import inspect as _inspect
+        _sig = _inspect.signature(sentry_sdk.init)
+        if "include_local_variables" in _sig.parameters:
+            init_kwargs["include_local_variables"] = False  # v2+
+        elif "with_locals" in _sig.parameters:
+            init_kwargs["with_locals"] = False  # v1
+
+        sentry_sdk.init(**init_kwargs)
+        logger.info("sentry initialized", extra={
+            "env": _os.environ.get("SENTRY_ENV", "production"),
+            "with_local_vars": False,
+        })
+    except ImportError:
+        logger.warning("SENTRY_DSN set but sentry-sdk not installed — skipping")
+    except Exception as _e:
+        logger.warning("sentry init failed: %s", _e)
+
+
 _running_recalcs: dict[str, dict] = {}
 
-# БАГ 27: TTL для finished/error tasks. Без этого _running_recalcs растёт бесконечно.
+# БАГ 27: TTL для finished/error tasks.
 _RECALC_STATE_TTL = timedelta(hours=24)
 
 # БАГ 52: UUID regex для валидации seller_id из Telegram /start payload.
@@ -133,10 +157,7 @@ _PRODUCTS_IN_BATCH = 500
 
 
 def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
-    """Upsert products и возвращает маппинг sku -> product_id.
-
-    БАГ 15 fix: батчируем `.in_("sku", [...])` по 500 SKU.
-    """
+    """Upsert products и возвращает маппинг sku -> product_id."""
     if not snapshots:
         return {}
     rows = [{"seller_id": seller_id, "sku": s.sku, "product_name": s.product_name or s.sku} for s in snapshots]
@@ -418,10 +439,7 @@ async def telegram_webhook(
     request: Request,
     x_telegram_bot_api_secret_token: Optional[str] = Header(None),
 ) -> dict:
-    """Telegram webhook handler.
-
-    БАГ 52 fix: проверяем X-Telegram-Bot-Api-Secret-Token header.
-    """
+    """Telegram webhook handler. БАГ 52 fix: проверяем X-Telegram-Bot-Api-Secret-Token."""
     from app.telegram import send_message
 
     expected_secret = _os.environ.get("TELEGRAM_WEBHOOK_SECRET")
