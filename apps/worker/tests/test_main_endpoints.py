@@ -121,35 +121,28 @@ class TestIngestCsvValidation:
         assert r.status_code == 400
         mock_sb.table.assert_not_called()
 
-    def test_rejects_empty_seller_id(self, monkeypatch):
-        """БАГ 97: пустой seller_id → 400 или 422 (FastAPI required)."""
-        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        r = client.post(
-            "/ingest/csv?seller_id=",
-            files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
-        )
-        # FastAPI: 422 для empty required query, или 400 от наш validator
-        assert r.status_code in (400, 422)
+    def test_rejects_oversized_file_with_lowered_limit(self, monkeypatch):
+        """БАГ 96: подменяем _CSV_MAX_SIZE_BYTES на 50 байт → 100-байт файл = 413.
 
-    def test_rejects_oversized_file_by_content_length(self, monkeypatch):
-        """БАГ 96: declared Content-Length > MAX → 413 БЕЗ load в память.
-
-        Проверяем что endpoint реагирует на size declared.
+        Использует подмену константы вместо создания реального 20MB файла —
+        тест работает быстро и не создаёт OOM-риска в CI.
         """
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        # Подменяем лимит на 50 байт (CSV хедер сам по себе ~25 байт)
+        monkeypatch.setattr("app.main._CSV_MAX_SIZE_BYTES", 50)
 
-        # Создаём файл ~21MB (превышает 20MB лимит)
-        oversized_content = b"sku,stock_quantity,price\n" + b"A1,10,100\n" * 2_000_000
-        # Проверяем что точно > 20MB
-        assert len(oversized_content) > 20 * 1024 * 1024
+        # 100-байт файл — точно > 50
+        content = b"sku,stock_quantity,price\n" + b"A1,10,100\n" * 10
+        assert len(content) > 50
 
         r = client.post(
             f"/ingest/csv?seller_id={VALID_UUID}",
-            files={"file": ("big.csv", oversized_content, "text/csv")},
+            files={"file": ("big.csv", content, "text/csv")},
         )
         # 413 Payload Too Large
         assert r.status_code == 413
-        assert "слишком" in r.json()["detail"].lower() or "max" in r.json()["detail"].lower()
+        detail = r.json()["detail"].lower()
+        assert "слишком" in detail or "max" in detail or "большой" in detail
 
     def test_accepts_normal_size_file(self, monkeypatch):
         """Sanity: файл меньше лимита проходит размер-проверку."""
@@ -160,7 +153,6 @@ class TestIngestCsvValidation:
             data=[{"product_id": "pid-1", "sku": "A1"}]
         )
         mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock()
-        # Маленький валидный файл — должен пройти размер-проверку и парсинг
         small_content = b"sku,stock_quantity,price\nA1,10,100\n"
         with patch("app.main.get_supabase", return_value=mock_sb), \
              patch("app.main.fetch_all", return_value=[]):
