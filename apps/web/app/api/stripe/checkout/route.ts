@@ -6,8 +6,15 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 /**
  * POST /api/stripe/checkout — создаёт Stripe Checkout Session.
  *
- * БАГ 48 fix: rate limit (создание sessions стоит Stripe API calls — не даём спамить).
+ * БАГ 48 fix: rate limit (создание sessions стоит Stripe API calls).
+ *
+ * БАГ 29 fix: origin для success_url/cancel_url берём ТОЛЬКО из whitelist
+ * APP_URL env, не из user-controlled `Origin` / `Host` headers. Иначе attacker
+ * мог бы передать произвольный Origin и Stripe бы редиректил пользователя на
+ * чужой домен после оплаты (open redirect через payment provider).
  */
+const ALLOWED_ORIGINS = (process.env.APP_URL || "https://veloseller.ru").split(",").map(s => s.trim());
+
 export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -34,7 +41,11 @@ export async function POST(req: NextRequest) {
     await supabase.from("sellers").update({ stripe_customer_id: customerId }).eq("id", user.id);
   }
 
-  const origin = req.headers.get("origin") || `https://${req.headers.get("host") || "veloseller.ru"}`;
+  // БАГ 29: используем whitelisted origin вместо user-controlled headers
+  const requestOrigin = req.headers.get("origin");
+  const origin = (requestOrigin && ALLOWED_ORIGINS.includes(requestOrigin))
+    ? requestOrigin
+    : ALLOWED_ORIGINS[0];
 
   const session = await stripe.checkout.sessions.create({
     customer: customerId,
