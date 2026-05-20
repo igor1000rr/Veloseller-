@@ -14,10 +14,16 @@ function adminClient() {
 }
 
 /**
+ * Stripe webhook handler.
+ *
  * БАГ 46-47 fix:
- *  - Логируем все events для аудита
- *  - current_period_end из sub.items.data[0] (на верхнем уровне deprecated в новых Stripe API)
+ *  - Логируем все events
+ *  - current_period_end из sub.items.data[0] (deprecated на верхнем уровне в новых API)
  *  - try/catch вокруг applySubscription (если упало, возвращаем 200 чтобы Stripe не retry'ил)
+ *
+ * БАГ 62 fix: customer.subscription.deleted проверяет что sub.id совпадает с
+ *   текущим stripe_subscription_id в БД. Иначе при out-of-order delivery старый
+ *   "deleted" webhook сбрасывал новую активную подписку.
  */
 export async function POST(req: NextRequest) {
   const sig = req.headers.get("stripe-signature");
@@ -56,6 +62,18 @@ export async function POST(req: NextRequest) {
         const sub = event.data.object as Stripe.Subscription;
         const sellerId = sub.metadata?.seller_id;
         if (sellerId) {
+          // БАГ 62: проверяем что это текущая активная подписка
+          // (защита от out-of-order delivery — старый "deleted" не сбрасывает новую)
+          const { data: seller } = await sb.from("sellers")
+            .select("stripe_subscription_id")
+            .eq("id", sellerId)
+            .maybeSingle();
+          if (seller?.stripe_subscription_id && seller.stripe_subscription_id !== sub.id) {
+            console.warn("[stripe-webhook] deleted event ignored — seller has different active subscription", {
+              sellerId, deleted_sub: sub.id, current_sub: seller.stripe_subscription_id,
+            });
+            break;
+          }
           await sb.from("sellers").update({
             plan: "trial",
             subscription_status: "canceled",
@@ -66,9 +84,6 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch (err: any) {
-    // Логируем но возвращаем 200 — Stripe не должен retry'ить наши внутренние ошибки
-    // (иначе получим бесконечный retry loop). Срабатывает только на нашей логике,
-    // все signature ошибки уже возвращают 400 выше.
     console.error("[stripe-webhook] handler failed", { type: event.type, error: err?.message });
   }
 
@@ -84,7 +99,6 @@ async function applySubscription(sb: ReturnType<typeof adminClient>, sub: Stripe
   const priceId = sub.items.data[0]?.price.id;
   const plan = priceId ? PLAN_BY_PRICE[priceId] : undefined;
 
-  // current_period_end: на старых Stripe API на верхнем уровне, на новых — в items.data[].current_period_end
   const rawPeriodEnd = (sub as any).current_period_end ?? sub.items.data[0]?.current_period_end;
   const periodEndIso = (typeof rawPeriodEnd === "number" && rawPeriodEnd > 0)
     ? new Date(rawPeriodEnd * 1000).toISOString()
