@@ -23,7 +23,6 @@ class TestRecalcAllConcurrencyLock:
             "status": "running",
             "started_at": "2026-05-20T00:00:00Z",
         }
-
         mock_sb = MagicMock()
         monkeypatch.setattr("app.jobs.recalc.fetch_all",
                             lambda q: [{"id": "seller-busy"}, {"id": "seller-free"}])
@@ -50,7 +49,6 @@ class TestRecalcAllConcurrencyLock:
             "status": "done",
             "finished_at": "2026-05-20T00:00:00Z",
         }
-
         mock_sb = MagicMock()
         monkeypatch.setattr("app.jobs.recalc.fetch_all", lambda q: [{"id": "seller-done"}])
         monkeypatch.setattr("app.jobs.recalc.get_supabase", lambda: mock_sb)

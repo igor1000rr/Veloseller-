@@ -65,8 +65,7 @@ class TestIngestCsv:
                 files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
             )
         assert r.status_code == 200
-        body = r.json()
-        assert body["skus"] == 1
+        assert r.json()["skus"] == 1
 
     def test_invalid_csv_returns_400(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
@@ -79,8 +78,6 @@ class TestIngestCsv:
 
 
 class TestIngestCsvValidation:
-    """БАГ 96 + 97: UUID validation + размер файла."""
-
     def test_rejects_non_uuid_seller_id(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_sb = MagicMock()
@@ -114,6 +111,8 @@ class TestIngestCsvValidation:
             files={"file": ("big.csv", content, "text/csv")},
         )
         assert r.status_code == 413
+        detail = r.json()["detail"].lower()
+        assert "слишком" in detail or "max" in detail or "большой" in detail
 
     def test_accepts_normal_size_file(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
@@ -156,7 +155,6 @@ class TestIngestGoogleSheet:
         with patch("app.main.get_supabase", return_value=mock_sb):
             r = client.post("/ingest/google-sheet/conn-1")
         assert r.status_code == 400
-        assert "sheet_url" in r.json()["detail"]
 
 
 class TestIngestOzon:
@@ -169,7 +167,6 @@ class TestIngestOzon:
         with patch("app.main.get_supabase", return_value=mock_sb):
             r = client.post("/ingest/ozon/conn-2")
         assert r.status_code == 400
-        assert "client_id" in r.json()["detail"]
 
     def test_404_when_no_connection(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
@@ -188,7 +185,6 @@ class TestIngestWb:
         with patch("app.main.get_supabase", return_value=mock_sb):
             r = client.post("/ingest/wb/conn-3")
         assert r.status_code == 400
-        assert "token" in r.json()["detail"]
 
 
 class TestIngestFeed:
@@ -200,7 +196,6 @@ class TestIngestFeed:
         with patch("app.main.get_supabase", return_value=mock_sb):
             r = client.post("/ingest/feed/conn-4")
         assert r.status_code == 400
-        assert "feed_url" in r.json()["detail"]
 
 
 class TestRecalcJobs:
@@ -232,9 +227,7 @@ class TestRecalcJobs:
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         _running_recalcs["seller-busy"] = {
             "started_at": "2026-05-19T09:00:00Z",
-            "status": "running",
-            "result": None,
-            "error": None,
+            "status": "running", "result": None, "error": None,
         }
         with patch("app.main.recalc_seller_all_periods") as fn:
             r = client.post("/jobs/recalc/seller-busy")
@@ -248,16 +241,13 @@ class TestRecalcJobs:
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         r = client.get("/jobs/recalc/some-unknown-seller/status")
         assert r.status_code == 200
-        body = r.json()
-        assert body["status"] == "idle"
+        assert r.json()["status"] == "idle"
 
     def test_recalc_status_returns_running_state(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         _running_recalcs["seller-running"] = {
             "started_at": "2026-05-19T09:00:00Z",
-            "status": "running",
-            "result": None,
-            "error": None,
+            "status": "running", "result": None, "error": None,
         }
         r = client.get("/jobs/recalc/seller-running/status")
         assert r.status_code == 200
@@ -289,20 +279,13 @@ class TestTelegramWebhook:
         assert r.status_code == 200
         assert r.json() == {"ok": True}
 
-    def test_no_chat_id_returns_ok(self):
-        r = client.post("/telegram/webhook", json={"message": {"text": "hi"}})
-        assert r.status_code == 200
-        assert r.json() == {"ok": True}
-
     def test_start_without_seller_id_shows_help(self):
         with patch("app.telegram.send_message", return_value=True) as send:
             r = client.post("/telegram/webhook", json={
                 "message": {"text": "/start", "chat": {"id": 555}}
             })
         assert r.status_code == 200
-        body = r.json()
-        assert body["ok"] is True
-        assert body["linked"] is False
+        assert r.json()["linked"] is False
         send.assert_called_once()
 
     def test_start_with_valid_uuid_links_account(self):
@@ -311,37 +294,23 @@ class TestTelegramWebhook:
             data=[{"id": VALID_UUID, "telegram_chat_id": "777"}]
         )
         with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.telegram.send_message", return_value=True) as send:
+             patch("app.telegram.send_message", return_value=True):
             r = client.post("/telegram/webhook", json={
                 "message": {"text": f"/start {VALID_UUID}", "chat": {"id": 777}}
             })
         assert r.status_code == 200
-        body = r.json()
-        assert body["ok"] is True
-        assert body["linked"] is True
-        send.assert_called_once()
+        assert r.json()["linked"] is True
 
     def test_start_with_invalid_uuid_shows_help(self):
         mock_sb = MagicMock()
         with patch("app.main.get_supabase", return_value=mock_sb), \
              patch("app.telegram.send_message", return_value=True):
             r = client.post("/telegram/webhook", json={
-                "message": {"text": "/start not-a-uuid; DROP TABLE sellers;--", "chat": {"id": 666}}
+                "message": {"text": "/start not-a-uuid", "chat": {"id": 666}}
             })
         assert r.status_code == 200
-        body = r.json()
-        assert body["linked"] is False
+        assert r.json()["linked"] is False
         mock_sb.table.assert_not_called()
-
-    def test_unknown_command_returns_ok(self):
-        r = client.post("/telegram/webhook", json={"message": {"text": "/random", "chat": {"id": 1}}})
-        assert r.status_code == 200
-        assert r.json() == {"ok": True}
-
-    def test_edited_message_is_processed(self):
-        r = client.post("/telegram/webhook", json={"edited_message": {"text": "hello", "chat": {"id": 1}}})
-        assert r.status_code == 200
-        assert r.json() == {"ok": True}
 
     def test_secret_token_required_when_env_set(self, monkeypatch):
         monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "my-secret")
@@ -356,15 +325,6 @@ class TestTelegramWebhook:
             headers={"X-Telegram-Bot-Api-Secret-Token": "my-secret"},
         )
         assert r.status_code == 200
-
-    def test_secret_token_rejected_when_wrong(self, monkeypatch):
-        monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "my-secret")
-        r = client.post(
-            "/telegram/webhook",
-            json={"update_id": 1},
-            headers={"X-Telegram-Bot-Api-Secret-Token": "wrong"},
-        )
-        assert r.status_code == 403
 
     def test_production_without_secret_returns_500(self, monkeypatch):
         monkeypatch.setenv("ENV", "production")

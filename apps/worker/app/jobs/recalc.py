@@ -10,14 +10,9 @@ import pytz
 
 from app.db import fetch_all, get_supabase
 from app.engine.alerts import (
-    critical_stock_alert,
-    dead_inventory_alert,
-    low_stock_alert,
-    repeated_stockout_alert,
-    should_keep_critical_active,
-    should_keep_dead_active,
-    should_keep_low_stock_active,
-    should_keep_repeated_stockout_active,
+    critical_stock_alert, dead_inventory_alert, low_stock_alert, repeated_stockout_alert,
+    should_keep_critical_active, should_keep_dead_active,
+    should_keep_low_stock_active, should_keep_repeated_stockout_active,
 )
 from app.engine.events import classify_event
 from app.engine.health import is_underestimated_sku
@@ -25,13 +20,8 @@ from app.engine.lost_revenue import average_stockout_price
 from app.engine.pipeline import DailyAggregate, compute_metrics_for_sku
 from app.engine.price import calculate_elasticity, detect_price_changes
 from app.engine.store import (
-    SkuHealthInput,
-    SkuValue,
-    concentration_50,
-    demand_weight,
-    frozen_inventory_value,
-    total_inventory_value,
-    warehouse_health_score,
+    SkuHealthInput, SkuValue, concentration_50, demand_weight,
+    frozen_inventory_value, total_inventory_value, warehouse_health_score,
 )
 from app.schemas import EventType, TVeloMetric
 
@@ -103,7 +93,7 @@ def _log_failed_sku(phase, seller_id, product_id, period_days, exc, verbose_rema
 def _fetch_snapshots_batched(sb, product_ids, history_start):
     if not product_ids:
         return {}
-    result: dict[str, list[dict]] = {pid: [] for pid in product_ids}
+    result = {pid: [] for pid in product_ids}
     for i in range(0, len(product_ids), _PRODUCT_IN_BATCH):
         batch = product_ids[i:i + _PRODUCT_IN_BATCH]
         rows = fetch_all(
@@ -122,18 +112,16 @@ def _fetch_snapshots_batched(sb, product_ids, history_start):
 
 
 def _extract_pre_period_sales_deltas(snapshots_rows, period_start, seller_tz):
-    by_day: dict[date, dict] = {}
+    by_day = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
         local_day = ts.astimezone(seller_tz).date()
         if local_day < period_start:
             by_day[local_day] = row
-
     if not by_day:
         return []
-
     sorted_days = sorted(by_day.keys())
-    deltas: list[float] = []
+    deltas = []
     prev_day = None
     prev_stock = None
     for day in sorted_days:
@@ -146,24 +134,22 @@ def _extract_pre_period_sales_deltas(snapshots_rows, period_start, seller_tz):
                 deltas.append(float(per_day_delta))
         prev_stock = stock
         prev_day = day
-
     if len(deltas) >= 3:
         med = _median(deltas)
         if med > 0:
             deltas = [d for d in deltas if d <= 5 * med]
-
     return deltas
 
 
 def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
-    by_day: dict[date, dict] = {}
+    by_day = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
         local_day = ts.astimezone(seller_tz).date()
         by_day[local_day] = row
 
     pre_period_days = sorted([d for d in by_day if d < period_start])
-    abs_deltas_history: list[int] = []
+    abs_deltas_history = []
     prev_stock = None
     prev_snapshot_id = None
     prev_exists = False
@@ -185,8 +171,8 @@ def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
             prev_for_seed = s
             prev_day_for_seed = d
 
-    aggregates: list[DailyAggregate] = []
-    event_rows: list[dict] = []
+    aggregates = []
+    event_rows = []
 
     cur = period_start
     while cur <= period_end:
@@ -196,12 +182,10 @@ def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
             price = float(row["price"])
             avail = bool(row["availability"])
             delta = (stock - prev_stock) if prev_exists else None
-
             median_abs = _median(abs_deltas_history) if abs_deltas_history else None
             et, excluded = classify_event(delta, median_abs, prev_exists)
             if et == EventType.SALES_LIKE and delta is not None:
                 abs_deltas_history.append(abs(delta))
-
             aggregates.append(DailyAggregate(
                 day=cur, availability=avail, end_of_day_stock=stock, price=price,
                 event_type=et, delta_stock=delta, excluded_from_confirmed_metrics=excluded,
@@ -239,7 +223,7 @@ def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
         ]
         recount_pairs = detect_recount_pairs(rc_snaps)
         if recount_pairs:
-            recount_days: set[date] = set()
+            recount_days = set()
             for snap_a, snap_b in recount_pairs:
                 recount_days.add(snap_a.snapshot_time.astimezone(seller_tz).date())
             for i, a in enumerate(aggregates):
@@ -285,11 +269,9 @@ def _write_changelog(sb, seller_id, product_id, aggregates, period_start, period
         if a.event_type not in significant:
             continue
         rows.append({
-            "seller_id": seller_id,
-            "product_id": product_id,
+            "seller_id": seller_id, "product_id": product_id,
             "event_date": a.day.isoformat(),
-            "event_type": a.event_type.value,
-            "delta_stock": a.delta_stock,
+            "event_type": a.event_type.value, "delta_stock": a.delta_stock,
             "message": _event_message(a.event_type, a.delta_stock),
             "confidence_impact": _confidence_impact(a.event_type),
         })
@@ -314,8 +296,6 @@ def _upsert_or_skip_alert(sb, seller_id, product_id, kind, message, payload):
     except Exception as e:
         err_str = str(e).lower()
         if "duplicate" in err_str or "unique" in err_str or "23505" in err_str:
-            logger.info("alert race condition resolved via update",
-                        extra={"seller_id": seller_id, "product_id": product_id, "kind": kind})
             existing2 = sb.table("alerts").select("id").eq("seller_id", seller_id).eq(
                 "product_id", product_id
             ).eq("kind", kind).is_("acknowledged_at", "null").limit(1).execute()
@@ -335,7 +315,7 @@ _HYSTERESIS_KEEP_CHECKS = {
 
 def _write_alerts(sb, seller_id, product_id, m, underestimated):
     cov = m.coverage_days
-    desired_alerts: list[tuple[str, str]] = []
+    desired_alerts = []
     if critical_stock_alert(cov):
         desired_alerts.append(("critical_stock", f"Coverage {cov:.1f} дн — критически мало"))
     elif low_stock_alert(cov):
@@ -408,8 +388,8 @@ def recalc_seller(seller_id, period_days=30, progress=None):
     events_written = 0
     changelog_written = 0
     failed_skus = 0
-    sku_data: list[dict] = []
-    velocities_for_median: list[float] = []
+    sku_data = []
+    velocities_for_median = []
 
     verbose_failures_left = _VERBOSE_FAILURES_PER_RECALC
 
@@ -429,11 +409,8 @@ def recalc_seller(seller_id, period_days=30, progress=None):
 
             history_arg = pre_period_history if pre_period_history else None
             metric = compute_metrics_for_sku(
-                product_id=pid,
-                period_start=period_start,
-                period_end=period_end,
-                daily_aggregates=aggregates,
-                current_stock=current_stock,
+                product_id=pid, period_start=period_start, period_end=period_end,
+                daily_aggregates=aggregates, current_stock=current_stock,
                 history_for_median=history_arg,
             )
 
@@ -445,11 +422,9 @@ def recalc_seller(seller_id, period_days=30, progress=None):
             if price_changes:
                 price_rows = [
                     {
-                        "product_id": pid,
-                        "seller_id": seller_id,
+                        "product_id": pid, "seller_id": seller_id,
                         "event_date": pc.day.isoformat(),
-                        "event_type": "recount_like",
-                        "delta_stock": None,
+                        "event_type": "recount_like", "delta_stock": None,
                         "message": f"Цена изменилась: {pc.previous_price:.2f} → {pc.new_price:.2f} ({pc.delta_pct:+.1f}%)",
                         "confidence_impact": 0.0,
                     }
@@ -475,8 +450,7 @@ def recalc_seller(seller_id, period_days=30, progress=None):
                     if sig is not None:
                         try:
                             sb.table("price_elasticity").upsert({
-                                "product_id": pid,
-                                "seller_id": seller_id,
+                                "product_id": pid, "seller_id": seller_id,
                                 "change_date": pc.day.isoformat(),
                                 "previous_price": float(pc.previous_price),
                                 "new_price": float(pc.new_price),
@@ -519,7 +493,7 @@ def recalc_seller(seller_id, period_days=30, progress=None):
     _bump_progress(progress, phase="writing_metrics", processed=0, total=len(sku_data))
     for idx, item in enumerate(sku_data):
         pid = item["pid"]
-        m: TVeloMetric = item["metric"]
+        m = item["metric"]
         try:
             has_enough_history = (
                 m.confidence_breakdown.low_history == 0.0
@@ -577,14 +551,6 @@ def recalc_seller(seller_id, period_days=30, progress=None):
         logger.exception("store_metrics write failed", extra={"seller_id": seller_id})
         store_written = 0
 
-    logger.info("recalc_seller done", extra={
-        "seller_id": seller_id, "period_days": period_days,
-        "products": len(products), "failed_skus": failed_skus,
-        "metrics_written": metrics_written, "alerts_written": alerts_written,
-        "events_written": events_written, "changelog_written": changelog_written,
-        "store_metrics_written": store_written,
-    })
-
     return {
         "products": len(products),
         "failed_skus": failed_skus,
@@ -622,7 +588,7 @@ def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
     total_value = total_inventory_value(sku_health_inputs)
     frozen_value = frozen_inventory_value(sku_health_inputs, coverage_by_sku)
     wh_score = warehouse_health_score(sku_health_inputs)
-    seg_distribution: dict[str, int] = {}
+    seg_distribution = {}
     for item in sku_data:
         seg = (item["metric"].segment.value if item["metric"].segment else "insufficient_data")
         seg_distribution[seg] = seg_distribution.get(seg, 0) + 1
