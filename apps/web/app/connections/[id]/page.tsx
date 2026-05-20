@@ -8,6 +8,24 @@ import { Icons } from "../../_components/Icons";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// БАГ 73: фильтруем sensitive поля из config перед отдачей в HTML
+const SENSITIVE_CONFIG_KEYS = new Set(["api_key", "token", "client_id", "password", "secret"]);
+
+function safeConfig(config: Record<string, any> | null): Record<string, string> {
+  if (!config) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(config)) {
+    if (SENSITIVE_CONFIG_KEYS.has(k)) {
+      // Не отдаём даже зашифрованный текст — показываем флаг
+      const hasValue = typeof v === "string" && v.length > 0;
+      out[k] = hasValue ? "•••••••• (задано)" : "(не задано)";
+    } else {
+      out[k] = String(v);
+    }
+  }
+  return out;
+}
+
 export default async function ConnectionDetailPage({
   params,
 }: {
@@ -18,14 +36,18 @@ export default async function ConnectionDetailPage({
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
+  // БАГ 73: явно выбираем колонки + config отдельно для фильтрации
   const { data: conn } = await supabase
     .from("data_connections")
-    .select("*")
+    .select("id,name,source,marketplace,status,last_sync_at,last_error,created_at,config")
     .eq("id", id)
     .eq("seller_id", user.id)
     .maybeSingle();
 
   if (!conn) notFound();
+
+  // Фильтруем config — sensitive поля заменяем на маски
+  const displayConfig = safeConfig(conn.config as Record<string, any> | null);
 
   // Количество snapshots от этой connection (история синков)
   const { count: snapshotsCount } = await supabase
@@ -93,21 +115,17 @@ export default async function ConnectionDetailPage({
         </div>
       )}
 
-      {/* Config */}
+      {/* Config (с замаскированными sensitive значениями) */}
       <div className="mb-6 rounded-2xl border border-line bg-paper p-5 md:p-6">
         <h2 className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-3">Параметры подключения</h2>
         <dl className="grid sm:grid-cols-2 gap-3">
-          {Object.entries(conn.config ?? {}).map(([k, v]) => {
-            const sensitive = ["client_id", "api_key", "token"].includes(k);
-            const display = sensitive && typeof v === "string" && v.length > 0 ? "•••••••• (зашифровано)" : String(v);
-            return (
-              <div key={k}>
-                <dt className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{k}</dt>
-                <dd className="mt-1 font-mono text-sm text-ink break-all">{display}</dd>
-              </div>
-            );
-          })}
-          {Object.keys(conn.config ?? {}).length === 0 && (
+          {Object.entries(displayConfig).map(([k, v]) => (
+            <div key={k}>
+              <dt className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{k}</dt>
+              <dd className="mt-1 font-mono text-sm text-ink break-all">{v}</dd>
+            </div>
+          ))}
+          {Object.keys(displayConfig).length === 0 && (
             <div className="text-sm text-ink-hush col-span-full">Параметры не заданы.</div>
           )}
         </dl>
