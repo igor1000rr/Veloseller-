@@ -14,19 +14,15 @@ from __future__ import annotations
 import os
 os.environ["ENABLE_SCHEDULER"] = "false"
 
-from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.schemas import SnapshotInput
 
 
 client = TestClient(app)
 
-# Валидный UUID для тестов (БАГ 97 — теперь /ingest/csv требует UUID)
 VALID_UUID = "e113ebfb-3409-4cca-b0ab-0a7d965f4cba"
 SECOND_UUID = "11111111-2222-3333-4444-555555555555"
 
@@ -234,20 +230,26 @@ class TestRecalcJobs:
         fn.assert_called_once_with(VALID_UUID)
 
     def test_recalc_seller_async_acquires_lock_and_returns_started(self, monkeypatch):
-        """async: try_acquire_recalc_lock=True → запускается task."""
+        """async: try_acquire_recalc_lock=True → запускается task.
+
+        ВАЖНО: BackgroundTask выполняется ПОСЛЕ response в TestClient (синхронно),
+        поэтому нужно замокать recalc_seller_all_periods + mark_recalc_done,
+        иначе фон сделает реальный recalc и упадёт с TypeError на MagicMock.
+        """
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_sb = MagicMock()
         with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.main.try_acquire_recalc_lock", return_value=True) as lock_fn:
+             patch("app.main.try_acquire_recalc_lock", return_value=True) as lock_fn, \
+             patch("app.main.recalc_seller_all_periods", return_value={"products": 0}), \
+             patch("app.main.mark_recalc_done"), \
+             patch("app.main.mark_recalc_error"):
             r = client.post(f"/jobs/recalc/{VALID_UUID}")
         assert r.status_code == 200
         body = r.json()
         assert body["started"] is True
         assert body["status"] == "running"
         assert "started_at" in body
-        # lock acquire вызван
         lock_fn.assert_called_once()
-        # Аргументы: первым sb, вторым seller_id
         call_args = lock_fn.call_args[0]
         assert call_args[1] == VALID_UUID
 
@@ -302,7 +304,6 @@ class TestRecalcJobs:
         body = r.json()
         assert body["status"] == "running"
         assert body["started_at"] == "2026-05-19T09:00:00+00:00"
-        # БАГ 95: error_text в DB → error в ответе
         assert body["error"] is None
         assert body["progress"] == {"phase": "loading"}
 
@@ -396,7 +397,7 @@ class TestTelegramWebhook:
     def test_start_with_invalid_uuid_shows_help(self):
         mock_sb = MagicMock()
         with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.telegram.send_message", return_value=True) as send:
+             patch("app.telegram.send_message", return_value=True):
             r = client.post("/telegram/webhook", json={
                 "message": {"text": "/start not-a-uuid; DROP TABLE sellers;--", "chat": {"id": 666}}
             })
