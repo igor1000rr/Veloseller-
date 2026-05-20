@@ -6,9 +6,10 @@ import { ErrorModal } from "../_components/ErrorModal";
 import { parseApiError, type ParsedError } from "@/lib/error-parser";
 
 // БАГ 87: интервалы polling'а статуса после fire-and-forget sync.
-// Sync 1879 SKU занимает 60-90с. Поллим раз в 4с, максимум 3 минуты.
+// Sync 1879 SKU занимает 60-90с, 10K SKU — до 5-6 минут.
+// Поллим раз в 4с, максимум 8 минут.
 const POLL_INTERVAL_MS = 4_000;
-const POLL_TIMEOUT_MS = 180_000;
+const POLL_TIMEOUT_MS = 480_000;
 
 export default function SyncButton({ connectionId, source }: { connectionId: string; source: string }) {
   const router = useRouter();
@@ -24,7 +25,6 @@ export default function SyncButton({ connectionId, source }: { connectionId: str
     setPolling(false);
   }
 
-  // Cleanup при unmount
   useEffect(() => stopPolling, []);
 
   function startPolling() {
@@ -34,16 +34,14 @@ export default function SyncButton({ connectionId, source }: { connectionId: str
         const res = await fetch(`/api/connections/${connectionId}/status`, { cache: "no-store" });
         if (!res.ok) return;
         const data = await res.json();
-        // Когда статус сменился со syncing на active или error — обновляем страницу
         if (data.status !== "syncing") {
           stopPolling();
           router.refresh();
         }
       } catch {
-        // network errors при polling'е игнорируем — следующая попытка может пройти
+        // network errors при polling'е игнорируем
       }
     }, POLL_INTERVAL_MS);
-    // Safety: если sync завис на 3 минуты, перестаём поллить и обновляем страницу
     pollTimeout.current = setTimeout(() => {
       stopPolling();
       router.refresh();
@@ -60,7 +58,6 @@ export default function SyncButton({ connectionId, source }: { connectionId: str
         setModalError(parseApiError(data, "Ошибка синхронизации"));
         return;
       }
-      // БАГ 85 + БАГ 87: sync теперь fire-and-forget, нужен polling статуса
       router.refresh();
       startPolling();
     } catch (e: any) {
@@ -70,12 +67,14 @@ export default function SyncButton({ connectionId, source }: { connectionId: str
     }
   }
 
-  // Для csv_upload синк через кнопку не нужен — данные загружаются через форму
   if (source === "csv_upload") {
     return <span className="text-sm text-ink-hush font-mono">только через загрузку CSV</span>;
   }
 
-  const label = polling ? "Идёт синхронизация…" : (loading ? "Запуск…" : "Синхронизировать");
+  // Лейбл: loading (отправляем запрос) → "Синхронизация…"
+  //        polling (ждём BG в worker'е) → "Идёт синхронизация…"
+  //        idle → "Синхронизировать"
+  const label = polling ? "Идёт синхронизация…" : (loading ? "Синхронизация…" : "Синхронизировать");
   return (
     <>
       <button
