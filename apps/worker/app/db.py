@@ -1,23 +1,105 @@
 """Supabase client (service role — bypass RLS, для worker) + helpers для пагинации."""
 from __future__ import annotations
 
+import logging
+import time
 from functools import lru_cache
+from typing import Any
+
+import httpx
 from supabase import Client, create_client
 
 from app.config import settings
+
+logger = logging.getLogger("veloseller.db")
+
+
+def _force_http11_on_postgrest(client: Client) -> None:
+    """БАГ 84 fix: переоткрываем httpx-сессию postgrest с HTTP/1.1.
+
+    HTTP/2 у Supabase Postgrest закрывает соединение через GOAWAY frame после
+    ~20K stream'ов (last_stream_id:19999). Это убивало recalc на 1879 SKU × 3
+    периода = ~45K запросов → httpx.RemoteProtocolError <ConnectionTerminated>.
+    На HTTP/1.1 с keep-alive такого лимита нет.
+
+    Поддерживаем две версии postgrest-py:
+      - старая: атрибут `_session` (httpx.Client)
+      - новая:  атрибут `session`
+    """
+    try:
+        pg = client.postgrest
+        # Пробуем оба варианта атрибута
+        old = getattr(pg, "session", None) or getattr(pg, "_session", None)
+        if old is None or not isinstance(old, httpx.Client):
+            logger.warning("postgrest session attribute not found, skipping HTTP/1.1 patch")
+            return
+        base_url = str(old.base_url)
+        headers = dict(old.headers)
+        new_session = httpx.Client(
+            base_url=base_url,
+            headers=headers,
+            timeout=httpx.Timeout(60.0),
+            http2=False,
+        )
+        old.close()
+        if hasattr(pg, "session"):
+            pg.session = new_session
+        if hasattr(pg, "_session"):
+            pg._session = new_session
+        logger.info("postgrest session patched to HTTP/1.1")
+    except Exception as e:
+        logger.warning("HTTP/1.1 patch failed: %s", e)
 
 
 @lru_cache(maxsize=1)
 def get_supabase() -> Client:
     if not settings.supabase_url or not settings.supabase_service_role_key:
         raise RuntimeError("SUPABASE_URL и SUPABASE_SERVICE_ROLE_KEY должны быть заданы в .env")
-    return create_client(settings.supabase_url, settings.supabase_service_role_key)
+    client = create_client(settings.supabase_url, settings.supabase_service_role_key)
+    _force_http11_on_postgrest(client)
+    return client
+
+
+def reset_supabase() -> None:
+    """Сбрасывает закешированный клиент. Используется при RemoteProtocolError,
+    чтобы следующий get_supabase() создал свежее соединение."""
+    try:
+        client = get_supabase.cache_info()  # noqa: F841  (только проверка кеша)
+        get_supabase.cache_clear()
+        logger.info("supabase client cache cleared")
+    except Exception:
+        pass
 
 
 # Лимит на pagination: 1M строк. С 1000 на страницу это 1000 итераций — около минуты.
 # Реалистичный максимум для одного селлера: 1879 SKU × 365 дней = ~700K snapshot'ов
 # за год. БАГ 23 fix: было 100K, что обрезало большие исторические выгрузки.
 _FETCH_ALL_MAX_ROWS = 1_000_000
+
+
+def safe_execute(query, max_retries: int = 3) -> Any:
+    """Retry-обёртка над .execute() для устойчивости к RemoteProtocolError.
+
+    БАГ 84: даже после перехода на HTTP/1.1 возможны транзитные обрывы
+    соединения (keep-alive idle timeout у Supabase ~5min, network blips и т.д.).
+    Эта функция:
+      1. Пробует query.execute()
+      2. На httpx.RemoteProtocolError или httpx.ReadError — сбрасывает кеш
+         supabase-клиента и retry с экспоненциальной задержкой.
+      3. На других исключениях — пробрасывает сразу.
+    """
+    last_exc = None
+    for attempt in range(max_retries):
+        try:
+            return query.execute()
+        except (httpx.RemoteProtocolError, httpx.ReadError, httpx.ConnectError) as e:
+            last_exc = e
+            logger.warning("safe_execute retry %d/%d after %s: %s",
+                           attempt + 1, max_retries, type(e).__name__, str(e)[:200])
+            get_supabase.cache_clear()
+            if attempt < max_retries - 1:
+                time.sleep(0.5 * (2 ** attempt))
+    raise last_exc  # type: ignore[misc]
 
 
 def fetch_all(query_builder, page_size: int = 1000) -> list[dict]:
