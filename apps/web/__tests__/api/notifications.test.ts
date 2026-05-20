@@ -69,13 +69,16 @@ describe("POST /api/notifications", () => {
     expect(capturedUpdate).not.toHaveProperty("id");
   });
 
-  it("при ошибке БД — 500", async () => {
+  it("при ошибке БД — 500 без разглашения SQL detail (БАГ 78)", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     updateChainMock.mockResolvedValue({ error: { message: "db error" } });
     const { POST } = await import("@/app/api/notifications/route");
     const res = await POST(req({ timezone: "Europe/Minsk" }));
     expect(res.status).toBe(500);
-    expect((await res.json()).error).toBe("db error");
+    const body = await res.json();
+    // БАГ 78: error.message НЕ должен утечь наружу
+    expect(body.error).not.toContain("db error");
+    expect(body.error).toBeDefined();
   });
 
   it("невалидный timezone — 400", async () => {
