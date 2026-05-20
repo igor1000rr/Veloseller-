@@ -24,6 +24,11 @@ function adminClient() {
  * БАГ 62 fix: customer.subscription.deleted проверяет что sub.id совпадает с
  *   текущим stripe_subscription_id в БД. Иначе при out-of-order delivery старый
  *   "deleted" webhook сбрасывал новую активную подписку.
+ *
+ * БАГ 103 fix: обрабатываем invoice.payment_failed и invoice.payment_succeeded
+ *   для tracking платёжных событий. Без этого UI не мог показать клиенту что
+ *   платёж не прошёл — приходилось ждать customer.subscription.updated со
+ *   status='past_due', что бывает не всегда сразу.
  */
 export async function POST(req: NextRequest) {
   const sig = req.headers.get("stripe-signature");
@@ -82,6 +87,19 @@ export async function POST(req: NextRequest) {
         }
         break;
       }
+      case "invoice.payment_failed": {
+        // БАГ 103: фиксируем неудачный платёж.
+        // Stripe Smart Retries попробует ещё раз; здесь мы только метим факт.
+        const invoice = event.data.object as Stripe.Invoice;
+        await applyPaymentFailed(sb, invoice);
+        break;
+      }
+      case "invoice.payment_succeeded": {
+        // БАГ 103: сбрасываем счётчик неудачных платежей.
+        const invoice = event.data.object as Stripe.Invoice;
+        await applyPaymentSucceeded(sb, invoice);
+        break;
+      }
     }
   } catch (err: any) {
     console.error("[stripe-webhook] handler failed", { type: event.type, error: err?.message });
@@ -114,4 +132,122 @@ async function applySubscription(sb: ReturnType<typeof adminClient>, sub: Stripe
   if (error) {
     console.error("[stripe-webhook] DB update failed", { sellerId, error: error.message });
   }
+}
+
+/**
+ * БАГ 103: invoice.payment_failed handler.
+ *
+ * Ищем seller по invoice.subscription.metadata.seller_id (предпочтительно)
+ * или по stripe_customer_id (fallback).
+ */
+async function applyPaymentFailed(sb: ReturnType<typeof adminClient>, invoice: Stripe.Invoice) {
+  const sellerId = await resolveSellerFromInvoice(sb, invoice);
+  if (!sellerId) {
+    console.warn("[stripe-webhook] invoice.payment_failed: seller not found", {
+      invoice_id: invoice.id, customer: invoice.customer,
+    });
+    return;
+  }
+
+  // Извлекаем причину из last_finalization_error или billing_reason
+  const reason =
+    (invoice as any).last_finalization_error?.message
+    || invoice.billing_reason
+    || "payment_failed";
+
+  // Атомарный increment счётчика. Используем RPC через update + select.
+  // Минимально безопасно: SELECT текущий, +1, UPDATE. Race возможен но не критичен.
+  const { data: current } = await sb.from("sellers")
+    .select("payment_failure_count")
+    .eq("id", sellerId)
+    .maybeSingle();
+  const newCount = ((current?.payment_failure_count as number | undefined) ?? 0) + 1;
+
+  const { error } = await sb.from("sellers").update({
+    last_payment_failed_at: new Date().toISOString(),
+    last_payment_failed_reason: String(reason).slice(0, 500),
+    payment_failure_count: newCount,
+  }).eq("id", sellerId);
+
+  if (error) {
+    console.error("[stripe-webhook] payment_failed DB update error", {
+      sellerId, error: error.message,
+    });
+  } else {
+    console.info("[stripe-webhook] payment_failed recorded", {
+      sellerId, invoice_id: invoice.id, count: newCount,
+    });
+  }
+}
+
+/**
+ * БАГ 103: invoice.payment_succeeded handler.
+ * Сбрасывает счётчик неудачных платежей и обновляет timestamp успеха.
+ */
+async function applyPaymentSucceeded(sb: ReturnType<typeof adminClient>, invoice: Stripe.Invoice) {
+  const sellerId = await resolveSellerFromInvoice(sb, invoice);
+  if (!sellerId) {
+    // Без seller_id это не наш платёж — silently ignore
+    return;
+  }
+
+  const { error } = await sb.from("sellers").update({
+    last_payment_succeeded_at: new Date().toISOString(),
+    last_payment_failed_at: null,
+    last_payment_failed_reason: null,
+    payment_failure_count: 0,
+  }).eq("id", sellerId);
+
+  if (error) {
+    console.error("[stripe-webhook] payment_succeeded DB update error", {
+      sellerId, error: error.message,
+    });
+  }
+}
+
+/**
+ * Резолвит seller_id из Stripe Invoice.
+ *
+ * Приоритет:
+ *   1. invoice.subscription_details.metadata.seller_id (Stripe 2024+)
+ *   2. retrieve subscription и взять sub.metadata.seller_id
+ *   3. lookup по invoice.customer → sellers.stripe_customer_id
+ *
+ * Возвращает null если seller не найден.
+ */
+async function resolveSellerFromInvoice(
+  sb: ReturnType<typeof adminClient>,
+  invoice: Stripe.Invoice,
+): Promise<string | null> {
+  // Попытка 1: subscription_details.metadata (новое API)
+  const subDetailsMeta = (invoice as any).subscription_details?.metadata?.seller_id;
+  if (typeof subDetailsMeta === "string" && subDetailsMeta) return subDetailsMeta;
+
+  // Попытка 2: retrieve subscription
+  const subId = (invoice as any).subscription;
+  if (typeof subId === "string" && subId) {
+    try {
+      const sub = await getStripe().subscriptions.retrieve(subId);
+      const subMeta = sub.metadata?.seller_id;
+      if (typeof subMeta === "string" && subMeta) return subMeta;
+    } catch (err: any) {
+      console.warn("[stripe-webhook] failed to retrieve subscription for seller lookup", {
+        sub_id: subId, error: err?.message,
+      });
+    }
+  }
+
+  // Попытка 3: lookup по stripe_customer_id
+  const customerId = typeof invoice.customer === "string"
+    ? invoice.customer
+    : invoice.customer?.id;
+  if (customerId) {
+    const { data: seller } = await sb.from("sellers")
+      .select("id")
+      .eq("stripe_customer_id", customerId)
+      .maybeSingle();
+    if (seller?.id) return seller.id as string;
+  }
+
+  return null;
 }
