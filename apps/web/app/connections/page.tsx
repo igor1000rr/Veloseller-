@@ -7,6 +7,10 @@ import { Icons } from "../_components/Icons";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// БАГ 72: явный список колонок вместо select("*") — не тянем config с зашифрованными
+// API ключами и другие поля, которые не нужны для списка.
+const LIST_COLUMNS = "id,name,source,marketplace,status,last_sync_at,last_error,created_at";
+
 export default async function ConnectionsPage() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -14,7 +18,7 @@ export default async function ConnectionsPage() {
 
   const { data: connections } = await supabase
     .from("data_connections")
-    .select("*")
+    .select(LIST_COLUMNS)
     .eq("seller_id", user.id)
     .order("created_at", { ascending: false });
 
@@ -39,7 +43,7 @@ export default async function ConnectionsPage() {
 
       <div className="space-y-3">
         {connections?.length ? (
-          connections.map((c) => (
+          connections.map((c: any) => (
             <div key={c.id} className="rounded-2xl border border-line bg-paper p-5 md:p-6 hover:shadow-sm transition">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div className="min-w-0 flex-1">
