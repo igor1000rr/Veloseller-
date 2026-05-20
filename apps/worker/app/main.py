@@ -32,13 +32,6 @@ logger = setup_logger("veloseller.worker")
 # ============================================================================
 # Sentry init (БАГ 67)
 # ============================================================================
-# Sentry не в requirements.txt — устанавливается в production отдельно.
-# Если SENTRY_DSN не задан или SDK не установлен — пропускаем.
-# Если установлен — настраиваем максимально безопасно:
-#   - локальные переменные в stacktrace НЕ отправляются (могут содержать api_key/token)
-#   - send_default_pii=False (не отправлять email, IP)
-#   - before_send scrub'ит sensitive поля по имени
-
 import os as _os
 
 
@@ -64,10 +57,6 @@ if _sentry_dsn:
         from sentry_sdk.integrations.fastapi import FastApiIntegration
         from sentry_sdk.integrations.logging import LoggingIntegration
 
-        # Параметр имени локальных переменных отличается в sentry-sdk v1 vs v2:
-        #   v1: with_locals=False
-        #   v2: include_local_variables=False
-        # Пробуем оба — что не поддерживается, отфильтруется через TypeError.
         init_kwargs = {
             "dsn": _sentry_dsn,
             "integrations": [
@@ -80,13 +69,12 @@ if _sentry_dsn:
             "send_default_pii": False,
             "before_send": _scrub_sentry_event,
         }
-        # Определяем версию по signature
         import inspect as _inspect
         _sig = _inspect.signature(sentry_sdk.init)
         if "include_local_variables" in _sig.parameters:
-            init_kwargs["include_local_variables"] = False  # v2+
+            init_kwargs["include_local_variables"] = False
         elif "with_locals" in _sig.parameters:
-            init_kwargs["with_locals"] = False  # v1
+            init_kwargs["with_locals"] = False
 
         sentry_sdk.init(**init_kwargs)
         logger.info("sentry initialized", extra={
@@ -101,10 +89,8 @@ if _sentry_dsn:
 
 _running_recalcs: dict[str, dict] = {}
 
-# БАГ 27: TTL для finished/error tasks.
 _RECALC_STATE_TTL = timedelta(hours=24)
 
-# БАГ 52: UUID regex для валидации seller_id из Telegram /start payload.
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
 
@@ -155,6 +141,14 @@ def health() -> dict:
 
 _PRODUCTS_IN_BATCH = 500
 
+# БАГ 83 fix: окно дедупликации snapshot'ов.
+# Было: 48 часов — слишком агрессивно. При daily sync'e большинство SKU
+# дедуплилось (stock не менялся за сутки) → engine получал 1 snapshot/SKU за неделю
+# → 97% SKU были insufficient_data, lost_revenue=0, dashboard пустой.
+# Стало: 20 часов — гарантируем минимум 1 snapshot в сутки даже если stock не изменился.
+# Engine получает ежедневные точки для each SKU → корректные velocity/coverage/alerts.
+_DEDUP_WINDOW_HOURS = 20
+
 
 def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
     """Upsert products и возвращает маппинг sku -> product_id."""
@@ -177,7 +171,13 @@ def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict
 
 
 def _persist_snapshots(seller_id, connection_id, source, snapshots):
-    """Сохраняет snapshot'ы с дедупликацией."""
+    """Сохраняет snapshot'ы с дедупликацией.
+
+    БАГ 83 fix: дедупликация работает в окне _DEDUP_WINDOW_HOURS (20 часов).
+    Если последний snapshot этого SKU был >20 часов назад — пишем новый даже если
+    stock/price не изменились. Это гарантирует ≥1 snapshot/день для каждого SKU,
+    что необходимо для корректной работы engine (velocity, coverage, alerts).
+    """
     if not snapshots:
         return 0
     sb = get_supabase()
@@ -192,7 +192,9 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
     pids = list(sku_to_pid.values())
     last_snapshots: dict[str, dict] = {}
     if pids:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
+        # БАГ 83: окно дедупликации — _DEDUP_WINDOW_HOURS вместо days=2.
+        # Нужно тянуть последний snapshot за это окно, чтобы решить пропускать или нет.
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=_DEDUP_WINDOW_HOURS)).isoformat()
         IN_BATCH = 200
         for i in range(0, len(pids), IN_BATCH):
             batch_pids = pids[i:i + IN_BATCH]
@@ -218,6 +220,9 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
             continue
         last = last_snapshots.get(pid)
         if last is not None:
+            # Если последний snapshot этого SKU был в окне дедупликации
+            # И stock+price не изменились — пропускаем. Иначе всегда пишем
+            # (даже если значения те же — для engine'а нужен ежедневный snapshot).
             last_stock = int(last.get("stock_quantity") or 0)
             last_price = float(last.get("price") or 0)
             cur_stock = int(s.stock_quantity)
