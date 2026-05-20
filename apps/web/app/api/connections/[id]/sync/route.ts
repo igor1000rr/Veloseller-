@@ -5,20 +5,17 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 /**
  * POST /api/connections/[id]/sync
  *
- * Запускает sync в worker'е и СРАЗУ возвращает 202 Accepted (fire-and-forget).
- * Worker работает в фоне ~60-90с на 1879 SKU; ждать его в Next.js — нельзя,
- * т.к. nginx таймаутит на 60с (БАГ 85) и клиент получает 504, хотя worker
- * успешно завершает sync. UI должен поллить status через GET /api/connections
- * (поле last_sync_at и status), worker сам обновит data_connections.
+ * Проксирует запрос в Python worker. Worker сам читает connection.config
+ * через service_role, запускает sync в BackgroundTask и обновляет статус.
  *
- * БАГ 31-34 fix: rate limit, валидация ENV.
- * БАГ 77 fix: не светим внутренние network errors наружу.
- * БАГ 85 fix: fire-and-forget вместо ожидания worker'а.
+ * БАГ 31-34 fix: rate limit, timeout на fetch worker'а, валидация ENV.
+ * БАГ 77 fix: не светим внутренние network/connection ошибки наружу. Worker error
+ *   passthrough оставляем — пользователь должен видеть "WB API key неверный".
+ * БАГ 85 fix: worker теперь возвращает immediately после валидации (BG task),
+ *   так что nginx upstream timeout больше не стреляет даже на 1879+ SKU.
  */
 
-// Короткий таймаут только на сам HTTP-запрос инициации к worker'у
-// (worker должен ответить 202 в течение секунд, а не выполнять sync).
-const WORKER_INIT_TIMEOUT_MS = 8_000;
+const WORKER_TIMEOUT_MS = 30_000;
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -52,80 +49,46 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   else if (conn.source === "marketplace_api" && conn.marketplace === "wildberries") endpoint = `/ingest/wb/${id}`;
   else return NextResponse.json({ error: "Для CSV используй upload-csv" }, { status: 400 });
 
-  // Отмечаем connection как "syncing" чтобы UI видел прогресс
-  await supabase
-    .from("data_connections")
-    .update({ status: "syncing", last_error: null })
-    .eq("id", id);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS);
 
-  // Fire-and-forget: пинаем worker, но не ждём результата.
-  // Worker сам обновит data_connections.status (active/error) и last_sync_at.
-  // У fetch() короткий timeout на инициацию запроса — если worker DOWN,
-  // мы это узнаем и сразу скажем пользователю.
-  const initController = new AbortController();
-  const initTimeout = setTimeout(() => initController.abort(), WORKER_INIT_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${workerUrl}${endpoint}`, {
+      method: "POST",
+      headers: { "X-Worker-Secret": workerSecret },
+      signal: controller.signal,
+    });
+  } catch (e: any) {
+    clearTimeout(timeout);
+    if (e?.name === "AbortError") {
+      return NextResponse.json({
+        error: `Worker не ответил за ${WORKER_TIMEOUT_MS / 1000}с. Попробуйте позже.`
+      }, { status: 504 });
+    }
+    console.error("[sync] worker network error:", e?.message);
+    return NextResponse.json({ error: "Ошибка связи с worker" }, { status: 502 });
+  }
+  clearTimeout(timeout);
 
-  // ВАЖНО: НЕ await — fire-and-forget. fetch продолжится в Node-runtime
-  // (sync операция в worker'е займёт 60-90с, но nginx не блокируется).
-  const initPromise = fetch(`${workerUrl}${endpoint}`, {
+  if (!res.ok) {
+    const text = await res.text();
+    return NextResponse.json({ error: text.slice(0, 500) }, { status: res.status });
+  }
+
+  // Fire-and-forget пересчёт — запустим после того как sync завершится в worker'е.
+  // Но поскольку sync теперь BG task, просто пускаем recalc через ~2 минуты
+  // (чтобы дать sync завершиться). UI также нажмёт recalc вручную.
+  // Worker /jobs/recalc сам дедуплицирует.
+  const recalcController = new AbortController();
+  const recalcTimeout = setTimeout(() => recalcController.abort(), 5_000);
+  fetch(`${workerUrl}/jobs/recalc/${user.id}`, {
     method: "POST",
     headers: { "X-Worker-Secret": workerSecret },
-    signal: initController.signal,
-  }).then(async (res) => {
-    clearTimeout(initTimeout);
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      console.error("[sync] worker returned non-ok:", res.status, text.slice(0, 200));
-      // Запишем ошибку в data_connections.last_error чтобы UI её увидел
-      try {
-        await supabase
-          .from("data_connections")
-          .update({ status: "error", last_error: text.slice(0, 500) })
-          .eq("id", id);
-      } catch {}
-    } else {
-      // После успешного sync — fire-and-forget recalc
-      try {
-        const recalcCtrl = new AbortController();
-        const recalcTimeout = setTimeout(() => recalcCtrl.abort(), 5_000);
-        await fetch(`${workerUrl}/jobs/recalc/${user.id}`, {
-          method: "POST",
-          headers: { "X-Worker-Secret": workerSecret },
-          signal: recalcCtrl.signal,
-        });
-        clearTimeout(recalcTimeout);
-      } catch {}
-    }
-  }).catch((e: any) => {
-    clearTimeout(initTimeout);
-    if (e?.name === "AbortError") {
-      // Worker не ответил на init за 8с — скорее всего DOWN
-      console.error("[sync] worker init timeout");
-      supabase
-        .from("data_connections")
-        .update({ status: "error", last_error: "Worker недоступен" })
-        .eq("id", id)
-        .then(() => {}, () => {});
-    } else {
-      console.error("[sync] worker network error:", e?.message);
-      supabase
-        .from("data_connections")
-        .update({ status: "error", last_error: "Network error" })
-        .eq("id", id)
-        .then(() => {}, () => {});
-    }
-  });
+    signal: recalcController.signal,
+  })
+    .catch(() => null)
+    .finally(() => clearTimeout(recalcTimeout));
 
-  // Edge runtime может убить background task. В Node.js runtime — нет.
-  // Этот route уже работает в Node.js (есть импорты server-only Supabase).
-  // Promise продолжит работать в фоне и сам обновит БД.
-  void initPromise;
-
-  return NextResponse.json(
-    {
-      started: true,
-      message: "Sync запущен. Дождитесь обновления статуса (~1-2 минуты).",
-    },
-    { status: 202 }
-  );
+  return NextResponse.json(await res.json());
 }

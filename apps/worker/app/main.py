@@ -89,6 +89,9 @@ if _sentry_dsn:
 
 _running_recalcs: dict[str, dict] = {}
 
+# БАГ 85+87: трекинг идущих sync'ов (для дедупликации двойных кликов).
+_running_syncs: dict[str, dict] = {}
+
 _RECALC_STATE_TTL = timedelta(hours=24)
 
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
@@ -111,6 +114,23 @@ def _cleanup_old_recalcs() -> None:
         del _running_recalcs[sid]
     if stale:
         logger.info("cleaned up stale recalc states", extra={"count": len(stale)})
+
+
+def _cleanup_old_syncs() -> None:
+    """Удаляет завершённые sync states старше 1ч (они короткоживущие)."""
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    stale = []
+    for cid, state in _running_syncs.items():
+        if state.get("status") in ("done", "error"):
+            finished = state.get("finished_at")
+            if finished:
+                try:
+                    if datetime.fromisoformat(finished.replace("Z", "+00:00")) < cutoff:
+                        stale.append(cid)
+                except (ValueError, AttributeError):
+                    stale.append(cid)
+    for cid in stale:
+        del _running_syncs[cid]
 
 
 @asynccontextmanager
@@ -146,19 +166,13 @@ _PRODUCTS_IN_BATCH = 500
 _INSERT_BATCH = 500
 
 # БАГ 83 fix: окно дедупликации snapshot'ов.
-# Было: 48 часов — слишком агрессивно. При daily sync'e большинство SKU
-# дедуплилось (stock не менялся за сутки) → engine получал 1 snapshot/SKU за неделю
-# → 97% SKU были insufficient_data, lost_revenue=0, dashboard пустой.
-# Стало: 20 часов — гарантируем минимум 1 snapshot в сутки даже если stock не изменился.
-# Engine получает ежедневные точки для each SKU → корректные velocity/coverage/alerts.
 _DEDUP_WINDOW_HOURS = 20
 
 
 def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
     """Upsert products и возвращает маппинг sku -> product_id.
 
-    БАГ 88 fix: upsert батчируется по _PRODUCTS_IN_BATCH чтобы не упасть
-    на больших каталогах (10K+ SKU = ~5MB body, лимит PostgREST 10MB).
+    БАГ 88 fix: upsert батчируется по _PRODUCTS_IN_BATCH.
     """
     if not snapshots:
         return {}
@@ -180,16 +194,7 @@ def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict
 
 
 def _persist_snapshots(seller_id, connection_id, source, snapshots):
-    """Сохраняет snapshot'ы с дедупликацией.
-
-    БАГ 83 fix: дедупликация работает в окне _DEDUP_WINDOW_HOURS (20 часов).
-    Если последний snapshot этого SKU был >20 часов назад — пишем новый даже если
-    stock/price не изменились. Это гарантирует ≥1 snapshot/день для каждого SKU,
-    что необходимо для корректной работы engine (velocity, coverage, alerts).
-
-    БАГ 88 fix: INSERT снапшотов теперь батчится по _INSERT_BATCH строк.
-    При 5K+ SKU один INSERT мог упасть на body size limit / statement timeout.
-    """
+    """Сохраняет snapshot'ы с дедупликацией (БАГ 83) и батчингом (БАГ 88)."""
     if not snapshots:
         return 0
     sb = get_supabase()
@@ -244,7 +249,6 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
             "availability": s.stock_quantity > 0,
             "snapshot_time": ts.isoformat(), "source": source.value,
         })
-    # БАГ 88 fix: батчируем INSERT'ы
     if rows:
         for i in range(0, len(rows), _INSERT_BATCH):
             sb.table("inventory_snapshots").insert(rows[i:i + _INSERT_BATCH]).execute()
@@ -265,8 +269,133 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
     }).eq("id", connection_id).execute()
 
 
+def _mark_connection_syncing(sb, connection_id: str) -> None:
+    """БАГ 87: помечаем connection как 'syncing' перед запуском BG task,
+    чтобы UI поллил status."""
+    try:
+        sb.table("data_connections").update({
+            "status": "syncing",
+            "last_error": None,
+        }).eq("id", connection_id).execute()
+    except Exception:
+        logger.exception("failed to mark connection syncing", extra={"connection_id": connection_id})
+
+
+# ============================================================================
+# Background sync tasks (БАГ 85+87)
+# ============================================================================
+# Раньше /ingest/ozon, /wb, /google-sheet, /feed были синхронными — ждали sync 60-90с
+# для 1879 SKU. Это вызывало nginx upstream timeout (60с) и 504 в UI, хотя sync
+# в фоне успевал. Теперь эти endpoint'ы возвращают immediate ack, реальный sync идёт
+# в BackgroundTask. UI поллит статус через /api/connections/[id]/status.
+
+def _run_ozon_sync_bg(connection_id: str, seller_id: str, client_id: str, api_key: str) -> None:
+    _running_syncs[connection_id] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "running",
+    }
+    sb = get_supabase()
+    try:
+        snapshots = ozon.fetch_snapshots(client_id, api_key)
+        inserted = _persist_snapshots(seller_id, connection_id, SourceType.MARKETPLACE_API, snapshots)
+        _mark_connection_synced(sb, connection_id)
+        _running_syncs[connection_id] = {
+            "status": "done",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "inserted": inserted, "fetched_skus": len(snapshots),
+        }
+        logger.info("ozon synced (bg)", extra={"connection_id": connection_id, "inserted": inserted, "fetched_skus": len(snapshots)})
+    except Exception as e:
+        _mark_connection_synced(sb, connection_id, error=str(e)[:500])
+        _running_syncs[connection_id] = {
+            "status": "error",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "error": str(e)[:500],
+        }
+        logger.exception("ozon sync failed (bg)", extra={"connection_id": connection_id})
+
+
+def _run_wb_sync_bg(connection_id: str, seller_id: str, token: str) -> None:
+    _running_syncs[connection_id] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "running",
+    }
+    sb = get_supabase()
+    try:
+        snapshots = wildberries.fetch_snapshots(token)
+        inserted = _persist_snapshots(seller_id, connection_id, SourceType.MARKETPLACE_API, snapshots)
+        _mark_connection_synced(sb, connection_id)
+        _running_syncs[connection_id] = {
+            "status": "done",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "inserted": inserted,
+        }
+        logger.info("wb synced (bg)", extra={"connection_id": connection_id, "inserted": inserted})
+    except Exception as e:
+        _mark_connection_synced(sb, connection_id, error=str(e)[:500])
+        _running_syncs[connection_id] = {
+            "status": "error",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "error": str(e)[:500],
+        }
+        logger.exception("wb sync failed (bg)", extra={"connection_id": connection_id})
+
+
+def _run_google_sheet_sync_bg(connection_id: str, seller_id: str, sheet: str, worksheet_index: int) -> None:
+    _running_syncs[connection_id] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "running",
+    }
+    sb = get_supabase()
+    try:
+        snapshots = google_sheet.fetch_snapshots(sheet, worksheet_index)
+        inserted = _persist_snapshots(seller_id, connection_id, SourceType.GOOGLE_SHEET, snapshots)
+        _mark_connection_synced(sb, connection_id)
+        _running_syncs[connection_id] = {
+            "status": "done",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "inserted": inserted,
+        }
+        logger.info("google sheet synced (bg)", extra={"connection_id": connection_id, "inserted": inserted})
+    except Exception as e:
+        _mark_connection_synced(sb, connection_id, error=str(e)[:500])
+        _running_syncs[connection_id] = {
+            "status": "error",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "error": str(e)[:500],
+        }
+        logger.exception("google sheet sync failed (bg)", extra={"connection_id": connection_id})
+
+
+def _run_feed_sync_bg(connection_id: str, seller_id: str, feed_url: str) -> None:
+    _running_syncs[connection_id] = {
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "status": "running",
+    }
+    sb = get_supabase()
+    try:
+        snapshots = feed_src.fetch_snapshots(feed_url)
+        inserted = _persist_snapshots(seller_id, connection_id, SourceType.FEED, snapshots)
+        _mark_connection_synced(sb, connection_id)
+        _running_syncs[connection_id] = {
+            "status": "done",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "inserted": inserted,
+        }
+        logger.info("feed synced (bg)", extra={"connection_id": connection_id, "inserted": inserted})
+    except Exception as e:
+        _mark_connection_synced(sb, connection_id, error=str(e)[:500])
+        _running_syncs[connection_id] = {
+            "status": "error",
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "error": str(e)[:500],
+        }
+        logger.exception("feed sync failed (bg)", extra={"connection_id": connection_id})
+
+
 @app.post("/ingest/csv", dependencies=[Depends(require_worker_secret)])
 async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
+    """CSV ingest остаётся синхронным — файл уже в памяти, парсится быстро."""
     content = await file.read()
     try:
         snapshots = csv_upload.parse_csv(content)
@@ -279,7 +408,8 @@ async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
 
 
 @app.post("/ingest/google-sheet/{connection_id}", dependencies=[Depends(require_worker_secret)])
-def ingest_google_sheet(connection_id: str) -> dict:
+def ingest_google_sheet(connection_id: str, background_tasks: BackgroundTasks) -> dict:
+    """БАГ 85: валидация sync, sync в BackgroundTask, immediate 200."""
     sb = get_supabase()
     conn = sb.table("data_connections").select("*").eq("id", connection_id).single().execute()
     if not conn.data:
@@ -288,20 +418,21 @@ def ingest_google_sheet(connection_id: str) -> dict:
     sheet = cfg.get("sheet_url") or cfg.get("sheet_id")
     if not sheet:
         raise HTTPException(400, "config.sheet_url или config.sheet_id обязателен")
-    try:
-        snapshots = google_sheet.fetch_snapshots(sheet, cfg.get("worksheet_index", 0))
-        inserted = _persist_snapshots(conn.data["seller_id"], connection_id, SourceType.GOOGLE_SHEET, snapshots)
-        _mark_connection_synced(sb, connection_id)
-        logger.info("google sheet synced", extra={"connection_id": connection_id, "inserted": inserted})
-    except Exception as e:
-        _mark_connection_synced(sb, connection_id, error=str(e)[:500])
-        logger.exception("google sheet sync failed", extra={"connection_id": connection_id})
-        raise HTTPException(500, f"Google Sheet sync error: {e}")
-    return {"inserted": inserted}
+    _cleanup_old_syncs()
+    existing = _running_syncs.get(connection_id)
+    if existing and existing.get("status") == "running":
+        return {"started": False, "status": "running", "message": "Sync уже идёт"}
+    _mark_connection_syncing(sb, connection_id)
+    background_tasks.add_task(
+        _run_google_sheet_sync_bg, connection_id, conn.data["seller_id"], sheet, cfg.get("worksheet_index", 0)
+    )
+    logger.info("google sheet sync enqueued", extra={"connection_id": connection_id})
+    return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
 @app.post("/ingest/ozon/{connection_id}", dependencies=[Depends(require_worker_secret)])
-def ingest_ozon(connection_id: str) -> dict:
+def ingest_ozon(connection_id: str, background_tasks: BackgroundTasks) -> dict:
+    """БАГ 85: валидация sync, sync в BackgroundTask, immediate 200."""
     sb = get_supabase()
     conn = sb.table("data_connections").select("*").eq("id", connection_id).single().execute()
     if not conn.data:
@@ -314,20 +445,21 @@ def ingest_ozon(connection_id: str) -> dict:
     api_key = decrypt_if_encrypted(api_key)
     if not client_id or not api_key:
         raise HTTPException(400, "config.client_id и config.api_key обязательны")
-    try:
-        snapshots = ozon.fetch_snapshots(client_id, api_key)
-        inserted = _persist_snapshots(conn.data["seller_id"], connection_id, SourceType.MARKETPLACE_API, snapshots)
-        _mark_connection_synced(sb, connection_id)
-        logger.info("ozon synced", extra={"connection_id": connection_id, "inserted": inserted, "fetched_skus": len(snapshots)})
-    except Exception as e:
-        _mark_connection_synced(sb, connection_id, error=str(e)[:500])
-        logger.exception("ozon sync failed", extra={"connection_id": connection_id})
-        raise HTTPException(500, f"Ozon sync error: {e}")
-    return {"inserted": inserted, "fetched_skus": len(snapshots)}
+    _cleanup_old_syncs()
+    existing = _running_syncs.get(connection_id)
+    if existing and existing.get("status") == "running":
+        return {"started": False, "status": "running", "message": "Sync уже идёт"}
+    _mark_connection_syncing(sb, connection_id)
+    background_tasks.add_task(
+        _run_ozon_sync_bg, connection_id, conn.data["seller_id"], client_id, api_key
+    )
+    logger.info("ozon sync enqueued", extra={"connection_id": connection_id})
+    return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
 @app.post("/ingest/wb/{connection_id}", dependencies=[Depends(require_worker_secret)])
-def ingest_wb(connection_id: str) -> dict:
+def ingest_wb(connection_id: str, background_tasks: BackgroundTasks) -> dict:
+    """БАГ 85: валидация sync, sync в BackgroundTask, immediate 200."""
     sb = get_supabase()
     conn = sb.table("data_connections").select("*").eq("id", connection_id).single().execute()
     if not conn.data:
@@ -338,20 +470,21 @@ def ingest_wb(connection_id: str) -> dict:
     token = decrypt_if_encrypted(token)
     if not token:
         raise HTTPException(400, "config.token обязателен")
-    try:
-        snapshots = wildberries.fetch_snapshots(token)
-        inserted = _persist_snapshots(conn.data["seller_id"], connection_id, SourceType.MARKETPLACE_API, snapshots)
-        _mark_connection_synced(sb, connection_id)
-        logger.info("wb synced", extra={"connection_id": connection_id, "inserted": inserted})
-    except Exception as e:
-        _mark_connection_synced(sb, connection_id, error=str(e)[:500])
-        logger.exception("wb sync failed", extra={"connection_id": connection_id})
-        raise HTTPException(500, f"WB sync error: {e}")
-    return {"inserted": inserted}
+    _cleanup_old_syncs()
+    existing = _running_syncs.get(connection_id)
+    if existing and existing.get("status") == "running":
+        return {"started": False, "status": "running", "message": "Sync уже идёт"}
+    _mark_connection_syncing(sb, connection_id)
+    background_tasks.add_task(
+        _run_wb_sync_bg, connection_id, conn.data["seller_id"], token
+    )
+    logger.info("wb sync enqueued", extra={"connection_id": connection_id})
+    return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
 @app.post("/ingest/feed/{connection_id}", dependencies=[Depends(require_worker_secret)])
-def ingest_feed(connection_id: str) -> dict:
+def ingest_feed(connection_id: str, background_tasks: BackgroundTasks) -> dict:
+    """БАГ 85: валидация sync, sync в BackgroundTask, immediate 200."""
     sb = get_supabase()
     conn = sb.table("data_connections").select("*").eq("id", connection_id).single().execute()
     if not conn.data:
@@ -360,16 +493,16 @@ def ingest_feed(connection_id: str) -> dict:
     feed_url = cfg.get("feed_url")
     if not feed_url:
         raise HTTPException(400, "config.feed_url обязателен")
-    try:
-        snapshots = feed_src.fetch_snapshots(feed_url)
-        inserted = _persist_snapshots(conn.data["seller_id"], connection_id, SourceType.FEED, snapshots)
-        _mark_connection_synced(sb, connection_id)
-        logger.info("feed synced", extra={"connection_id": connection_id, "inserted": inserted})
-    except Exception as e:
-        _mark_connection_synced(sb, connection_id, error=str(e)[:500])
-        logger.exception("feed sync failed", extra={"connection_id": connection_id})
-        raise HTTPException(500, f"Feed sync error: {e}")
-    return {"inserted": inserted}
+    _cleanup_old_syncs()
+    existing = _running_syncs.get(connection_id)
+    if existing and existing.get("status") == "running":
+        return {"started": False, "status": "running", "message": "Sync уже идёт"}
+    _mark_connection_syncing(sb, connection_id)
+    background_tasks.add_task(
+        _run_feed_sync_bg, connection_id, conn.data["seller_id"], feed_url
+    )
+    logger.info("feed sync enqueued", extra={"connection_id": connection_id})
+    return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
 def _run_recalc_bg(seller_id: str) -> None:
