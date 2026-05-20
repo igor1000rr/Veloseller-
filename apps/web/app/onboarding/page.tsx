@@ -26,33 +26,39 @@ export default async function OnboardingPage() {
       <div className="mx-auto max-w-2xl">
         <div className="inline-flex items-center gap-2 mb-2">
           <span className="size-1 rounded-full bg-lime-deep" />
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Onboarding</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Подключение</span>
         </div>
         <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">
           Добро пожаловать в <span className="text-lime-deep italic">Veloseller</span>
         </h1>
-        <p className="mt-2 text-ink-muted text-sm">3 шага до первого расчёта TVelo</p>
+        <p className="mt-2 text-ink-muted text-sm">3 шага до подключения</p>
+
+        <div className="mt-5 p-4 rounded-2xl border border-line bg-bg-soft text-sm text-ink-soft leading-relaxed">
+          Чтобы Veloseller начал считать TVelo, нужны ежедневные записи по твоим SKU.
+          Актуальные расчёты через 7 дней. Наиболее точные показатели через 30 дней.
+          Мы отправим тебе на email сводные отчёты за эти даты.
+        </div>
 
         <ol className="mt-8 space-y-3">
           <Step
             n={1}
             title="Подключи источник данных"
             done={step1Done}
-            description="CSV-файл, Google Sheet, Ozon или Wildberries API"
+            description="Google Sheet, Ozon или Wildberries API"
             cta={!step1Done ? { href: "/connections/new", label: "Подключить" } : null}
           />
           <Step
             n={2}
-            title="Загрузи первые snapshots"
+            title="Первые записи данных"
             done={step2Done}
-            description="Первый sync произойдёт автоматически после подключения"
-            cta={step1Done && !step2Done ? { href: "/connections", label: "Запустить sync" } : null}
+            description="Синхронизация произойдёт автоматически после подключения"
+            cta={step1Done && !step2Done ? { href: "/connections", label: "Запустить синхронизацию" } : null}
           />
           <Step
             n={3}
             title="Дождись пересчёта"
             done={step3Done}
-            description="Cron запускается каждый час — или нажми «Пересчитать сейчас» на dashboard"
+            description="Синхронизация запускается каждый час или нажми «Пересчитать сейчас» на dashboard"
             cta={step2Done && !step3Done ? { href: "/dashboard", label: "Открыть dashboard" } : null}
           />
         </ol>
