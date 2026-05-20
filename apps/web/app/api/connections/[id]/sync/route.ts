@@ -8,8 +8,9 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  * Проксирует запрос в Python worker. Worker сам читает connection.config
  * через service_role и обновляет статус.
  *
- * БАГ 31-34 fix: rate limit (защита от спама и rate limit'ов маркетплейсов),
- * timeout на fetch worker'а, валидация ENV.
+ * БАГ 31-34 fix: rate limit, timeout на fetch worker'а, валидация ENV.
+ * БАГ 77 fix: не светим внутренние network/connection ошибки наружу. Worker error
+ *   passthrough оставляем — пользователь должен видеть "WB API key неверный".
  */
 
 const WORKER_TIMEOUT_MS = 180_000;  // 3 минуты — Ozon sync 1879 SKU укладывается
@@ -36,9 +37,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const workerUrl = process.env.WORKER_URL;
   const workerSecret = process.env.WORKER_SECRET;
   if (!workerUrl || !workerSecret) {
-    return NextResponse.json({
-      error: "WORKER_URL/WORKER_SECRET не настроены на сервере"
-    }, { status: 500 });
+    console.error("[sync] WORKER_URL/WORKER_SECRET not configured");
+    return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
   }
 
   let endpoint = "";
@@ -64,15 +64,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         error: `Worker не ответил за ${WORKER_TIMEOUT_MS / 1000}с. Попробуйте позже.`
       }, { status: 504 });
     }
-    return NextResponse.json({
-      error: `Ошибка связи с worker: ${e?.message || String(e)}`
-    }, { status: 502 });
+    // БАГ 77: не светим network errors
+    console.error("[sync] worker network error:", e?.message);
+    return NextResponse.json({ error: "Ошибка связи с worker" }, { status: 502 });
   }
   clearTimeout(timeout);
 
   if (!res.ok) {
+    // Текст от worker'а — это валидное user-facing сообщение типа "Ozon API key invalid".
+    // Можем пробросить, но обрезаем чтобы не вышло stacktrace.
     const text = await res.text();
-    return NextResponse.json({ error: text }, { status: res.status });
+    return NextResponse.json({ error: text.slice(0, 500) }, { status: res.status });
   }
 
   // Fire-and-forget пересчёт с коротким таймаутом — он работает в background
