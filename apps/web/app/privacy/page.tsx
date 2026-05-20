@@ -7,8 +7,9 @@ export const metadata = {
 
 const LAST_UPDATED = "15 мая 2026";
 const COMPANY = "Veloseller";
-const CONTACT_EMAIL = "privacy@veloseller.com";
-const DPO_EMAIL = "dpo@veloseller.com";
+// БАГ 52 fix: домен veloseller.ru (не .com — .com не зарегистрирован)
+const CONTACT_EMAIL = "privacy@veloseller.ru";
+const DPO_EMAIL = "dpo@veloseller.ru";
 
 // ВАЖНО: Этот документ — шаблон. Перед production показать юристу.
 // Замени COMPANY/CONTACT_EMAIL/DPO_EMAIL на свои данные.
