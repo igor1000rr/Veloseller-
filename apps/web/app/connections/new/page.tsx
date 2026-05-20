@@ -8,7 +8,7 @@ import { Icons } from "../../_components/Icons";
 import { ErrorModal } from "../../_components/ErrorModal";
 import { parseApiError, type ParsedError } from "@/lib/error-parser";
 
-type SourceKind = "csv_upload" | "google_sheet" | "ozon" | "wildberries" | "shopify" | "amazon";
+type SourceKind = "google_sheet" | "ozon" | "wildberries" | "shopify" | "amazon";
 
 type SourceMeta = {
   kind: SourceKind;
@@ -18,13 +18,13 @@ type SourceMeta = {
   status: "ready" | "wip";
 };
 
+// Порядок по правкам Игоря: OZON, WB, Google Sheet, Shopify, Amazon. CSV убран.
 const SOURCES: SourceMeta[] = [
-  { kind: "google_sheet", title: "Google Sheet",   text: "Расшарь таблицу нашему service account — синхрон по расписанию.",  dot: "#0F9D58", status: "ready" },
-  { kind: "csv_upload",   title: "CSV-загрузка",   text: "Самый простой способ — выгрузи из своей системы и залей файл.",        dot: "#525249", status: "ready" },
-  { kind: "ozon",         title: "Ozon API",       text: "Read-only ключ из личного кабинета Ozon. Никакого write-доступа.",        dot: "#005bff", status: "ready" },
-  { kind: "wildberries",  title: "Wildberries",    text: "Статистический токен WB — только чтение остатков и цен.",            dot: "#a71179", status: "ready" },
-  { kind: "shopify",      title: "Shopify",        text: "OAuth-подключение к Shopify Admin API. Скоро появится.",                       dot: "#95BF47", status: "wip" },
-  { kind: "amazon",       title: "Amazon SP-API",  text: "Amazon Selling Partner API — в процессе одобрения роли Amazon.",                dot: "#FF9900", status: "wip" },
+  { kind: "ozon",         title: "Ozon API",       text: "Read-only ключ из личного кабинета Ozon.",                          dot: "#005bff", status: "ready" },
+  { kind: "wildberries",  title: "Wildberries",    text: "Статистический токен WB — только чтение остатков и цен.",           dot: "#a71179", status: "ready" },
+  { kind: "google_sheet", title: "Google Sheet",   text: "Доступ только для чтения таблицы Google Sheet.",                    dot: "#0F9D58", status: "ready" },
+  { kind: "shopify",      title: "Shopify",        text: "OAuth-подключение к Shopify Admin API. Скоро появится.",            dot: "#95BF47", status: "wip" },
+  { kind: "amazon",       title: "Amazon SP-API",  text: "Amazon Selling Partner API — в процессе одобрения роли Amazon.",    dot: "#FF9900", status: "wip" },
 ];
 
 export default function NewConnectionPage() {
@@ -41,7 +41,7 @@ export default function NewConnectionPage() {
       <div className="mb-8">
         <div className="inline-flex items-center gap-2 mb-2">
           <span className="size-1 rounded-full bg-lime-deep" />
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">New source</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Новый источник</span>
         </div>
         <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">Новый источник</h1>
         <p className="mt-1 text-ink-muted text-sm">Выбери вариант подключения</p>
@@ -136,7 +136,7 @@ function WipPanel({ source, onCancel }: { source: SourceMeta; onCancel: () => vo
         <span className="text-lime-deep mt-0.5"><Icons.Bell /></span>
         <div>
           <div className="font-medium text-ink">Оповестить, когда будет готово</div>
-          <p className="mt-1 text-sm text-ink-muted">Напишем на твой email как только сделаем {source.title}. Пока что подключи Google Sheet или CSV — это работает уже сейчас.</p>
+          <p className="mt-1 text-sm text-ink-muted">Напишем на твой email как только сделаем {source.title}. Пока что подключи Ozon, Wildberries или Google Sheet — это работает уже сейчас.</p>
         </div>
       </div>
 
@@ -161,7 +161,6 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
   const [clientId, setClientId] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [wbToken, setWbToken] = useState("");
-  const [csvFile, setCsvFile] = useState<File | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -180,13 +179,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
       let marketplace: string | null = null;
       let config: Record<string, unknown> = {};
 
-      if (kind === "csv_upload") {
-        source = "csv_upload";
-        if (!csvFile) {
-          setModalError({ kind: "validation", title: "Файл не выбран", message: "Выберите CSV-файл для загрузки." });
-          return;
-        }
-      } else if (kind === "google_sheet") {
+      if (kind === "google_sheet") {
         source = "google_sheet";
         config = { sheet_id: sheetId, range: sheetRange };
       } else if (kind === "ozon") {
@@ -211,26 +204,14 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
       }
       const conn = await createRes.json() as { id: string };
 
-      if (kind === "csv_upload" && csvFile) {
-        const fd = new FormData();
-        fd.append("file", csvFile);
-        const res = await fetch(`/api/connections/${conn.id}/upload-csv`, { method: "POST", body: fd });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          setModalError(parseApiError(data, "Загрузка CSV не прошла"));
-          return;
-        }
-      } else {
-        const res = await fetch(`/api/connections/${conn.id}/sync`, { method: "POST" });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}));
-          setModalError(parseApiError(data, "Первая синхронизация не прошла"));
-          return;
-        }
+      const res = await fetch(`/api/connections/${conn.id}/sync`, { method: "POST" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setModalError(parseApiError(data, "Первая синхронизация не прошла"));
+        return;
       }
       onDone();
     } catch (err: any) {
-      // Network errors попадают сюда (fetch throws)
       setModalError(parseApiError(err?.message || String(err), "Не удалось связаться с сервером"));
     } finally {
       setLoading(false);
@@ -245,6 +226,11 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
         </button>
 
         <h2 className="font-display text-2xl md:text-3xl tracking-tight font-medium">{sourceTitle(kind)}</h2>
+
+        {/* Инструкция по правкам Игоря — над полями формы */}
+        {kind === "ozon" && <OzonInstructions />}
+        {kind === "wildberries" && <WbInstructions />}
+        {kind === "google_sheet" && <SheetInstructions />}
 
         <div>
           <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Название (для себя)</label>
@@ -267,7 +253,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
               <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Range</label>
               <input required value={sheetRange} onChange={(e) => setSheetRange(e.target.value)}
                 className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono text-sm focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
-              <p className="mt-1.5 font-mono text-[11px] text-ink-hush">Колонки: sku, product_name, price, stock_quantity, snapshot_time (опц.).</p>
+              <p className="mt-1.5 font-mono text-[11px] text-ink-hush">Колонки: артикул, наименование, цена, сток, snapshot_time (опц.).</p>
             </div>
           </>
         )}
@@ -283,7 +269,6 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
               <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Api-Key</label>
               <input required type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
                 className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
-              <p className="mt-1.5 text-[11px] text-orange">Создавай read-only ключ в Ozon Seller → Настройки → API.</p>
             </div>
           </>
         )}
@@ -293,16 +278,6 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
             <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Статистический токен</label>
             <input required type="password" value={wbToken} onChange={(e) => setWbToken(e.target.value)}
               className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
-            <p className="mt-1.5 text-[11px] text-orange">Кабинет WB → Профиль → Доступ к API → Статистика (read-only).</p>
-          </div>
-        )}
-
-        {kind === "csv_upload" && (
-          <div>
-            <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">CSV-файл</label>
-            <input required type="file" accept=".csv,text/csv" onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
-              className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-ink file:text-paper file:text-sm file:cursor-pointer" />
-            <p className="mt-1.5 font-mono text-[11px] text-ink-hush">Колонки: sku, product_name, price, stock_quantity, snapshot_time (опц.).</p>
           </div>
         )}
 
@@ -317,9 +292,91 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
   );
 }
 
+// ============================================================
+// Инструкции для каждой интеграции (по правкам Игоря)
+// ============================================================
+
+function OzonInstructions() {
+  return (
+    <div className="rounded-xl border border-line bg-bg-soft p-4 md:p-5 text-sm">
+      <h3 className="font-display text-base font-medium text-ink mb-3">Как получить ключ</h3>
+      <p className="text-ink-soft mb-2">
+        Кабинет OZON → <b>Настройки → Seller API</b> → скопируйте <b>Client&nbsp;ID</b> в сервис
+        и нажмите <b>Сгенерировать ключ</b>.
+      </p>
+      <ol className="list-decimal list-inside space-y-1 text-ink-muted">
+        <li>Название ключа — произвольное</li>
+        <li>Цель использования — <b>Для внешнего сервиса, приложения</b></li>
+        <li>Название сервиса — <b>Veloseller</b></li>
+        <li>Тип токена — <b>Product read-only</b></li>
+        <li>Нажать <b>Сгенерировать</b></li>
+        <li>Скопировать ключ в Veloseller в поле <b>Api-Key</b></li>
+      </ol>
+    </div>
+  );
+}
+
+function WbInstructions() {
+  return (
+    <div className="rounded-xl border border-line bg-bg-soft p-4 md:p-5 text-sm">
+      <h3 className="font-display text-base font-medium text-ink mb-3">Как получить токен</h3>
+      <p className="text-ink-soft mb-2">
+        Кабинет WB → <b>Профиль → Интеграции по API</b> → <b>Создать токен</b>.
+      </p>
+      <ol className="list-decimal list-inside space-y-1 text-ink-muted">
+        <li>Для интеграции — <b>вручную</b></li>
+        <li>Тип токена — <b>Базовый токен</b></li>
+        <li>Название токена — произвольное</li>
+        <li>Категории — <b>Статистика</b></li>
+        <li>Уровень доступа — <b>Только чтение</b></li>
+        <li>Нажать <b>Создать токен</b></li>
+        <li>Скопировать в поле <b>Статистический токен</b></li>
+      </ol>
+    </div>
+  );
+}
+
+function SheetInstructions() {
+  return (
+    <div className="rounded-xl border border-line bg-bg-soft p-4 md:p-5 text-sm">
+      <h3 className="font-display text-base font-medium text-ink mb-3">Как открыть доступ и заполнить поля</h3>
+      <p className="text-ink-soft mb-2">
+        Таблица Google Sheet → <b>Файл → Поделиться → Открыть доступ</b> → <b>Общий доступ → Все, у кого есть ссылка</b> → <b>Скопировать ссылку</b>.
+      </p>
+      <div className="space-y-3">
+        <div>
+          <div className="font-medium text-ink mb-1">1. Sheet ID — внутри ссылки</div>
+          <p className="text-ink-muted">Пример ссылки:</p>
+          <code className="block bg-paper border border-line rounded px-2 py-1 mt-1 font-mono text-[11px] text-ink-soft break-all">
+            https://docs.google.com/spreadsheets/d/<span className="text-lime-deep font-semibold">1XDhI5m7F0adlN8petoJhkX5CGHRQxLRaBezPcTzOaY</span>/edit?usp=sharing
+          </code>
+          <p className="mt-2 text-ink-muted">
+            Sheet&nbsp;ID:{" "}
+            <code className="bg-paper border border-line rounded px-1.5 py-0.5 font-mono text-[11px]">
+              1XDhI5m7F0adlN8petoJhkX5CGHRQxLRaBezPcTzOaY
+            </code>
+          </p>
+        </div>
+        <div>
+          <div className="font-medium text-ink mb-1">2. Range — диапазон со столбцами</div>
+          <p className="text-ink-muted">
+            Названия столбцов с данными: <b>Артикул, Наименование, Цена, Сток</b>.
+          </p>
+          <p className="mt-1 text-ink-muted">
+            Пример:{" "}
+            <code className="bg-paper border border-line rounded px-1.5 py-0.5 font-mono text-[11px]">
+              Sheet1!A:E
+            </code>
+            , где <b>Sheet1</b> — название листа, <b>!</b> — разделитель, <b>A:E</b> — диапазон ячеек с данными.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function sourceTitle(kind: SourceKind): string {
   return ({
-    csv_upload:   "CSV-загрузка",
     google_sheet: "Google Sheet",
     ozon:         "Ozon API",
     wildberries:  "Wildberries API",
