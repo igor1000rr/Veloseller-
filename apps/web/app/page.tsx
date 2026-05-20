@@ -4,6 +4,7 @@ import HeroVeloDemo from "./HeroVeloDemo";
 import DashboardPreview from "./DashboardPreview";
 import FaqAccordion from "./FaqAccordion";
 import MobileMenu from "./_components/MobileMenu";
+import ScrollToTopButton from "./_components/ScrollToTopButton";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 // Лендинг — server component с проверкой сессии. Авто-обновление на каждый
@@ -86,14 +87,14 @@ export default async function LandingPage() {
 
             <h1 className="mt-6 font-display text-[44px] sm:text-5xl md:text-6xl xl:text-7xl leading-[0.95] tracking-tight font-medium">
               Скорость продаж<br className="hidden sm:block" />{" "}
-              <span className="text-lime-deep italic font-display">без вранья</span>
+              <span className="text-lime-deep italic font-display">без искажений</span>
             </h1>
 
             <p className="mt-6 text-base md:text-lg text-ink-muted max-w-xl leading-relaxed">
-              Если ваш отчёт делит продажи на 30 дней — он лжёт. Мы вычитаем дни,
-              когда товара не было на складе, и показываем{" "}
-              <span className="text-ink font-medium">реальную скорость продаж</span> —
-              ту, по которой можно планировать закупку.
+              Если ваш отчёт делит продажи на все 30 дней — он ошибается. Мы
+              исключаем дни, когда товара не было на складе, и показываем{" "}
+              <span className="text-ink font-medium">реальную скорость продаж (TVelo)</span>,
+              по которой можно планировать закупки, анализировать спрос и контролировать остатки.
             </p>
 
             <div className="mt-8 flex flex-wrap items-center gap-3">
@@ -144,13 +145,13 @@ export default async function LandingPage() {
         <div className="w-full px-4 md:px-8 lg:px-12 mb-8 md:mb-10 max-w-[1600px] mx-auto">
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div>
-              <Eyebrow>Integrations</Eyebrow>
+              <Eyebrow>Интеграции</Eyebrow>
               <h2 className="mt-2 font-display text-2xl md:text-4xl tracking-tight font-medium">
-                Подключается ко всему,<br className="hidden md:block"/> где живут твои данные
+                Подключается ко всем<br className="hidden md:block"/> вашим источникам данных
               </h2>
             </div>
             <p className="text-ink-muted text-sm md:text-[15px] max-w-md">
-              Read-only доступ через API маркетплейсов, или просто пришли CSV или Google Sheet.{" "}
+              Read-only доступ через API маркетплейсов, CSV или Google Sheets.{" "}
               <span className="text-orange font-medium">Shopify и Amazon — скоро.</span>
             </p>
           </div>
@@ -192,14 +193,14 @@ export default async function LandingPage() {
         <div className="max-w-[1600px] mx-auto">
           <div className="flex items-end justify-between mb-8 md:mb-10 flex-wrap gap-4">
             <div>
-              <Eyebrow>Console</Eyebrow>
+              <Eyebrow>Панель управления</Eyebrow>
               <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight max-w-2xl font-medium">
                 Не таблица. <span className="text-ink-hush">Командный центр.</span>
               </h2>
             </div>
             <p className="text-ink-muted max-w-md text-sm md:text-[15px]">
-              Видишь сразу: что заканчивается, что зависло мёртвым грузом, и сколько
-              теряешь каждый день из-за неправильной velocity.
+              Сразу видно: что заканчивается, что становится неликвидом и где
+              теряются деньги из-за неправильного расчёта скорости продаж.
             </p>
           </div>
           <DashboardPreview />
@@ -210,13 +211,12 @@ export default async function LandingPage() {
       <section id="features" className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line bg-bg-soft">
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-14">
-            <Eyebrow center>Features</Eyebrow>
+            <Eyebrow center>Возможности</Eyebrow>
             <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
               Шесть вещей, которые экономят деньги
             </h2>
             <p className="mt-4 text-ink-muted max-w-2xl mx-auto text-sm md:text-base">
-              Не «решения для бизнеса», а конкретные расчёты по каждому SKU. Каждая цифра
-              подкреплена методологией и confidence-показателем.
+              Каждая цифра подкреплена методологией и показателем достоверности данных.
             </p>
           </div>
 
@@ -226,16 +226,17 @@ export default async function LandingPage() {
               <div className="relative">
                 <div className="flex items-center gap-3">
                   <div className="flex size-11 items-center justify-center rounded-lg bg-lime text-ink"><Icons.Speed /></div>
-                  <span className="font-mono text-[10px] text-ink-hush">01 / CORE</span>
+                  <span className="font-mono text-[10px] text-ink-hush">01 / ОСНОВНОЙ</span>
                 </div>
-                <h3 className="mt-5 md:mt-6 font-display text-2xl md:text-4xl tracking-tight font-medium">TVelo — честная velocity</h3>
+                <h3 className="mt-5 md:mt-6 font-display text-2xl md:text-4xl tracking-tight font-medium">TVelo — реальная скорость продаж</h3>
                 <p className="mt-3 text-ink-muted max-w-lg text-sm md:text-base leading-relaxed">
-                  Считает скорость продаж, вычитая дни OOS. Реальная картина: какой товар
-                  продаётся быстро, какой — мёртв. Разница с обычным расчётом может достигать 50%.
+                  Считает скорость продаж, вычитая дни отсутствия товара на складе. Реальная
+                  картина: какой товар продаётся быстро, какой становится неликвидом. Разница
+                  с обычным расчётом может достигать 50%.
                 </p>
                 <div className="mt-5 md:mt-6 rounded-xl border border-line bg-bg-soft p-4 inline-flex items-center gap-3 md:gap-4 flex-wrap">
                   <div>
-                    <div className="font-mono text-[10px] text-ink-hush">sales / period</div>
+                    <div className="font-mono text-[10px] text-ink-hush">продажи / период</div>
                     <div className="font-mono text-lg md:text-xl text-ink-hush tabular line-through decoration-orange decoration-2">2.00</div>
                   </div>
                   <Icons.ArrowRight />
@@ -247,11 +248,11 @@ export default async function LandingPage() {
               </div>
             </div>
 
-            <BentoCard idx="02" icon={<Icons.Coverage />} title="Дни покрытия" text="На сколько хватит остатков. Сигнал заранее, а не когда уже OOS." accent="azure" />
-            <BentoCard idx="03" icon={<Icons.Health />}   title="Health Score 0-100"  text="Состояние склада одной цифрой. Дефицит, неликвид, тренд." accent="lime" />
-            <BentoCard idx="04" icon={<Icons.Shield />}   title="Confidence-брейкдаун" text="Видно насколько надёжна метрика. Аномалии, пополнения, пропуски." accent="emerald" />
-            <BentoCard idx="05" icon={<Icons.Bell />}     title="Умные уведомления" text="Telegram и email. Только важное: скоро закончится, повторный OOS." accent="orange" />
-            <BentoCard idx="06" icon={<Icons.Plug />}     title="Гибкие источники данных" text="Sheets, CSV, Ozon, WB, YML. Скоро: Shopify и Amazon SP-API." accent="azure" />
+            <BentoCard idx="02" icon={<Icons.Coverage />} title="Дни покрытия" text="На сколько хватит остатков. Сигнал заранее, а не когда уже товар закончился." accent="azure" />
+            <BentoCard idx="03" icon={<Icons.Health />}   title="Потерянная выручка"  text="Сколько выручки теряется из-за отсутствия товара на складе." accent="lime" />
+            <BentoCard idx="04" icon={<Icons.Shield />}   title="Планирование закупки" text="Расчёты с учётом реальной скорости продаж и времени поставки." accent="emerald" />
+            <BentoCard idx="05" icon={<Icons.Bell />}     title="Замороженные остатки" text="Сколько денег заморожено в SKU с низкой скоростью продаж." accent="orange" />
+            <BentoCard idx="06" icon={<Icons.Plug />}     title="Достоверность данных" text="Рассчитываем точность данных для принятия решений." accent="azure" />
           </div>
         </div>
       </section>
@@ -260,7 +261,7 @@ export default async function LandingPage() {
       <section className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line">
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-14">
-            <Eyebrow center>Compare</Eyebrow>
+            <Eyebrow center>Сравнение</Eyebrow>
             <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
               Excel vs Veloseller
             </h2>
@@ -306,9 +307,9 @@ export default async function LandingPage() {
       <section id="how" className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line bg-bg-soft">
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-12 md:mb-16">
-            <Eyebrow center>How it works</Eyebrow>
+            <Eyebrow center>Как это работает</Eyebrow>
             <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
-              От Excel до решения — <span className="text-lime-deep italic">три шага</span>
+              От Excel до решения — <span className="text-lime-deep italic">в три шага</span>
             </h2>
           </div>
           <div className="grid md:grid-cols-3 gap-4 md:gap-6">
@@ -316,7 +317,7 @@ export default async function LandingPage() {
               <div key={i} className="relative rounded-2xl border border-line bg-paper p-6 md:p-7 hover:border-lime-deep/40 hover:shadow-lg transition">
                 <div className="flex items-center justify-between">
                   <div className="font-display text-4xl md:text-5xl text-lime-deep/80 tabular font-medium">0{i + 1}</div>
-                  <span className="font-mono text-[10px] text-ink-hush uppercase tracking-widest">step 0{i + 1}</span>
+                  <span className="font-mono text-[10px] text-ink-hush uppercase tracking-widest">Шаг 0{i + 1}</span>
                 </div>
                 <h3 className="mt-4 md:mt-5 font-display text-lg md:text-xl font-medium">{s.title}</h3>
                 <p className="mt-3 text-sm text-ink-muted leading-relaxed">{s.text}</p>
@@ -330,7 +331,7 @@ export default async function LandingPage() {
       <section className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line">
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-14">
-            <Eyebrow center>Selled</Eyebrow>
+            <Eyebrow center>Отзывы</Eyebrow>
             <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
               Селлеры о цифрах, которые увидели впервые
             </h2>
@@ -361,7 +362,7 @@ export default async function LandingPage() {
       <section id="pricing" className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line bg-bg-soft">
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-12">
-            <Eyebrow center>Pricing</Eyebrow>
+            <Eyebrow center>Цены</Eyebrow>
             <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
               Простые тарифы. Никаких звёздочек.
             </h2>
@@ -371,8 +372,8 @@ export default async function LandingPage() {
             {plans.map((p) => <PricingCard key={p.name} {...p} isAuthed={isAuthed} />)}
           </div>
           <p className="mt-8 md:mt-10 text-center font-mono text-xs text-ink-hush flex items-center justify-center flex-wrap gap-x-2 gap-y-1">
-            <span>Все тарифы включают:</span>
-            <span>TVelo</span><Icons.Dot size={3} /> <span>Alerts</span><Icons.Dot size={3} /> <span>Дашборд</span><Icons.Dot size={3} /> <span>Email + Telegram</span>
+            <span>Все тарифы включают весь функционал:</span>
+            <span>TVelo</span><Icons.Dot size={3} /> <span>Покрытие</span><Icons.Dot size={3} /> <span>Потерянная выручка</span><Icons.Dot size={3} /> <span>Планирование закупки</span><Icons.Dot size={3} /> <span>Email + Telegram</span>
           </p>
         </div>
       </section>
@@ -398,7 +399,7 @@ export default async function LandingPage() {
             <div className="absolute -left-20 -bottom-20 size-60 rounded-full bg-azure/20 blur-3xl" />
             <div className="relative z-10 max-w-3xl">
               <h2 className="font-display text-3xl md:text-5xl lg:text-6xl tracking-tight leading-[1.05] font-medium">
-                Перестань считать <span className="text-lime-deep italic">velocity вручную.</span>
+                Перестань считать <span className="text-lime-deep italic">скорость продаж вручную.</span>
               </h2>
               <p className="mt-4 md:mt-5 text-ink-muted text-base md:text-lg max-w-2xl leading-relaxed">
                 Подключи источник данных — Google Sheet, CSV или API маркетплейса.
@@ -430,8 +431,8 @@ export default async function LandingPage() {
                 <span className="font-display text-xl tracking-tight font-medium">Veloseller</span>
               </div>
               <p className="mt-5 text-sm text-ink-muted max-w-xs leading-relaxed">
-                Inventory intelligence для маркетплейс-селлеров. TVelo, health score,
-                confidence — расчёты, которым можно доверять.
+                Управление складом для маркетплейс-селлеров. TVelo, дни покрытия,
+                достоверность данных — расчёты, которым можно доверять.
               </p>
             </div>
             <FooterCol title="Продукт" items={[
@@ -470,7 +471,7 @@ export default async function LandingPage() {
           </div>
           <div className="mt-10 md:mt-12 pt-6 md:pt-8 border-t border-line flex flex-wrap items-center justify-between gap-4">
             <div className="font-mono text-xs text-ink-hush">
-              © {new Date().getFullYear()} Veloseller — Inventory intelligence для ecommerce
+              © {new Date().getFullYear()} Veloseller — управление складом для ecommerce
             </div>
             <div className="flex items-center gap-2">
               <span className="size-1.5 rounded-full bg-lime-deep animate-pulse" />
@@ -479,6 +480,9 @@ export default async function LandingPage() {
           </div>
         </div>
       </footer>
+
+      {/* Кнопка "вверх" — появляется после скролла */}
+      <ScrollToTopButton />
     </main>
   );
 }
@@ -530,7 +534,8 @@ function PricingCard({ name, price, skus, highlight, perks, isAuthed }: typeof p
       )}
       <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">{name}</div>
       <div className="mt-4 flex items-baseline gap-1">
-        <span className="font-display text-5xl md:text-6xl tracking-tight text-ink tabular font-medium">${price}</span>
+        <span className="font-display text-5xl md:text-6xl tracking-tight text-ink tabular font-medium">{price.toLocaleString("ru-RU")}</span>
+        <span className="text-ink-muted text-2xl ml-1">₽</span>
         <span className="text-ink-muted">/мес</span>
       </div>
       <div className="mt-1 font-mono text-xs text-ink-hush">до {skus} SKU</div>
@@ -573,10 +578,10 @@ function FooterCol({ title, items }: { title: string; items: [string, string][] 
 
 // ============================================================
 const stats = [
-  { label: "Точность TVelo", value: "+47", unit: "%", sub: "vs обычная velocity" },
-  { label: "Среднее время сетапа", value: "5", unit: "мин", sub: "от регистрации до данных" },
+  { label: "Точность TVelo", value: "+47", unit: "%", sub: "vs обычная скорость продаж" },
+  { label: "Среднее время настройки", value: "5", unit: "мин", sub: "от регистрации до данных" },
   { label: "Источников данных", value: "5", sub: "Sheets, CSV, Ozon, WB, YML" },
-  { label: "Метрик по каждому SKU", value: "23", sub: "включая confidence" },
+  { label: "Метрик по каждому SKU", value: "23", sub: "включая достоверность данных" },
 ];
 const integrations = [
   { name: "Ozon",          tag: "API",       dot: "#005bff" },
@@ -590,31 +595,28 @@ const integrations = [
   { name: "Resend",        tag: "EMAIL",     dot: "#000" },
 ];
 const compareLeft = [
-  "Считаешь velocity вручную раз в месяц",
-  "Не учитываешь дни OOS — данные искажены",
-  "Замечаешь дефицит, когда уже поздно",
-  "Не видишь сколько денег зависло в мёртвых остатках",
-  "Алерты приходят постфактум, через WhatsApp",
+  "Считаешь скорость продаж вручную раз в месяц",
+  "Не учитываешь дни отсутствия товара на складе — данные искажены",
+  "Не видишь сколько денег зависло в неликвиде",
+  "Тревожные сигналы приходят постфактум, когда уже поздно",
 ];
 const compareRight = [
-  "TVelo пересчитывается каждые 6 часов автоматически",
-  "Вычитаем OOS дни — реальная velocity",
-  "Сигнал на закупку за 7-14 дней до OOS",
-  "Видишь точную сумму заморозки в неликвиде",
-  "Telegram + email digest каждое утро",
+  "Вычитаем дни отсутствия товара на складе — реальная скорость продаж",
+  "Сигнал на закупку за 7–14 дней до окончания остатков",
+  "Telegram + email отчёты каждое утро",
 ];
 const steps = [
-  { title: "Подключи источник",     text: "Вставь ссылку на Google Sheet, загрузи CSV или подключи Ozon/WB через API-ключ." },
-  { title: "Получи первый расчёт",   text: "Через 30 минут — первые TVelo и health score. Через 7 дней — все аналитики работают точно." },
-  { title: "Действуй по сигналам",   text: "Email + Telegram digest каждое утро. Дашборд с приоритетами и калькулятор закупки." },
+  { title: "Подключи источник",     text: "Добавь ссылку на Google Sheet, загрузи CSV или подключи Ozon/WB через API-ключ." },
+  { title: "Получи первый расчёт",   text: "Через 30 минут — сводная информация по складу. Через 7 дней — первые TVelo и другие показатели. Через 30 дней — значительно улучшена достоверность данных." },
+  { title: "Управляй запасами на основе данных",   text: "Получай сигналы в Telegram и email, следи за рисками, планируй закупки и контролируй остатки в одном дашборде." },
 ];
 const testimonials = [
-  { quote: "Наконец перестал считать velocity в Excel. Через неделю увидел, что 12% оборотных денег заморожено в неликвиде — закрыл закупку на пару SKU и освободил 380к.", name: "Артём Кузнецов", role: "Селлер на Ozon, 1200 SKU", initials: "АК", avatarBg: "#84cc16", avatarColor: "#0a0a08" },
-  { quote: "TVelo показал, что половина моих медленных товаров на самом деле быстрые — просто часто уходили в OOS. Перезаказал — выручка +18% за месяц.", name: "Мария Логинова", role: "WB Premium, 3400 SKU", initials: "МЛ", avatarBg: "#0284c7", avatarColor: "#fff" },
+  { quote: "Наконец перестал считать скорость продаж в Excel. Через неделю увидел, что 12% оборотных денег заморожено в неликвиде — закрыл закупку на пару SKU и освободил 380к.", name: "Артём Кузнецов", role: "Селлер на Ozon, 1200 SKU", initials: "АК", avatarBg: "#84cc16", avatarColor: "#0a0a08" },
+  { quote: "TVelo показал, что половина моих медленных товаров на самом деле быстрые — просто часто уходили в out-of-stock. Перезаказал — выручка +18% за месяц.", name: "Мария Логинова", role: "WB Premium, 3400 SKU", initials: "МЛ", avatarBg: "#0284c7", avatarColor: "#fff" },
   { quote: "Telegram-уведомления — главная фишка. Не сижу в дашборде. Приходит сигнал и пошёл, заказал, забыл.", name: "Дмитрий Беляев", role: "Multi-marketplace, 800 SKU", initials: "ДБ", avatarBg: "#ea580c", avatarColor: "#fff" },
 ];
 const plans = [
-  { name: "Starter", price: 24,  skus: "500",   highlight: false, perks: ["1 магазин", "Дашборд + базовая аналитика", "Email digest"] },
-  { name: "Growth",  price: 89,  skus: "4 000", highlight: true,  perks: ["3 магазина", "Все источники данных", "Telegram + email digest", "Калькулятор закупки"] },
-  { name: "Pro",     price: 299, skus: "10 000",highlight: false, perks: ["Безлимит магазинов", "Price elasticity", "Приоритетная поддержка", "API доступ"] },
+  { name: "Старт", price: 1900,  skus: "500",   highlight: false, perks: ["1 магазин"] },
+  { name: "Рост",  price: 6900,  skus: "4 000", highlight: true,  perks: ["3 магазина"] },
+  { name: "Про",   price: 19900, skus: "10 000",highlight: false, perks: ["Безлимит магазинов"] },
 ];
