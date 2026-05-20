@@ -16,6 +16,12 @@
 БАГ 50 (здесь): recalc_all_sellers пропускает sellers с активным manual recalc
   (избегаем deadlock'ов в inventory_events delete+insert при concurrent запуске).
 
+БАГ 92 (здесь): batched fetch snapshots для ВСЕХ продуктов одним запросом — было
+  per-SKU = 1879 запросов, стало ceil(1879/200) = 10 запросов. Радикально снижает
+  время recalc'а и шанс попасть в keep-alive race с Postgrest (БАГ 91).
+БАГ 93 (здесь): try/except на per-SKU loop — если один SKU падает на pure-compute
+  или DB write, не теряем весь recalc. Логируем failed_skus в результате.
+
 underestimated_sku требует ≥2 stockout_days.
 """
 from __future__ import annotations
@@ -56,6 +62,9 @@ from app.schemas import EventType, TVeloMetric
 
 logger = logging.getLogger("veloseller.recalc")
 
+# БАГ 92: размер батча для .in_() — PostgREST безопасно держит ~200 ID в URL.
+_PRODUCT_IN_BATCH = 200
+
 
 # ============================================================================
 # Helpers
@@ -94,6 +103,39 @@ def _bump_progress(progress: Optional[dict], **fields) -> None:
     if progress is None:
         return
     progress.update(fields)
+
+
+def _fetch_snapshots_batched(
+    sb,
+    product_ids: list[str],
+    history_start: str,
+) -> dict[str, list[dict]]:
+    """БАГ 92: один batched fetch вместо per-SKU N запросов.
+
+    Возвращает маппинг product_id → list[snapshot rows] (отсортированные по времени).
+    Snapshots группируются in-memory, потому что PostgREST не позволяет per-key sort
+    в одном IN запросе. Это всё равно радикально быстрее N отдельных запросов.
+    """
+    if not product_ids:
+        return {}
+    result: dict[str, list[dict]] = {pid: [] for pid in product_ids}
+    for i in range(0, len(product_ids), _PRODUCT_IN_BATCH):
+        batch = product_ids[i:i + _PRODUCT_IN_BATCH]
+        rows = fetch_all(
+            sb.table("inventory_snapshots")
+            .select("snapshot_id,product_id,snapshot_time,stock_quantity,price,availability")
+            .in_("product_id", batch)
+            .gte("snapshot_time", history_start)
+        )
+        for r in rows:
+            pid = r.get("product_id")
+            if pid in result:
+                result[pid].append(r)
+    # Сортируем in-memory (фетч мог вернуть в любом порядке, но build_daily_aggregates
+    # сортирует сам — это для defensive consistency)
+    for pid in result:
+        result[pid].sort(key=lambda r: r["snapshot_time"])
+    return result
 
 
 def _extract_pre_period_sales_deltas(
@@ -386,110 +428,135 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
     )
     if not products:
         _bump_progress(progress, phase="done")
-        return {"products": 0, "metrics_written": 0, "alerts_written": 0, "store_metrics_written": 0}
+        return {"products": 0, "metrics_written": 0, "alerts_written": 0,
+                "store_metrics_written": 0, "failed_skus": 0,
+                "events_written": 0, "changelog_written": 0}
 
     total_skus = len(products)
-    _bump_progress(progress, phase="processing_skus", total=total_skus, processed=0)
+    history_start = (period_start - timedelta(days=30)).isoformat()
+
+    # БАГ 92: один batched fetch вместо per-SKU N запросов.
+    # До: 1879 запросов GET inventory_snapshots, ~3 минуты + риск keep-alive race.
+    # После: ceil(1879/200) = 10 запросов, ~5 секунд.
+    _bump_progress(progress, phase="fetching_snapshots", total=total_skus, processed=0)
+    all_pids = [p["product_id"] for p in products]
+    snapshots_by_pid = _fetch_snapshots_batched(sb, all_pids, history_start)
+    logger.info("recalc batched fetch done", extra={
+        "seller_id": seller_id, "period_days": period_days,
+        "products": total_skus,
+        "snapshots_total": sum(len(v) for v in snapshots_by_pid.values()),
+        "history_start": history_start,
+    })
+
+    _bump_progress(progress, phase="processing_skus", processed=0)
 
     metrics_written = 0
     alerts_written = 0
     events_written = 0
     changelog_written = 0
-
+    failed_skus = 0
     sku_data: list[dict] = []
     velocities_for_median: list[float] = []
 
+    # ВНУТРЕННИЙ ЦИКЛ per-SKU: каждый SKU обёрнут в try/except (БАГ 93).
+    # Если один SKU падает — логируем и продолжаем со следующим.
+    # Идемпотентность гарантируется upsert'ом tvelo_metrics и DELETE+INSERT events/changelog.
     for idx, p in enumerate(products):
         pid = p["product_id"]
-        history_start = (period_start - timedelta(days=30)).isoformat()
-        rows = fetch_all(
-            sb.table("inventory_snapshots")
-            .select("snapshot_id,snapshot_time,stock_quantity,price,availability")
-            .eq("product_id", pid)
-            .gte("snapshot_time", history_start)
-            .order("snapshot_time")
-        )
-        if (idx + 1) % 20 == 0 or idx == total_skus - 1:
-            _bump_progress(progress, processed=idx + 1)
-        if not rows:
+        try:
+            rows = snapshots_by_pid.get(pid, [])
+            if (idx + 1) % 50 == 0 or idx == total_skus - 1:
+                _bump_progress(progress, processed=idx + 1)
+            if not rows:
+                continue
+
+            pre_period_history = _extract_pre_period_sales_deltas(rows, period_start, seller_tz)
+            aggregates, event_rows = build_daily_aggregates(rows, period_start, period_end, seller_tz)
+            current_stock = int(rows[-1]["stock_quantity"])
+            current_price = float(rows[-1]["price"])
+
+            history_arg = pre_period_history if pre_period_history else None
+            metric = compute_metrics_for_sku(
+                product_id=pid,
+                period_start=period_start,
+                period_end=period_end,
+                daily_aggregates=aggregates,
+                current_stock=current_stock,
+                history_for_median=history_arg,
+            )
+
+            events_written += _write_inventory_events(sb, pid, event_rows, period_start, period_end)
+            changelog_written += _write_changelog(sb, seller_id, pid, aggregates, period_start, period_end)
+
+            daily_prices = [(a.day, a.price) for a in aggregates if a.price > 0]
+            price_changes = detect_price_changes(daily_prices)
+            if price_changes:
+                price_rows = [
+                    {
+                        "product_id": pid,
+                        "seller_id": seller_id,
+                        "event_date": pc.day.isoformat(),
+                        "event_type": "recount_like",
+                        "delta_stock": None,
+                        "message": f"Цена изменилась: {pc.previous_price:.2f} → {pc.new_price:.2f} ({pc.delta_pct:+.1f}%)",
+                        "confidence_impact": 0.0,
+                    }
+                    for pc in price_changes
+                ]
+                sb.table("changelog").insert(price_rows).execute()
+                changelog_written += len(price_rows)
+
+                for pc in price_changes:
+                    sales_before = [
+                        abs(a.delta_stock or 0) for a in aggregates
+                        if a.day < pc.day and a.availability
+                        and a.event_type.value == "sales_like"
+                        and a.delta_stock is not None
+                    ]
+                    sales_after = [
+                        abs(a.delta_stock or 0) for a in aggregates
+                        if a.day > pc.day and a.availability
+                        and a.event_type.value == "sales_like"
+                        and a.delta_stock is not None
+                    ]
+                    sig = calculate_elasticity(pc, sales_before, sales_after)
+                    if sig is not None:
+                        try:
+                            sb.table("price_elasticity").upsert({
+                                "product_id": pid,
+                                "seller_id": seller_id,
+                                "change_date": pc.day.isoformat(),
+                                "previous_price": float(pc.previous_price),
+                                "new_price": float(pc.new_price),
+                                "price_delta_pct": float(pc.delta_pct),
+                                "velocity_before": float(sig.velocity_before),
+                                "velocity_after": float(sig.velocity_after),
+                                "price_impact_percent": float(sig.price_impact_percent),
+                                "days_before": sig.days_before,
+                                "days_after": sig.days_after,
+                            }, on_conflict="product_id,change_date").execute()
+                        except Exception as e:
+                            logger.warning("elasticity write failed for %s: %s", pid, e)
+
+            sku_data.append({
+                "pid": pid, "metric": metric, "current_stock": current_stock,
+                "current_price": current_price, "availability_now": current_stock > 0,
+                "aggregates": aggregates,
+            })
+            if metric.adjusted_velocity > 0:
+                velocities_for_median.append(metric.adjusted_velocity)
+        except Exception:
+            failed_skus += 1
+            logger.exception("recalc SKU failed (БАГ 93: skip and continue)", extra={
+                "seller_id": seller_id, "product_id": pid, "period_days": period_days,
+            })
             continue
 
-        pre_period_history = _extract_pre_period_sales_deltas(rows, period_start, seller_tz)
-
-        aggregates, event_rows = build_daily_aggregates(rows, period_start, period_end, seller_tz)
-        current_stock = int(rows[-1]["stock_quantity"])
-        current_price = float(rows[-1]["price"])
-
-        history_arg = pre_period_history if pre_period_history else None
-        metric = compute_metrics_for_sku(
-            product_id=pid,
-            period_start=period_start,
-            period_end=period_end,
-            daily_aggregates=aggregates,
-            current_stock=current_stock,
-            history_for_median=history_arg,
-        )
-
-        events_written += _write_inventory_events(sb, pid, event_rows, period_start, period_end)
-        changelog_written += _write_changelog(sb, seller_id, pid, aggregates, period_start, period_end)
-
-        daily_prices = [(a.day, a.price) for a in aggregates if a.price > 0]
-        price_changes = detect_price_changes(daily_prices)
-        if price_changes:
-            price_rows = [
-                {
-                    "product_id": pid,
-                    "seller_id": seller_id,
-                    "event_date": pc.day.isoformat(),
-                    "event_type": "recount_like",
-                    "delta_stock": None,
-                    "message": f"Цена изменилась: {pc.previous_price:.2f} → {pc.new_price:.2f} ({pc.delta_pct:+.1f}%)",
-                    "confidence_impact": 0.0,
-                }
-                for pc in price_changes
-            ]
-            sb.table("changelog").insert(price_rows).execute()
-            changelog_written += len(price_rows)
-
-            for pc in price_changes:
-                sales_before = [
-                    abs(a.delta_stock or 0) for a in aggregates
-                    if a.day < pc.day and a.availability
-                    and a.event_type.value == "sales_like"
-                    and a.delta_stock is not None
-                ]
-                sales_after = [
-                    abs(a.delta_stock or 0) for a in aggregates
-                    if a.day > pc.day and a.availability
-                    and a.event_type.value == "sales_like"
-                    and a.delta_stock is not None
-                ]
-                sig = calculate_elasticity(pc, sales_before, sales_after)
-                if sig is not None:
-                    try:
-                        sb.table("price_elasticity").upsert({
-                            "product_id": pid,
-                            "seller_id": seller_id,
-                            "change_date": pc.day.isoformat(),
-                            "previous_price": float(pc.previous_price),
-                            "new_price": float(pc.new_price),
-                            "price_delta_pct": float(pc.delta_pct),
-                            "velocity_before": float(sig.velocity_before),
-                            "velocity_after": float(sig.velocity_after),
-                            "price_impact_percent": float(sig.price_impact_percent),
-                            "days_before": sig.days_before,
-                            "days_after": sig.days_after,
-                        }, on_conflict="product_id,change_date").execute()
-                    except Exception as e:
-                        logger.warning("elasticity write failed for %s: %s", pid, e)
-
-        sku_data.append({
-            "pid": pid, "metric": metric, "current_stock": current_stock,
-            "current_price": current_price, "availability_now": current_stock > 0,
-            "aggregates": aggregates,
+    if failed_skus > 0:
+        logger.warning("recalc: some SKUs failed", extra={
+            "seller_id": seller_id, "period_days": period_days,
+            "failed_skus": failed_skus, "total_skus": total_skus,
         })
-        if metric.adjusted_velocity > 0:
-            velocities_for_median.append(metric.adjusted_velocity)
 
     median_store_velocity = _median(velocities_for_median) if velocities_for_median else 0.0
 
@@ -497,48 +564,67 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
     for idx, item in enumerate(sku_data):
         pid = item["pid"]
         m: TVeloMetric = item["metric"]
-        has_enough_history = (
-            m.confidence_breakdown.low_history == 0.0
-            if m.confidence_breakdown else True
-        )
-        underestimated = (
-            is_underestimated_sku(
-                stockout_days=m.stockout_days,
-                adjusted_velocity=m.adjusted_velocity,
-                median_store_velocity=median_store_velocity,
-                confidence_score=m.confidence_score,
+        try:
+            has_enough_history = (
+                m.confidence_breakdown.low_history == 0.0
+                if m.confidence_breakdown else True
             )
-            and has_enough_history
-            and m.stockout_days >= 2
-        )
-        sb.table("tvelo_metrics").upsert({
-            "product_id": pid,
-            "period_start": m.period_start.isoformat(),
-            "period_end": m.period_end.isoformat(),
-            "confirmed_velocity": float(m.confirmed_velocity),
-            "adjusted_velocity": float(m.adjusted_velocity),
-            "median_30d_velocity": float(m.median_30d_velocity),
-            "confidence_score": float(m.confidence_score),
-            "confidence_breakdown": m.confidence_breakdown.model_dump() if m.confidence_breakdown else {},
-            "stockout_days": m.stockout_days,
-            "in_stock_days": m.in_stock_days,
-            "coverage_days": float(m.coverage_days) if m.coverage_days is not None else None,
-            "current_stock": m.current_stock,
-            "current_price": item["current_price"],
-            "inventory_segment": m.segment.value if m.segment else None,
-            "sku_health_score": float(m.sku_health_score) if m.sku_health_score is not None else None,
-            "underestimated_sku": underestimated,
-        }, on_conflict="product_id,period_start,period_end").execute()
-        metrics_written += 1
-        alerts_written += _write_alerts(sb, seller_id, pid, m, underestimated)
-        if (idx + 1) % 20 == 0 or idx == len(sku_data) - 1:
+            underestimated = (
+                is_underestimated_sku(
+                    stockout_days=m.stockout_days,
+                    adjusted_velocity=m.adjusted_velocity,
+                    median_store_velocity=median_store_velocity,
+                    confidence_score=m.confidence_score,
+                )
+                and has_enough_history
+                and m.stockout_days >= 2
+            )
+            sb.table("tvelo_metrics").upsert({
+                "product_id": pid,
+                "period_start": m.period_start.isoformat(),
+                "period_end": m.period_end.isoformat(),
+                "confirmed_velocity": float(m.confirmed_velocity),
+                "adjusted_velocity": float(m.adjusted_velocity),
+                "median_30d_velocity": float(m.median_30d_velocity),
+                "confidence_score": float(m.confidence_score),
+                "confidence_breakdown": m.confidence_breakdown.model_dump() if m.confidence_breakdown else {},
+                "stockout_days": m.stockout_days,
+                "in_stock_days": m.in_stock_days,
+                "coverage_days": float(m.coverage_days) if m.coverage_days is not None else None,
+                "current_stock": m.current_stock,
+                "current_price": item["current_price"],
+                "inventory_segment": m.segment.value if m.segment else None,
+                "sku_health_score": float(m.sku_health_score) if m.sku_health_score is not None else None,
+                "underestimated_sku": underestimated,
+            }, on_conflict="product_id,period_start,period_end").execute()
+            metrics_written += 1
+            alerts_written += _write_alerts(sb, seller_id, pid, m, underestimated)
+        except Exception:
+            failed_skus += 1
+            logger.exception("recalc metric/alert write failed", extra={
+                "seller_id": seller_id, "product_id": pid,
+            })
+        if (idx + 1) % 50 == 0 or idx == len(sku_data) - 1:
             _bump_progress(progress, processed=idx + 1)
 
     _bump_progress(progress, phase="writing_store")
-    store_written = _write_store_metrics(sb, seller_id, sku_data, period_start, period_end)
+    try:
+        store_written = _write_store_metrics(sb, seller_id, sku_data, period_start, period_end)
+    except Exception:
+        logger.exception("store_metrics write failed", extra={"seller_id": seller_id})
+        store_written = 0
+
+    logger.info("recalc_seller done", extra={
+        "seller_id": seller_id, "period_days": period_days,
+        "products": len(products), "failed_skus": failed_skus,
+        "metrics_written": metrics_written, "alerts_written": alerts_written,
+        "events_written": events_written, "changelog_written": changelog_written,
+        "store_metrics_written": store_written,
+    })
 
     return {
         "products": len(products),
+        "failed_skus": failed_skus,
         "metrics_written": metrics_written,
         "alerts_written": alerts_written,
         "events_written": events_written,
@@ -621,16 +707,26 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
 def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -> dict:
     result = {"products": 0, "metrics_written": 0, "alerts_written": 0,
               "store_metrics_written": 0, "events_written": 0, "changelog_written": 0,
-              "periods": []}
+              "failed_skus": 0, "periods": []}
     periods_list = (7, 30, 90)
     _bump_progress(progress, total_periods=len(periods_list), current_period_index=0)
     for i, period_days in enumerate(periods_list):
         _bump_progress(progress, current_period_index=i + 1)
-        r = recalc_seller(seller_id, period_days=period_days, progress=progress)
+        try:
+            r = recalc_seller(seller_id, period_days=period_days, progress=progress)
+        except Exception:
+            logger.exception("recalc_seller failed for period", extra={
+                "seller_id": seller_id, "period_days": period_days,
+            })
+            r = {"products": 0, "failed_skus": 0, "metrics_written": 0, "alerts_written": 0,
+                 "events_written": 0, "changelog_written": 0, "store_metrics_written": 0,
+                 "error": "period failed"}
         result["periods"].append({"period_days": period_days, **r})
+        # Главным считаем 30-day (как было раньше — на dashboard основной период)
         if period_days == 30:
             for k in ("products", "metrics_written", "alerts_written",
-                      "store_metrics_written", "events_written", "changelog_written"):
+                      "store_metrics_written", "events_written", "changelog_written",
+                      "failed_skus"):
                 result[k] = r.get(k, 0)
     _bump_progress(progress, phase="done")
     return result
@@ -648,9 +744,8 @@ def recalc_all_sellers() -> dict:
     sb = get_supabase()
     sellers = fetch_all(sb.table("sellers").select("id"))
     summary = {"sellers": 0, "skipped_concurrent": 0, "metrics_written": 0,
-               "alerts_written": 0, "store_metrics_written": 0}
+               "alerts_written": 0, "store_metrics_written": 0, "failed_skus": 0}
 
-    # БАГ 50: проверяем _running_recalcs (импорт здесь чтобы избежать circular import)
     try:
         from app.main import _running_recalcs
     except ImportError:
@@ -658,7 +753,6 @@ def recalc_all_sellers() -> dict:
 
     for s in sellers:
         seller_id = s["id"]
-        # БАГ 50: пропускаем если manual recalc уже идёт
         state = _running_recalcs.get(seller_id) if _running_recalcs else None
         if state and state.get("status") == "running":
             summary["skipped_concurrent"] += 1
@@ -671,6 +765,7 @@ def recalc_all_sellers() -> dict:
             summary["metrics_written"] += r.get("metrics_written", 0)
             summary["alerts_written"] += r.get("alerts_written", 0)
             summary["store_metrics_written"] += r.get("store_metrics_written", 0)
+            summary["failed_skus"] += r.get("failed_skus", 0)
         except Exception as e:
             logger.exception("recalc failed for seller %s: %s", seller_id, e)
     return summary
