@@ -6,12 +6,16 @@ from __future__ import annotations
 import os
 os.environ["ENABLE_SCHEDULER"] = "false"
 
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.main import _ensure_products, _persist_snapshots, _PRODUCTS_IN_BATCH
+from app.main import (
+    _ensure_products, _persist_snapshots, _PRODUCTS_IN_BATCH,
+    _cleanup_old_recalcs, _running_recalcs,
+)
 from app.schemas import SnapshotInput, SourceType
 
 
@@ -28,12 +32,9 @@ class TestEnsureProductsBatching:
     """Батчинг .in_(sku, [...]) защищает от PostgREST URL лимита 8KB."""
 
     def test_small_batch_single_query(self):
-        """При <500 SKU делает один запрос."""
         snaps = [_mk_snap(f"SKU{i}") for i in range(100)]
         mock_sb = MagicMock()
-        # upsert
         mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
-        # select.eq.in_.execute → 100 строк
         mock_sb.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = MagicMock(
             data=[{"product_id": f"pid-{i}", "sku": f"SKU{i}"} for i in range(100)]
         )
@@ -42,7 +43,6 @@ class TestEnsureProductsBatching:
 
         assert len(result) == 100
         assert result["SKU0"] == "pid-0"
-        # Один in_ вызов (один батч)
         assert mock_sb.table.return_value.select.return_value.eq.return_value.in_.call_count == 1
 
     def test_large_array_split_into_batches(self):
@@ -51,12 +51,10 @@ class TestEnsureProductsBatching:
         mock_sb = MagicMock()
         mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
 
-        # Каждый вызов .in_ возвращает batch_size строк
         call_count = {"n": 0}
 
         def execute_side_effect():
             call_count["n"] += 1
-            # Возвращаем фейковые продукты для всех SKU (грубое допущение для теста)
             return MagicMock(data=[{"product_id": f"pid-{i}", "sku": f"SKU{i}"}
                                     for i in range((call_count["n"] - 1) * _PRODUCTS_IN_BATCH,
                                                    min(call_count["n"] * _PRODUCTS_IN_BATCH, 1879))])
@@ -65,13 +63,11 @@ class TestEnsureProductsBatching:
 
         result = _ensure_products(mock_sb, "seller-1", snaps)
 
-        # Должно быть 4 батча: ceil(1879 / 500) = 4
         expected_batches = (1879 + _PRODUCTS_IN_BATCH - 1) // _PRODUCTS_IN_BATCH
         assert mock_sb.table.return_value.select.return_value.eq.return_value.in_.call_count == expected_batches
         assert len(result) == 1879
 
     def test_empty_snapshots(self):
-        """Пустой массив → пустой dict без запросов."""
         result = _ensure_products(MagicMock(), "seller-1", [])
         assert result == {}
 
@@ -85,9 +81,7 @@ class TestPersistSnapshotsDedup:
     """Snapshot не записывается если stock+price совпадают с последним."""
 
     def _setup_mock(self, last_snap_data: list[dict]):
-        """Helper: настраивает mock_sb для _persist_snapshots."""
         mock_sb = MagicMock()
-        # _ensure_products:
         mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
         mock_sb.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = MagicMock(
             data=[{"product_id": "pid-A", "sku": "A1"}, {"product_id": "pid-B", "sku": "B2"}]
@@ -95,10 +89,8 @@ class TestPersistSnapshotsDedup:
         return mock_sb
 
     def test_duplicate_skipped(self, monkeypatch):
-        """Если stock и price такие же — snapshot не записывается."""
         mock_sb = self._setup_mock([])
 
-        # fetch_all возвращает последний snapshot с stock=10, price=100
         def fake_fetch_all(query):
             return [
                 {"product_id": "pid-A", "stock_quantity": 10, "price": "100.00",
@@ -108,16 +100,13 @@ class TestPersistSnapshotsDedup:
         monkeypatch.setattr("app.main.fetch_all", fake_fetch_all)
         monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
 
-        # Передаём snapshot с такими же stock+price → должен быть пропущен
         snaps = [_mk_snap("A1", stock=10, price=100.0)]
         result = _persist_snapshots("seller-1", "conn-1", SourceType.MARKETPLACE_API, snaps)
 
-        assert result == 0  # ничего не вставлено
-        # insert не должен быть вызван (rows пустой)
+        assert result == 0
         mock_sb.table.return_value.insert.assert_not_called()
 
     def test_stock_changed_inserted(self, monkeypatch):
-        """Если stock изменился — snapshot записывается."""
         mock_sb = self._setup_mock([])
 
         def fake_fetch_all(query):
@@ -129,7 +118,6 @@ class TestPersistSnapshotsDedup:
         monkeypatch.setattr("app.main.fetch_all", fake_fetch_all)
         monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
 
-        # Stock изменился с 10 на 8
         snaps = [_mk_snap("A1", stock=8, price=100.0)]
         result = _persist_snapshots("seller-1", "conn-1", SourceType.MARKETPLACE_API, snaps)
 
@@ -137,7 +125,6 @@ class TestPersistSnapshotsDedup:
         mock_sb.table.return_value.insert.assert_called_once()
 
     def test_price_changed_inserted(self, monkeypatch):
-        """Если цена изменилась — snapshot записывается."""
         mock_sb = self._setup_mock([])
 
         def fake_fetch_all(query):
@@ -156,10 +143,8 @@ class TestPersistSnapshotsDedup:
         mock_sb.table.return_value.insert.assert_called_once()
 
     def test_no_previous_snapshot_inserted(self, monkeypatch):
-        """Если для SKU нет предыдущего snapshot'а — записываем (первый раз)."""
         mock_sb = self._setup_mock([])
 
-        # fetch_all возвращает пустой список — никаких предыдущих snapshot'ов
         monkeypatch.setattr("app.main.fetch_all", lambda q: [])
         monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
 
@@ -170,7 +155,6 @@ class TestPersistSnapshotsDedup:
         mock_sb.table.return_value.insert.assert_called_once()
 
     def test_tiny_price_difference_treated_as_same(self, monkeypatch):
-        """Разница в цене <0.01 считается отсутствием изменения (floating point)."""
         mock_sb = self._setup_mock([])
 
         def fake_fetch_all(query):
@@ -185,15 +169,13 @@ class TestPersistSnapshotsDedup:
         snaps = [_mk_snap("A1", stock=10, price=100.008)]
         result = _persist_snapshots("seller-1", "conn-1", SourceType.MARKETPLACE_API, snaps)
 
-        assert result == 0  # пропустили — разница 0.003 < 0.01
+        assert result == 0
 
     def test_unmapped_skus_skipped_safely(self, monkeypatch):
-        """Если SKU отсутствует в sku_to_pid (например, лимит URL) — пропускаем без падения."""
         mock_sb = MagicMock()
         mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
-        # _ensure_products возвращает маппинг только для A1, не для B2
         mock_sb.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = MagicMock(
-            data=[{"product_id": "pid-A", "sku": "A1"}]  # B2 отсутствует
+            data=[{"product_id": "pid-A", "sku": "A1"}]
         )
         monkeypatch.setattr("app.main.fetch_all", lambda q: [])
         monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
@@ -201,5 +183,96 @@ class TestPersistSnapshotsDedup:
         snaps = [_mk_snap("A1"), _mk_snap("B2")]
         result = _persist_snapshots("seller-1", "conn-1", SourceType.MARKETPLACE_API, snaps)
 
-        # Только A1 записан
         assert result == 1
+
+
+# ============================================================================
+# БАГ 27: _cleanup_old_recalcs — TTL для finished tasks
+# ============================================================================
+
+
+class TestCleanupOldRecalcs:
+    """Защита от memory leak — старые finished задачи удаляются."""
+
+    def setup_method(self):
+        """Очищаем перед каждым тестом."""
+        _running_recalcs.clear()
+
+    def teardown_method(self):
+        _running_recalcs.clear()
+
+    def test_keeps_running_tasks(self):
+        """Running задачи никогда не удаляются, даже если давно начались."""
+        old_time = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        _running_recalcs["seller-running"] = {
+            "started_at": old_time,
+            "status": "running",
+            "finished_at": None,
+        }
+        _cleanup_old_recalcs()
+        assert "seller-running" in _running_recalcs
+
+    def test_keeps_recent_finished(self):
+        """Finished задачи моложе 24ч остаются."""
+        recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        _running_recalcs["seller-recent"] = {
+            "status": "done",
+            "finished_at": recent,
+        }
+        _cleanup_old_recalcs()
+        assert "seller-recent" in _running_recalcs
+
+    def test_removes_old_done(self):
+        """Done задачи старше 24ч удаляются."""
+        old = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        _running_recalcs["seller-old-done"] = {
+            "status": "done",
+            "finished_at": old,
+        }
+        _cleanup_old_recalcs()
+        assert "seller-old-done" not in _running_recalcs
+
+    def test_removes_old_error(self):
+        """Error задачи старше 24ч тоже удаляются."""
+        old = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+        _running_recalcs["seller-old-error"] = {
+            "status": "error",
+            "finished_at": old,
+            "error": "something failed",
+        }
+        _cleanup_old_recalcs()
+        assert "seller-old-error" not in _running_recalcs
+
+    def test_handles_malformed_finished_at(self):
+        """Поломанный timestamp — удаляем (нельзя оставлять навсегда)."""
+        _running_recalcs["seller-broken"] = {
+            "status": "done",
+            "finished_at": "not-a-date",
+        }
+        _cleanup_old_recalcs()
+        assert "seller-broken" not in _running_recalcs
+
+    def test_handles_missing_finished_at(self):
+        """Если finished_at отсутствует — не падаем, просто оставляем."""
+        _running_recalcs["seller-no-finished"] = {
+            "status": "done",
+            # нет finished_at
+        }
+        # Не должен упасть
+        _cleanup_old_recalcs()
+
+    def test_mixed_cleanup(self):
+        """Смешанные задачи — старые удалены, свежие остались."""
+        old = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        _running_recalcs["old-1"] = {"status": "done", "finished_at": old}
+        _running_recalcs["old-2"] = {"status": "error", "finished_at": old}
+        _running_recalcs["recent"] = {"status": "done", "finished_at": recent}
+        _running_recalcs["running"] = {"status": "running", "finished_at": None}
+
+        _cleanup_old_recalcs()
+
+        assert "old-1" not in _running_recalcs
+        assert "old-2" not in _running_recalcs
+        assert "recent" in _running_recalcs
+        assert "running" in _running_recalcs
