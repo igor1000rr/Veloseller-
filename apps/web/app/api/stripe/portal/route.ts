@@ -7,7 +7,10 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  * POST /api/stripe/portal — создаёт Stripe Billing Portal Session.
  *
  * БАГ 49 fix: rate limit.
+ * БАГ 29 fix: origin для return_url из whitelisted env, не из user-controlled headers.
  */
+const ALLOWED_ORIGINS = (process.env.APP_URL || "https://veloseller.ru").split(",").map(s => s.trim());
+
 export async function POST(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -22,7 +25,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Нет активной подписки" }, { status: 400 });
   }
 
-  const origin = req.headers.get("origin") || `https://${req.headers.get("host") || "veloseller.ru"}`;
+  const requestOrigin = req.headers.get("origin");
+  const origin = (requestOrigin && ALLOWED_ORIGINS.includes(requestOrigin))
+    ? requestOrigin
+    : ALLOWED_ORIGINS[0];
+
   const session = await getStripe().billingPortal.sessions.create({
     customer: seller.stripe_customer_id,
     return_url: `${origin}/billing`,
