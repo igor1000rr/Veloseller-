@@ -3,7 +3,7 @@
 Покрываем:
   - /health smoke
   - require_worker_secret (dev mode + production auth)
-  - /ingest/csv
+  - /ingest/csv (success, invalid CSV, БАГ 96 size limit, БАГ 97 UUID validation)
   - /ingest/google-sheet/{id} (404, 400, success)
   - /ingest/ozon, /ingest/wb, /ingest/feed — с mock-ами
   - /jobs/recalc/{seller_id} (синхронный ?sync=true и async режимы), /jobs/recalc-all, /jobs/recalc/{id}/status
@@ -25,8 +25,9 @@ from app.schemas import SnapshotInput
 
 client = TestClient(app)
 
-# Валидный UUID для тестов (тестируем UUID-валидацию seller_id в /telegram/webhook)
+# Валидный UUID для тестов (БАГ 97 — теперь /ingest/csv требует UUID)
 VALID_UUID = "e113ebfb-3409-4cca-b0ab-0a7d965f4cba"
+SECOND_UUID = "11111111-2222-3333-4444-555555555555"
 
 
 class TestHealth:
@@ -74,7 +75,7 @@ class TestIngestCsv:
         with patch("app.main.get_supabase", return_value=mock_sb), \
              patch("app.main.fetch_all", return_value=[]):
             r = client.post(
-                "/ingest/csv?seller_id=s-1",
+                f"/ingest/csv?seller_id={VALID_UUID}",
                 files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
             )
         assert r.status_code == 200
@@ -84,11 +85,90 @@ class TestIngestCsv:
     def test_invalid_csv_returns_400(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         r = client.post(
-            "/ingest/csv?seller_id=s-1",
+            f"/ingest/csv?seller_id={VALID_UUID}",
             files={"file": ("test.csv", b"bad,headers\nnope,nope\n", "text/csv")},
         )
         assert r.status_code == 400
         assert "CSV parse error" in r.json()["detail"]
+
+
+class TestIngestCsvValidation:
+    """БАГ 96 + 97: UUID validation + размер файла."""
+
+    def test_rejects_non_uuid_seller_id(self, monkeypatch):
+        """БАГ 97: seller_id не-UUID → 400 БЕЗ обращения к БД."""
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = MagicMock()
+        with patch("app.main.get_supabase", return_value=mock_sb):
+            r = client.post(
+                "/ingest/csv?seller_id=not-a-uuid",
+                files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
+            )
+        assert r.status_code == 400
+        assert "UUID" in r.json()["detail"]
+        # DB calls не должны были произойти
+        mock_sb.table.assert_not_called()
+
+    def test_rejects_sql_injection_in_seller_id(self, monkeypatch):
+        """БАГ 97: SQL injection в seller_id отрезается на validation."""
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = MagicMock()
+        with patch("app.main.get_supabase", return_value=mock_sb):
+            r = client.post(
+                "/ingest/csv?seller_id='; DROP TABLE sellers;--",
+                files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
+            )
+        assert r.status_code == 400
+        mock_sb.table.assert_not_called()
+
+    def test_rejects_empty_seller_id(self, monkeypatch):
+        """БАГ 97: пустой seller_id → 400 или 422 (FastAPI required)."""
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        r = client.post(
+            "/ingest/csv?seller_id=",
+            files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
+        )
+        # FastAPI: 422 для empty required query, или 400 от наш validator
+        assert r.status_code in (400, 422)
+
+    def test_rejects_oversized_file_by_content_length(self, monkeypatch):
+        """БАГ 96: declared Content-Length > MAX → 413 БЕЗ load в память.
+
+        Проверяем что endpoint реагирует на size declared.
+        """
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+
+        # Создаём файл ~21MB (превышает 20MB лимит)
+        oversized_content = b"sku,stock_quantity,price\n" + b"A1,10,100\n" * 2_000_000
+        # Проверяем что точно > 20MB
+        assert len(oversized_content) > 20 * 1024 * 1024
+
+        r = client.post(
+            f"/ingest/csv?seller_id={VALID_UUID}",
+            files={"file": ("big.csv", oversized_content, "text/csv")},
+        )
+        # 413 Payload Too Large
+        assert r.status_code == 413
+        assert "слишком" in r.json()["detail"].lower() or "max" in r.json()["detail"].lower()
+
+    def test_accepts_normal_size_file(self, monkeypatch):
+        """Sanity: файл меньше лимита проходит размер-проверку."""
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = MagicMock()
+        mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
+        mock_sb.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = MagicMock(
+            data=[{"product_id": "pid-1", "sku": "A1"}]
+        )
+        mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock()
+        # Маленький валидный файл — должен пройти размер-проверку и парсинг
+        small_content = b"sku,stock_quantity,price\nA1,10,100\n"
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.main.fetch_all", return_value=[]):
+            r = client.post(
+                f"/ingest/csv?seller_id={VALID_UUID}",
+                files={"file": ("small.csv", small_content, "text/csv")},
+            )
+        assert r.status_code == 200
 
 
 def _mock_supabase_for_connection(connection_data: dict | None) -> MagicMock:
