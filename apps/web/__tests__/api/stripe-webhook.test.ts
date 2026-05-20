@@ -6,6 +6,11 @@ const updateChainMock = vi.fn();
 const fromMock = vi.fn();
 const eqMock = vi.fn();
 
+// Для select(...).eq(...).maybeSingle() chain (БАГ 62)
+const selectMock = vi.fn();
+const selectEqMock = vi.fn();
+const maybeSingleMock = vi.fn();
+
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     webhooks: { constructEvent: constructEventMock },
@@ -23,9 +28,18 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_URL = "http://localhost";
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service-key";
   process.env.STRIPE_WEBHOOK_SECRET = "whsec_test";
+
+  // Default: select().eq().maybeSingle() возвращает null (нет seller в БД)
+  maybeSingleMock.mockResolvedValue({ data: null, error: null });
+  selectEqMock.mockReturnValue({ maybeSingle: maybeSingleMock });
+  selectMock.mockReturnValue({ eq: selectEqMock });
+
   eqMock.mockResolvedValue({ data: null, error: null });
   updateChainMock.mockReturnValue({ eq: eqMock });
-  fromMock.mockReturnValue({ update: updateChainMock });
+  fromMock.mockReturnValue({
+    update: updateChainMock,
+    select: selectMock,
+  });
 });
 
 async function callWebhook(body: string, sig: string | null) {
@@ -87,7 +101,9 @@ describe("POST /api/stripe/webhook", () => {
     expect(updateChainMock.mock.calls[0][0].plan).toBe("pro");
   });
 
-  it("subscription.deleted — на trial, обнуляет sub_id", async () => {
+  it("subscription.deleted — на trial, обнуляет sub_id (нет активной в БД)", async () => {
+    // Имитируем что в БД ничего нет (либо это та же sub_id, либо null)
+    maybeSingleMock.mockResolvedValue({ data: null, error: null });
     constructEventMock.mockReturnValue({
       type: "customer.subscription.deleted",
       data: { object: { id: "sub_789", metadata: { seller_id: "seller-3" } } },
@@ -96,6 +112,35 @@ describe("POST /api/stripe/webhook", () => {
     expect(updateChainMock.mock.calls[0][0]).toEqual({
       plan: "trial", subscription_status: "canceled", stripe_subscription_id: null,
     });
+  });
+
+  it("subscription.deleted — обновляет если sub.id совпадает с текущим в БД", async () => {
+    // БАГ 62: проверяем что deleted ОБНОВЛЯЕТ если та же подписка
+    maybeSingleMock.mockResolvedValue({
+      data: { stripe_subscription_id: "sub_789" }, error: null,
+    });
+    constructEventMock.mockReturnValue({
+      type: "customer.subscription.deleted",
+      data: { object: { id: "sub_789", metadata: { seller_id: "seller-3" } } },
+    });
+    await callWebhook("{}", "sig");
+    expect(updateChainMock.mock.calls[0][0]).toEqual({
+      plan: "trial", subscription_status: "canceled", stripe_subscription_id: null,
+    });
+  });
+
+  it("БАГ 62: subscription.deleted IGNORED если seller имеет другую активную подписку", async () => {
+    // Out-of-order: пришёл deleted для старой подписки, у seller'а уже новая
+    maybeSingleMock.mockResolvedValue({
+      data: { stripe_subscription_id: "sub_NEW" }, error: null,
+    });
+    constructEventMock.mockReturnValue({
+      type: "customer.subscription.deleted",
+      data: { object: { id: "sub_OLD", metadata: { seller_id: "seller-3" } } },
+    });
+    await callWebhook("{}", "sig");
+    // update НЕ должен быть вызван — старый deleted игнорится
+    expect(updateChainMock).not.toHaveBeenCalled();
   });
 
   it("deleted без seller_id — не обновляет", async () => {
