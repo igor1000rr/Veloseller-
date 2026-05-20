@@ -30,13 +30,16 @@ describe("POST /api/alerts/[id]/ack", () => {
     expect(res.status).toBe(401);
   });
 
-  it("при ошибке БД — 500", async () => {
+  it("при ошибке БД — 500 без разглашения SQL detail (БАГ 78)", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     updateChainMock.mockResolvedValue({ error: { message: "permission denied" }, count: null });
     const { POST } = await import("@/app/api/alerts/[id]/ack/route");
     const res = await POST(new Request("http://x"), { params: Promise.resolve({ id: "a1" }) });
     expect(res.status).toBe(500);
-    expect((await res.json()).error).toBe("permission denied");
+    const body = await res.json();
+    // БАГ 78: error.message НЕ должен утечь наружу — возвращаем общий текст.
+    expect(body.error).not.toContain("permission denied");
+    expect(body.error).toBeDefined();
   });
 
   it("если alert не найден — 404", async () => {

@@ -118,13 +118,16 @@ describe("POST /api/connections", () => {
     expect(capturedInsert.seller_id).toBe("real-user");
   });
 
-  it("при ошибке БД — 400", async () => {
+  it("при ошибке БД — 400 без разглашения SQL detail (БАГ 78)", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     insertChainMock.mockResolvedValue({ data: null, error: { message: "rls fail" } });
     const { POST } = await import("@/app/api/connections/route");
     const res = await POST(req({ source: "csv_upload", config: {} }) as any);
     expect(res.status).toBe(400);
-    expect((await res.json()).error).toBe("rls fail");
+    const body = await res.json();
+    // БАГ 78: error.message НЕ должен утечь наружу
+    expect(body.error).not.toContain("rls");
+    expect(body.error).toBeDefined();
   });
 
   it("лимит connections превышен — 400", async () => {
