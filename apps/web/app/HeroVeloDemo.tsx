@@ -104,7 +104,7 @@ export default function HeroVeloDemo() {
 
         <div className="mt-5 md:mt-6 grid grid-cols-2 gap-3">
           <div className="rounded-lg border border-line bg-bg-soft p-3 md:p-4">
-            <div className="font-mono text-[9px] md:text-[10px] uppercase tracking-widest text-ink-hush">обычная velocity</div>
+            <div className="font-mono text-[9px] md:text-[10px] uppercase tracking-widest text-ink-hush">обычная скорость продаж</div>
             <div className="mt-1 font-mono text-2xl md:text-3xl text-ink-hush tabular line-through decoration-orange decoration-2">
               {naive.toFixed(2)}
             </div>
@@ -120,8 +120,8 @@ export default function HeroVeloDemo() {
         </div>
 
         <p className="mt-4 md:mt-5 text-xs md:text-[12.5px] leading-relaxed text-ink-muted">
-          Поделить продажи на 30 — неправильно: <span className="text-orange font-semibold">{oos} дней</span> товара
-          просто не было на складе. TVelo считает только <span className="text-lime-deep font-semibold">дни доступности</span>.
+          Делить продажи на 30 — неверно: <span className="text-orange font-semibold">{oos} дней</span> товара
+          не было на складе. TVelo считает только <span className="text-lime-deep font-semibold">дни в наличии</span>.
         </p>
       </div>
     </div>
