@@ -90,6 +90,9 @@ _running_recalcs: dict[str, dict] = {}
 _RECALC_STATE_TTL = timedelta(hours=24)
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
+# БАГ 96: лимит размера CSV upload — 50K SKU × 200 байт = 10MB. Защита от OOM-атаки.
+_CSV_MAX_SIZE_BYTES = 20 * 1024 * 1024  # 20 МБ запас
+
 
 def _cleanup_old_recalcs() -> None:
     cutoff = datetime.now(timezone.utc) - _RECALC_STATE_TTL
@@ -314,8 +317,32 @@ def _run_feed_sync_bg(connection_id: str, seller_id: str, feed_url: str) -> None
 
 @app.post("/ingest/csv", dependencies=[Depends(require_worker_secret)])
 async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
-    """CSV ingest остаётся синхронным — файл в памяти, парсится быстро."""
+    """CSV ingest — sync.
+
+    БАГ 96: проверяем размер файла ДО чтения в память (OOM защита).
+    БАГ 97: валидируем seller_id формат (UUID) — иначе FK constraint violation
+            возвращает 500 вместо понятного 400 пользователю.
+    """
+    if not _UUID_RE.match(seller_id or ""):
+        raise HTTPException(400, "seller_id должен быть UUID")
+
+    # Проверяем размер ДО загрузки в память.
+    # UploadFile.size доступен в FastAPI ≥0.66 (берём с Content-Length).
+    declared_size = getattr(file, "size", None)
+    if declared_size is not None and declared_size > _CSV_MAX_SIZE_BYTES:
+        raise HTTPException(
+            413,
+            f"Файл слишком большой: {declared_size} байт (максимум {_CSV_MAX_SIZE_BYTES})",
+        )
+
     content = await file.read()
+    # Дополнительная проверка после чтения (Content-Length может врать).
+    if len(content) > _CSV_MAX_SIZE_BYTES:
+        raise HTTPException(
+            413,
+            f"Файл слишком большой: {len(content)} байт (максимум {_CSV_MAX_SIZE_BYTES})",
+        )
+
     try:
         snapshots = csv_upload.parse_csv(content)
     except Exception as e:
