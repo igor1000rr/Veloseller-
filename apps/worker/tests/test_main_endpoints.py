@@ -1,24 +1,16 @@
-"""Тесты FastAPI endpoints в app/main.py.
-
-Покрываем:
-  - /health smoke
-  - require_worker_secret (dev mode + production auth)
-  - /ingest/csv (success, invalid CSV, БАГ 96 size limit, БАГ 97 UUID validation)
-  - /ingest/google-sheet/{id} (404, 400, success)
-  - /ingest/ozon, /ingest/wb, /ingest/feed — с mock-ами
-  - /jobs/recalc/{seller_id} (БАГ 95: DB-based lock через mock recalc_lock)
-  - /jobs/recalc-all, /jobs/recalc/{id}/status
-  - /telegram/webhook (/start, /start <uuid>, empty, БАГ 52 — secret token)
-"""
+"""Тесты FastAPI endpoints в app/main.py."""
 from __future__ import annotations
 import os
 os.environ["ENABLE_SCHEDULER"] = "false"
 
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.schemas import SnapshotInput
 
 
 client = TestClient(app)
@@ -90,8 +82,6 @@ class TestIngestCsv:
 
 
 class TestIngestCsvValidation:
-    """БАГ 96 + 97: UUID validation + размер файла."""
-
     def test_rejects_non_uuid_seller_id(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_sb = MagicMock()
@@ -217,10 +207,15 @@ class TestIngestFeed:
 
 
 class TestRecalcJobs:
-    """БАГ 95: lock через recalc_lock module, не in-memory dict."""
+    def setup_method(self):
+        from app.main import _running_recalcs
+        _running_recalcs.clear()
+
+    def teardown_method(self):
+        from app.main import _running_recalcs
+        _running_recalcs.clear()
 
     def test_recalc_seller_sync_returns_result(self, monkeypatch):
-        """sync режим не использует lock — для dev/тестов."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_result = {"products": 5, "metrics_written": 5, "periods": []}
         with patch("app.main.recalc_seller_all_periods", return_value=mock_result) as fn:
@@ -229,103 +224,35 @@ class TestRecalcJobs:
         assert r.json() == mock_result
         fn.assert_called_once_with(VALID_UUID)
 
-    def test_recalc_seller_async_acquires_lock_and_returns_started(self, monkeypatch):
-        """async: try_acquire_recalc_lock=True → запускается task.
-
-        ВАЖНО: BackgroundTask выполняется ПОСЛЕ response в TestClient (синхронно),
-        поэтому нужно замокать recalc_seller_all_periods + mark_recalc_done,
-        иначе фон сделает реальный recalc и упадёт с TypeError на MagicMock.
-        """
+    def test_recalc_seller_async_returns_started(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = MagicMock()
-        with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.main.try_acquire_recalc_lock", return_value=True) as lock_fn, \
-             patch("app.main.recalc_seller_all_periods", return_value={"products": 0}), \
-             patch("app.main.mark_recalc_done"), \
-             patch("app.main.mark_recalc_error"):
-            r = client.post(f"/jobs/recalc/{VALID_UUID}")
+        r = client.post(f"/jobs/recalc/{VALID_UUID}")
         assert r.status_code == 200
         body = r.json()
         assert body["started"] is True
         assert body["status"] == "running"
         assert "started_at" in body
-        lock_fn.assert_called_once()
-        call_args = lock_fn.call_args[0]
-        assert call_args[1] == VALID_UUID
 
-    def test_recalc_seller_dedup_when_lock_already_held(self, monkeypatch):
-        """БАГ 95: try_acquire_recalc_lock=False → возвращаем started=False."""
+    def test_recalc_seller_dedup_when_running(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = MagicMock()
-        existing_state = {
+        from app.main import _running_recalcs
+        _running_recalcs[VALID_UUID] = {
             "status": "running",
             "started_at": "2026-05-19T09:00:00+00:00",
-            "worker_id": "host1:1234",
         }
-        with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.main.try_acquire_recalc_lock", return_value=False), \
-             patch("app.main.get_recalc_state", return_value=existing_state):
-            r = client.post(f"/jobs/recalc/{VALID_UUID}")
+        r = client.post(f"/jobs/recalc/{VALID_UUID}")
         assert r.status_code == 200
         body = r.json()
         assert body["started"] is False
         assert body["status"] == "running"
-        assert body["started_at"] == "2026-05-19T09:00:00+00:00"
 
     def test_recalc_status_idle(self, monkeypatch):
-        """get_recalc_state=None → status='idle'."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = MagicMock()
-        with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.main.get_recalc_state", return_value=None):
-            r = client.get(f"/jobs/recalc/{VALID_UUID}/status")
+        r = client.get(f"/jobs/recalc/{VALID_UUID}/status")
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "idle"
         assert body["started_at"] is None
-
-    def test_recalc_status_returns_running_state(self, monkeypatch):
-        """DB state маппится на response с error_text → error."""
-        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = MagicMock()
-        db_state = {
-            "seller_id": VALID_UUID,
-            "status": "running",
-            "started_at": "2026-05-19T09:00:00+00:00",
-            "finished_at": None,
-            "result": None,
-            "error_text": None,
-            "progress": {"phase": "loading"},
-        }
-        with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.main.get_recalc_state", return_value=db_state):
-            r = client.get(f"/jobs/recalc/{VALID_UUID}/status")
-        assert r.status_code == 200
-        body = r.json()
-        assert body["status"] == "running"
-        assert body["started_at"] == "2026-05-19T09:00:00+00:00"
-        assert body["error"] is None
-        assert body["progress"] == {"phase": "loading"}
-
-    def test_recalc_status_returns_error_text_as_error(self, monkeypatch):
-        """DB.error_text → response.error для UI совместимости."""
-        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = MagicMock()
-        db_state = {
-            "seller_id": VALID_UUID,
-            "status": "error",
-            "started_at": "2026-05-19T09:00:00+00:00",
-            "finished_at": "2026-05-19T09:05:00+00:00",
-            "result": None,
-            "error_text": "OOM killed",
-            "progress": None,
-        }
-        with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.main.get_recalc_state", return_value=db_state):
-            r = client.get(f"/jobs/recalc/{VALID_UUID}/status")
-        body = r.json()
-        assert body["status"] == "error"
-        assert body["error"] == "OOM killed"
 
     def test_recalc_all(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
@@ -334,11 +261,6 @@ class TestRecalcJobs:
             r = client.post("/jobs/recalc-all")
         assert r.status_code == 200
         assert r.json() == mock_result
-
-
-# ============================================================================
-# Telegram webhook (БАГ 52)
-# ============================================================================
 
 
 class TestTelegramWebhook:

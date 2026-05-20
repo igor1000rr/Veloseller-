@@ -12,11 +12,10 @@
 БАГ 11 (здесь): lost_revenue исключает MISSING_DATA.
 БАГ 32 (здесь): recalc_all_sellers через fetch_all.
 БАГ 33 (здесь): _upsert_or_skip_alert ловит race condition.
+БАГ 50 (здесь): recalc_all_sellers пропускает sellers с активным manual recalc.
 БАГ 92 (здесь): batched fetch snapshots.
 БАГ 93 (здесь): try/except на per-SKU loop.
 БАГ 94 (здесь): детальное логирование failed_skus.
-БАГ 95 (здесь): recalc_all_sellers использует DB lock через recalc_lock module
-  (раньше in-memory _running_recalcs — per-worker, не multi-worker safe).
 """
 from __future__ import annotations
 
@@ -51,13 +50,6 @@ from app.engine.store import (
     frozen_inventory_value,
     total_inventory_value,
     warehouse_health_score,
-)
-# БАГ 95: import на уровне модуля (не внутри функции) — иначе monkeypatch в тестах не работает.
-from app.recalc_lock import (
-    get_recalc_state,
-    mark_recalc_done,
-    mark_recalc_error,
-    try_acquire_recalc_lock,
 )
 from app.schemas import EventType, TVeloMetric
 
@@ -741,43 +733,32 @@ def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -
 
 
 def recalc_all_sellers() -> dict:
-    """БАГ 32: пагинация. БАГ 95: DB-based lock (раньше in-memory dict).
-
-    Two-phase check:
-      1. get_recalc_state — быстрый SELECT; если status='running', skip
-      2. try_acquire_recalc_lock — atomic UPSERT; race-safe второй guard
-      3. recalc + mark_recalc_done/mark_recalc_error
-    """
+    """БАГ 32: пагинация. БАГ 50: пропускаем sellers с активным manual recalc."""
     sb = get_supabase()
     sellers = fetch_all(sb.table("sellers").select("id"))
     summary = {"sellers": 0, "skipped_concurrent": 0, "metrics_written": 0,
                "alerts_written": 0, "store_metrics_written": 0, "failed_skus": 0}
 
+    try:
+        from app.main import _running_recalcs
+    except ImportError:
+        _running_recalcs = {}
+
     for s in sellers:
         seller_id = s["id"]
-
-        state = get_recalc_state(sb, seller_id)
+        state = _running_recalcs.get(seller_id) if _running_recalcs else None
         if state and state.get("status") == "running":
             summary["skipped_concurrent"] += 1
-            logger.info("recalc-all: skip seller (recalc already running)",
+            logger.info("recalc-all: skip seller (manual recalc running)",
                         extra={"seller_id": seller_id})
             continue
-
-        if not try_acquire_recalc_lock(sb, seller_id):
-            summary["skipped_concurrent"] += 1
-            logger.info("recalc-all: skip seller (lock race)",
-                        extra={"seller_id": seller_id})
-            continue
-
         try:
             r = recalc_seller_all_periods(seller_id)
-            mark_recalc_done(sb, seller_id, r)
             summary["sellers"] += 1
             summary["metrics_written"] += r.get("metrics_written", 0)
             summary["alerts_written"] += r.get("alerts_written", 0)
             summary["store_metrics_written"] += r.get("store_metrics_written", 0)
             summary["failed_skus"] += r.get("failed_skus", 0)
         except Exception as e:
-            mark_recalc_error(sb, seller_id, str(e))
             logger.exception("recalc failed for seller %s: %s", seller_id, e)
     return summary
