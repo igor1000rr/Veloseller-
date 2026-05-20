@@ -9,13 +9,12 @@
 БАГ 5 (здесь): hysteresis в _write_alerts.
 БАГ 9 (здесь): median_30d_velocity отдельной колонкой, используется в SkuHealthInput.
 
-БАГ 10 (здесь): pre-period дельты НОРМАЛИЗУЮТСЯ на количество дней
-между snapshot'ами.
-
+БАГ 10 (здесь): pre-period дельты НОРМАЛИЗУЮТСЯ на количество дней между snapshot'ами.
 БАГ 11 (здесь): lost_revenue prices_during_stockout явно исключает MISSING_DATA.
-
 БАГ 32 (здесь): recalc_all_sellers использует fetch_all (раньше обрезался на 1000).
 БАГ 33 (здесь): _upsert_or_skip_alert ловит race condition через unique index.
+БАГ 50 (здесь): recalc_all_sellers пропускает sellers с активным manual recalc
+  (избегаем deadlock'ов в inventory_events delete+insert при concurrent запуске).
 
 underestimated_sku требует ≥2 stockout_days.
 """
@@ -297,13 +296,7 @@ def _write_changelog(sb, seller_id: str, product_id: str, aggregates: list[Daily
 
 
 def _upsert_or_skip_alert(sb, seller_id: str, product_id: str, kind: str, message: str, payload: dict) -> bool:
-    """Создаёт новый alert или обновляет существующий unread alert того же kind.
-
-    БАГ 33 fix: ловим race condition через partial unique index alerts_unique_unread.
-    Между нашим SELECT и INSERT другой процесс мог вставить такой же alert.
-    Unique index на (seller_id, product_id, kind) WHERE acknowledged_at IS NULL не позволит дубль.
-    Если поймали ошибку — это значит другой процесс уже вставил, делаем UPDATE на найденную запись.
-    """
+    """БАГ 33 fix: race condition handling через partial unique index alerts_unique_unread."""
     existing = sb.table("alerts").select("id").eq("seller_id", seller_id).eq(
         "product_id", product_id
     ).eq("kind", kind).is_("acknowledged_at", "null").limit(1).execute()
@@ -317,8 +310,6 @@ def _upsert_or_skip_alert(sb, seller_id: str, product_id: str, kind: str, messag
         }).execute()
         return True
     except Exception as e:
-        # БАГ 33: race condition — между SELECT и INSERT другой процесс вставил.
-        # Логируем и делаем повторный SELECT+UPDATE для актуализации message.
         err_str = str(e).lower()
         if "duplicate" in err_str or "unique" in err_str or "23505" in err_str:
             logger.info("alert race condition resolved via update",
@@ -648,18 +639,38 @@ def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -
 def recalc_all_sellers() -> dict:
     """Запускает recalc для всех sellers.
 
-    БАГ 32 fix: пагинация через fetch_all — раньше при ≥1000 sellers обрезался.
+    БАГ 32 fix: пагинация через fetch_all.
+    БАГ 50 fix: пропускаем sellers с активным manual recalc'ом (status='running'
+    в _running_recalcs из main.py). Иначе cron параллельно с manual recalc создавал
+    race condition в inventory_events.delete()+insert() для одного product_id,
+    что приводило к deadlock'ам PostgreSQL и/или временному отсутствию events.
     """
     sb = get_supabase()
     sellers = fetch_all(sb.table("sellers").select("id"))
-    summary = {"sellers": 0, "metrics_written": 0, "alerts_written": 0, "store_metrics_written": 0}
+    summary = {"sellers": 0, "skipped_concurrent": 0, "metrics_written": 0,
+               "alerts_written": 0, "store_metrics_written": 0}
+
+    # БАГ 50: проверяем _running_recalcs (импорт здесь чтобы избежать circular import)
+    try:
+        from app.main import _running_recalcs
+    except ImportError:
+        _running_recalcs = {}
+
     for s in sellers:
+        seller_id = s["id"]
+        # БАГ 50: пропускаем если manual recalc уже идёт
+        state = _running_recalcs.get(seller_id) if _running_recalcs else None
+        if state and state.get("status") == "running":
+            summary["skipped_concurrent"] += 1
+            logger.info("recalc-all: skip seller (manual recalc running)",
+                        extra={"seller_id": seller_id})
+            continue
         try:
-            r = recalc_seller_all_periods(s["id"])
+            r = recalc_seller_all_periods(seller_id)
             summary["sellers"] += 1
             summary["metrics_written"] += r.get("metrics_written", 0)
             summary["alerts_written"] += r.get("alerts_written", 0)
             summary["store_metrics_written"] += r.get("store_metrics_written", 0)
         except Exception as e:
-            logger.exception("recalc failed for seller %s: %s", s["id"], e)
+            logger.exception("recalc failed for seller %s: %s", seller_id, e)
     return summary
