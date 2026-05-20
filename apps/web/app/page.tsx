@@ -151,8 +151,7 @@ export default async function LandingPage() {
               </h2>
             </div>
             <p className="text-ink-muted text-sm md:text-[15px] max-w-md">
-              Read-only доступ через API маркетплейсов, CSV или Google Sheets.{" "}
-              <span className="text-orange font-medium">Shopify и Amazon — скоро.</span>
+              Read-only доступ через API маркетплейсов, CSV или Google Sheets.
             </p>
           </div>
         </div>
@@ -520,7 +519,7 @@ function BentoCard({ idx, icon, title, text, accent }: {
   );
 }
 
-function PricingCard({ name, price, skus, highlight, perks, isAuthed }: typeof plans[number] & { isAuthed: boolean }) {
+function PricingCard({ name, price, highlight, perks, isAuthed }: typeof plans[number] & { isAuthed: boolean }) {
   return (
     <div className={`relative rounded-2xl p-6 md:p-8 transition ${
       highlight
@@ -538,7 +537,6 @@ function PricingCard({ name, price, skus, highlight, perks, isAuthed }: typeof p
         <span className="text-ink-muted text-2xl ml-1">₽</span>
         <span className="text-ink-muted">/мес</span>
       </div>
-      <div className="mt-1 font-mono text-xs text-ink-hush">до {skus} SKU</div>
       <ul className="mt-6 md:mt-7 space-y-3">
         {perks.map((perk) => (
           <li key={perk} className="flex items-start gap-2.5 text-sm md:text-[15px] text-ink-soft">
@@ -616,7 +614,7 @@ const testimonials = [
   { quote: "Telegram-уведомления — главная фишка. Не сижу в дашборде. Приходит сигнал и пошёл, заказал, забыл.", name: "Дмитрий Беляев", role: "Multi-marketplace, 800 SKU", initials: "ДБ", avatarBg: "#ea580c", avatarColor: "#fff" },
 ];
 const plans = [
-  { name: "Старт", price: 1900,  skus: "500",   highlight: false, perks: ["1 магазин"] },
-  { name: "Рост",  price: 6900,  skus: "4 000", highlight: true,  perks: ["3 магазина"] },
-  { name: "Про",   price: 19900, skus: "10 000",highlight: false, perks: ["Безлимит магазинов"] },
+  { name: "Старт", price: 1900,  highlight: false, perks: ["1 магазин"] },
+  { name: "Рост",  price: 6900,  highlight: true,  perks: ["3 магазина"] },
+  { name: "Про",   price: 19900, highlight: false, perks: ["Безлимит магазинов"] },
 ];
