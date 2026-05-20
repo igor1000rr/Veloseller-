@@ -13,15 +13,13 @@
 БАГ 11 (здесь): lost_revenue prices_during_stockout явно исключает MISSING_DATA.
 БАГ 32 (здесь): recalc_all_sellers использует fetch_all (раньше обрезался на 1000).
 БАГ 33 (здесь): _upsert_or_skip_alert ловит race condition через unique index.
-БАГ 50 (здесь): recalc_all_sellers пропускает sellers с активным manual recalc
-  (избегаем deadlock'ов в inventory_events delete+insert при concurrent запуске).
+БАГ 95 (здесь): recalc_all_sellers использует DB lock через recalc_lock module
+  (раньше был in-memory _running_recalcs — per-worker, не multi-worker safe).
 
 БАГ 92 (здесь): batched fetch snapshots для ВСЕХ продуктов одним запросом.
 БАГ 93 (здесь): try/except на per-SKU loop — если один SKU падает, не теряем весь recalc.
 
-БАГ 94 (здесь): детальное логирование failed_skus с exception text. Без этого
-  невозможно найти причину фейлов в проде. Также пишем первые 3 фейла полностью
-  с product_id + error type + error msg в WARNING лог (видны в journalctl без grep -A).
+БАГ 94 (здесь): детальное логирование failed_skus с exception text.
 """
 from __future__ import annotations
 
@@ -64,8 +62,7 @@ logger = logging.getLogger("veloseller.recalc")
 # БАГ 92: размер батча для .in_() — PostgREST безопасно держит ~200 ID в URL.
 _PRODUCT_IN_BATCH = 200
 
-# БАГ 94: первые N фейлов в одном recalc логируем как WARNING с полной инфой,
-# остальные — DEBUG (чтобы не флудить логи при массовом сбое).
+# БАГ 94: первые N фейлов в одном recalc логируем как WARNING с полной инфой.
 _VERBOSE_FAILURES_PER_RECALC = 3
 
 
@@ -116,11 +113,7 @@ def _log_failed_sku(
     exc: BaseException,
     verbose_remaining: int,
 ) -> None:
-    """БАГ 94: логируем failed SKU так чтобы было ВИДНО в journalctl.
-
-    Первые N фейлов в одном recalc — как WARNING с msg = str(exc).
-    Остальные — INFO (короткий маркер), чтобы не флудить.
-    """
+    """БАГ 94: логируем failed SKU так чтобы было ВИДНО в journalctl."""
     err_type = type(exc).__name__
     err_msg = str(exc)[:300]
     if verbose_remaining > 0:
@@ -464,7 +457,6 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
     total_skus = len(products)
     history_start = (period_start - timedelta(days=30)).isoformat()
 
-    # БАГ 92: один batched fetch.
     _bump_progress(progress, phase="fetching_snapshots", total=total_skus, processed=0)
     all_pids = [p["product_id"] for p in products]
     snapshots_by_pid = _fetch_snapshots_batched(sb, all_pids, history_start)
@@ -485,10 +477,8 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
     sku_data: list[dict] = []
     velocities_for_median: list[float] = []
 
-    # БАГ 94: счётчик verbose-логов в этом recalc (первые N — WARNING, остальные — INFO).
     verbose_failures_left = _VERBOSE_FAILURES_PER_RECALC
 
-    # БАГ 93: per-SKU try/except в Loop 1
     for idx, p in enumerate(products):
         pid = p["product_id"]
         try:
@@ -589,7 +579,6 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
 
     median_store_velocity = _median(velocities_for_median) if velocities_for_median else 0.0
 
-    # БАГ 94: Loop 2 verbose ограничение отдельно (даём шанс увидеть фейлы Loop 2 даже если Loop 1 не имел)
     verbose_failures_left_l2 = _VERBOSE_FAILURES_PER_RECALC
     loop2_failures = 0
 
@@ -772,32 +761,50 @@ def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -
 
 
 def recalc_all_sellers() -> dict:
-    """БАГ 32: пагинация. БАГ 50: пропускаем sellers с активным manual recalc."""
+    """БАГ 32: пагинация. БАГ 95: DB-based lock (раньше был in-memory dict — per-worker race).
+
+    Для каждого seller'а:
+      1. SELECT recalc_jobs — если status='running', skip (manual recalc идёт)
+      2. try_acquire_recalc_lock — atomic UPSERT; если race с manual recalc, skip
+      3. recalc_seller_all_periods + mark_recalc_done/mark_recalc_error
+    """
+    from app.recalc_lock import (
+        try_acquire_recalc_lock, mark_recalc_done, mark_recalc_error, get_recalc_state,
+    )
+
     sb = get_supabase()
     sellers = fetch_all(sb.table("sellers").select("id"))
     summary = {"sellers": 0, "skipped_concurrent": 0, "metrics_written": 0,
                "alerts_written": 0, "store_metrics_written": 0, "failed_skus": 0}
 
-    try:
-        from app.main import _running_recalcs
-    except ImportError:
-        _running_recalcs = {}
-
     for s in sellers:
         seller_id = s["id"]
-        state = _running_recalcs.get(seller_id) if _running_recalcs else None
+
+        # БАГ 95: сначала проверяем текущий status (быстрый path)
+        state = get_recalc_state(sb, seller_id)
         if state and state.get("status") == "running":
             summary["skipped_concurrent"] += 1
-            logger.info("recalc-all: skip seller (manual recalc running)",
+            logger.info("recalc-all: skip seller (recalc already running)",
                         extra={"seller_id": seller_id})
             continue
+
+        # Атомарный lock acquire (race-safe: если manual recalc взял lock после
+        # нашего SELECT, RPC вернёт False).
+        if not try_acquire_recalc_lock(sb, seller_id):
+            summary["skipped_concurrent"] += 1
+            logger.info("recalc-all: skip seller (lock race)",
+                        extra={"seller_id": seller_id})
+            continue
+
         try:
             r = recalc_seller_all_periods(seller_id)
+            mark_recalc_done(sb, seller_id, r)
             summary["sellers"] += 1
             summary["metrics_written"] += r.get("metrics_written", 0)
             summary["alerts_written"] += r.get("alerts_written", 0)
             summary["store_metrics_written"] += r.get("store_metrics_written", 0)
             summary["failed_skus"] += r.get("failed_skus", 0)
         except Exception as e:
+            mark_recalc_error(sb, seller_id, str(e))
             logger.exception("recalc failed for seller %s: %s", seller_id, e)
     return summary
