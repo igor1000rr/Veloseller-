@@ -4,15 +4,17 @@ import { Icons } from "../_components/Icons";
 
 export const dynamic = "force-dynamic";
 
+// Правки Игоря: тарифы в рублях, разделение только по количеству магазинов.
+// Весь функционал доступен всем тарифам — детали под карточками.
 const PLANS = [
-  { id: "trial",   name: "Trial",   price: "0",   limit: 50,    period: "30 дней бесплатно",
-    features: ["Все источники данных", "Полный TVelo", "Health score", "Email + Telegram уведомления"] },
-  { id: "starter", name: "Starter", price: "24",  limit: 500,   period: "$/мес",
-    features: ["Всё из Trial", "До 500 SKU", "Помесячная динамика", "Sparkline-тренды"] },
-  { id: "growth",  name: "Growth",  price: "89",  limit: 4000,  period: "$/мес",
-    features: ["Всё из Starter", "До 4000 SKU", "Price elasticity", "Underestimated SKU"] },
-  { id: "pro",     name: "Pro",     price: "299", limit: 10000, period: "$/мес",
-    features: ["Всё из Growth", "До 10000 SKU", "Приоритетная поддержка", "API доступ"] },
+  { id: "trial",   name: "Триал",  price: 0,     period: "30 дней бесплатно",
+    features: ["1 магазин", "Весь функционал бесплатно"] },
+  { id: "starter", name: "Старт",  price: 1900,  period: "₽/мес",
+    features: ["1 магазин"] },
+  { id: "growth",  name: "Рост",   price: 6900,  period: "₽/мес",
+    features: ["3 магазина"] },
+  { id: "pro",     name: "Про",    price: 19900, period: "₽/мес",
+    features: ["Безлимит магазинов"] },
 ];
 
 export default async function BillingPage() {
@@ -34,15 +36,15 @@ export default async function BillingPage() {
       <header>
         <div className="inline-flex items-center gap-2 mb-2">
           <span className="size-1 rounded-full bg-lime-deep" />
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Billing</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Тарифы</span>
         </div>
         <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">Тарифы</h1>
         <p className="mt-2 text-ink-muted text-sm">
-          Текущий план: <span className="font-medium text-lime-deep">{currentName}</span> · использовано <span className="font-medium text-ink tabular">{used}</span> SKU
+          Текущий план: <span className="font-medium text-lime-deep">{currentName}</span> · загружено <span className="font-medium text-ink tabular">{used}</span> SKU
         </p>
         {currentPlan === "trial" && seller?.trial_ends_at && (
           <p className="text-xs text-ink-hush mt-1 font-mono">
-            Trial действует до {new Date(seller.trial_ends_at).toLocaleDateString("ru-RU")}
+            Триал действует до {new Date(seller.trial_ends_at).toLocaleDateString("ru-RU")}
           </p>
         )}
       </header>
@@ -67,11 +69,12 @@ export default async function BillingPage() {
                   </span>
                 )}
               </div>
-              <div className="mt-3 flex items-baseline gap-1">
-                <span className="font-display text-3xl md:text-4xl tracking-tight font-medium tabular text-ink">${p.price}</span>
+              <div className="mt-3 flex items-baseline gap-1 flex-wrap">
+                <span className="font-display text-3xl md:text-4xl tracking-tight font-medium tabular text-ink">
+                  {p.price.toLocaleString("ru-RU")}
+                </span>
                 <span className="text-sm text-ink-muted">{p.period}</span>
               </div>
-              <div className="mt-1 font-mono text-xs text-ink-hush">до <span className="text-ink-soft font-semibold">{p.limit.toLocaleString("ru-RU")}</span> SKU</div>
 
               <ul className="mt-5 space-y-2 text-sm text-ink-soft">
                 {p.features.map((f, i) => (
@@ -97,9 +100,18 @@ export default async function BillingPage() {
         })}
       </div>
 
+      <p className="text-center font-mono text-xs text-ink-hush flex items-center justify-center flex-wrap gap-x-2 gap-y-1 px-4">
+        <span>Все тарифы включают весь функционал:</span>
+        <span>TVelo</span><span>·</span>
+        <span>Покрытие</span><span>·</span>
+        <span>Потерянная выручка</span><span>·</span>
+        <span>Планирование закупки</span><span>·</span>
+        <span>Email + Telegram</span>
+      </p>
+
       <div className="text-center space-y-2">
         {currentPlan !== "trial" && <ManageSubscriptionButton />}
-        <p className="font-mono text-[11px] text-ink-hush">Платежи через Stripe. Подписку можно отменить в любой момент.</p>
+        <p className="font-mono text-[11px] text-ink-hush">Подписку можно отменить в любой момент.</p>
       </div>
     </div>
   );
