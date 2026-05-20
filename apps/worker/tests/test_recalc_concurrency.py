@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 os.environ["ENABLE_SCHEDULER"] = "false"
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 class TestRecalcAllConcurrencyLock:

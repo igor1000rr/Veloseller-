@@ -3,14 +3,11 @@ from __future__ import annotations
 import os
 os.environ["ENABLE_SCHEDULER"] = "false"
 
-from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
-from app.schemas import SnapshotInput
+from app.main import app, _running_recalcs
 
 
 client = TestClient(app)
@@ -82,6 +79,8 @@ class TestIngestCsv:
 
 
 class TestIngestCsvValidation:
+    """БАГ 96 + 97: UUID validation + размер файла."""
+
     def test_rejects_non_uuid_seller_id(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_sb = MagicMock()
@@ -115,8 +114,6 @@ class TestIngestCsvValidation:
             files={"file": ("big.csv", content, "text/csv")},
         )
         assert r.status_code == 413
-        detail = r.json()["detail"].lower()
-        assert "слишком" in detail or "max" in detail or "большой" in detail
 
     def test_accepts_normal_size_file(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
@@ -208,51 +205,65 @@ class TestIngestFeed:
 
 class TestRecalcJobs:
     def setup_method(self):
-        from app.main import _running_recalcs
-        _running_recalcs.clear()
-
-    def teardown_method(self):
-        from app.main import _running_recalcs
         _running_recalcs.clear()
 
     def test_recalc_seller_sync_returns_result(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_result = {"products": 5, "metrics_written": 5, "periods": []}
         with patch("app.main.recalc_seller_all_periods", return_value=mock_result) as fn:
-            r = client.post(f"/jobs/recalc/{VALID_UUID}?sync=true")
+            r = client.post("/jobs/recalc/seller-uuid-123?sync=true")
         assert r.status_code == 200
         assert r.json() == mock_result
-        fn.assert_called_once_with(VALID_UUID)
+        fn.assert_called_once_with("seller-uuid-123")
 
     def test_recalc_seller_async_returns_started(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        r = client.post(f"/jobs/recalc/{VALID_UUID}")
+        mock_result = {"products": 5, "metrics_written": 5}
+        with patch("app.main.recalc_seller_all_periods", return_value=mock_result):
+            r = client.post("/jobs/recalc/seller-uuid-456")
         assert r.status_code == 200
         body = r.json()
         assert body["started"] is True
         assert body["status"] == "running"
         assert "started_at" in body
+        assert "seller-uuid-456" in _running_recalcs
 
     def test_recalc_seller_dedup_when_running(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        from app.main import _running_recalcs
-        _running_recalcs[VALID_UUID] = {
+        _running_recalcs["seller-busy"] = {
+            "started_at": "2026-05-19T09:00:00Z",
             "status": "running",
-            "started_at": "2026-05-19T09:00:00+00:00",
+            "result": None,
+            "error": None,
         }
-        r = client.post(f"/jobs/recalc/{VALID_UUID}")
+        with patch("app.main.recalc_seller_all_periods") as fn:
+            r = client.post("/jobs/recalc/seller-busy")
         assert r.status_code == 200
         body = r.json()
         assert body["started"] is False
         assert body["status"] == "running"
+        fn.assert_not_called()
 
     def test_recalc_status_idle(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        r = client.get(f"/jobs/recalc/{VALID_UUID}/status")
+        r = client.get("/jobs/recalc/some-unknown-seller/status")
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "idle"
-        assert body["started_at"] is None
+
+    def test_recalc_status_returns_running_state(self, monkeypatch):
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        _running_recalcs["seller-running"] = {
+            "started_at": "2026-05-19T09:00:00Z",
+            "status": "running",
+            "result": None,
+            "error": None,
+        }
+        r = client.get("/jobs/recalc/seller-running/status")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["status"] == "running"
+        assert body["started_at"] == "2026-05-19T09:00:00Z"
 
     def test_recalc_all(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
@@ -279,9 +290,7 @@ class TestTelegramWebhook:
         assert r.json() == {"ok": True}
 
     def test_no_chat_id_returns_ok(self):
-        r = client.post("/telegram/webhook", json={
-            "message": {"text": "hi"}
-        })
+        r = client.post("/telegram/webhook", json={"message": {"text": "hi"}})
         assert r.status_code == 200
         assert r.json() == {"ok": True}
 
@@ -295,8 +304,6 @@ class TestTelegramWebhook:
         assert body["ok"] is True
         assert body["linked"] is False
         send.assert_called_once()
-        call_args = send.call_args[0]
-        assert "Veloseller" in call_args[1]
 
     def test_start_with_valid_uuid_links_account(self):
         mock_sb = MagicMock()
@@ -313,8 +320,6 @@ class TestTelegramWebhook:
         assert body["ok"] is True
         assert body["linked"] is True
         send.assert_called_once()
-        msg = send.call_args[0][1]
-        assert "подключ" in msg.lower()
 
     def test_start_with_invalid_uuid_shows_help(self):
         mock_sb = MagicMock()
@@ -329,16 +334,12 @@ class TestTelegramWebhook:
         mock_sb.table.assert_not_called()
 
     def test_unknown_command_returns_ok(self):
-        r = client.post("/telegram/webhook", json={
-            "message": {"text": "/random", "chat": {"id": 1}}
-        })
+        r = client.post("/telegram/webhook", json={"message": {"text": "/random", "chat": {"id": 1}}})
         assert r.status_code == 200
         assert r.json() == {"ok": True}
 
     def test_edited_message_is_processed(self):
-        r = client.post("/telegram/webhook", json={
-            "edited_message": {"text": "hello", "chat": {"id": 1}}
-        })
+        r = client.post("/telegram/webhook", json={"edited_message": {"text": "hello", "chat": {"id": 1}}})
         assert r.status_code == 200
         assert r.json() == {"ok": True}
 

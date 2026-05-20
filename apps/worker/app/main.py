@@ -28,6 +28,7 @@ _root.setLevel(logging.INFO)
 
 logger = setup_logger("veloseller.worker")
 
+
 import os as _os
 
 
@@ -85,6 +86,7 @@ if _sentry_dsn:
 _running_recalcs: dict[str, dict] = {}
 _RECALC_STATE_TTL = timedelta(hours=24)
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+
 _CSV_MAX_SIZE_BYTES = 20 * 1024 * 1024
 
 

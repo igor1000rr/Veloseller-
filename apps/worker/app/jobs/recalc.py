@@ -1,22 +1,4 @@
-"""Пересчёт метрик селлера: events, tvelo_metrics, store_metrics, alerts, changelog.
-
-Запускается из FastAPI endpoints (/jobs/recalc/{seller_id}) и APScheduler.
-
-Аудит точности:
-БАГ 1 (в pipeline.py): MISSING_DATA больше не stockout.
-БАГ 2 (здесь): pre-period sales-like deltas передаются как history_for_median.
-БАГ 4 (в pipeline.py): confidence штрафует за < 7 sales_like дней.
-БАГ 5 (здесь): hysteresis в _write_alerts.
-БАГ 9 (здесь): median_30d_velocity отдельной колонкой.
-БАГ 10 (здесь): pre-period дельты нормализуются на дни.
-БАГ 11 (здесь): lost_revenue исключает MISSING_DATA.
-БАГ 32 (здесь): recalc_all_sellers через fetch_all.
-БАГ 33 (здесь): _upsert_or_skip_alert ловит race condition.
-БАГ 50 (здесь): recalc_all_sellers пропускает sellers с активным manual recalc.
-БАГ 92 (здесь): batched fetch snapshots.
-БАГ 93 (здесь): try/except на per-SKU loop.
-БАГ 94 (здесь): детальное логирование failed_skus.
-"""
+"""Пересчёт метрик селлера."""
 from __future__ import annotations
 
 import logging
@@ -94,14 +76,7 @@ def _bump_progress(progress: Optional[dict], **fields) -> None:
     progress.update(fields)
 
 
-def _log_failed_sku(
-    phase: str,
-    seller_id: str,
-    product_id: str,
-    period_days: int,
-    exc: BaseException,
-    verbose_remaining: int,
-) -> None:
+def _log_failed_sku(phase, seller_id, product_id, period_days, exc, verbose_remaining):
     err_type = type(exc).__name__
     err_msg = str(exc)[:300]
     if verbose_remaining > 0:
@@ -125,11 +100,7 @@ def _log_failed_sku(
         )
 
 
-def _fetch_snapshots_batched(
-    sb,
-    product_ids: list[str],
-    history_start: str,
-) -> dict[str, list[dict]]:
+def _fetch_snapshots_batched(sb, product_ids, history_start):
     if not product_ids:
         return {}
     result: dict[str, list[dict]] = {pid: [] for pid in product_ids}
@@ -150,11 +121,7 @@ def _fetch_snapshots_batched(
     return result
 
 
-def _extract_pre_period_sales_deltas(
-    snapshots_rows: list[dict],
-    period_start: date,
-    seller_tz: pytz.tzinfo.BaseTzInfo,
-) -> list[float]:
+def _extract_pre_period_sales_deltas(snapshots_rows, period_start, seller_tz):
     by_day: dict[date, dict] = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
@@ -167,8 +134,8 @@ def _extract_pre_period_sales_deltas(
 
     sorted_days = sorted(by_day.keys())
     deltas: list[float] = []
-    prev_day: Optional[date] = None
-    prev_stock: Optional[int] = None
+    prev_day = None
+    prev_stock = None
     for day in sorted_days:
         stock = int(by_day[day]["stock_quantity"])
         if prev_stock is not None and prev_day is not None:
@@ -188,12 +155,7 @@ def _extract_pre_period_sales_deltas(
     return deltas
 
 
-def build_daily_aggregates(
-    snapshots_rows: list[dict],
-    period_start: date,
-    period_end: date,
-    seller_tz: pytz.tzinfo.BaseTzInfo,
-) -> tuple[list[DailyAggregate], list[dict]]:
+def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
     by_day: dict[date, dict] = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
@@ -202,16 +164,16 @@ def build_daily_aggregates(
 
     pre_period_days = sorted([d for d in by_day if d < period_start])
     abs_deltas_history: list[int] = []
-    prev_stock: Optional[int] = None
-    prev_snapshot_id: Optional[str] = None
+    prev_stock = None
+    prev_snapshot_id = None
     prev_exists = False
     if pre_period_days:
         last_pre = pre_period_days[-1]
         prev_stock = int(by_day[last_pre]["stock_quantity"])
         prev_snapshot_id = by_day[last_pre].get("snapshot_id")
         prev_exists = True
-        prev_for_seed: Optional[int] = None
-        prev_day_for_seed: Optional[date] = None
+        prev_for_seed = None
+        prev_day_for_seed = None
         for d in pre_period_days:
             s = int(by_day[d]["stock_quantity"])
             if prev_for_seed is not None and prev_day_for_seed is not None:
@@ -299,7 +261,7 @@ def build_daily_aggregates(
     return aggregates, event_rows
 
 
-def _write_inventory_events(sb, product_id: str, event_rows: list[dict], period_start: date, period_end: date) -> int:
+def _write_inventory_events(sb, product_id, event_rows, period_start, period_end):
     if not event_rows:
         return 0
     sb.table("inventory_events").delete().eq("product_id", product_id).gte("event_date", period_start.isoformat()).lte("event_date", period_end.isoformat()).execute()
@@ -315,7 +277,7 @@ def _write_inventory_events(sb, product_id: str, event_rows: list[dict], period_
     return len(rows)
 
 
-def _write_changelog(sb, seller_id: str, product_id: str, aggregates: list[DailyAggregate], period_start: date, period_end: date) -> int:
+def _write_changelog(sb, seller_id, product_id, aggregates, period_start, period_end):
     significant = {EventType.REPLENISHMENT_LIKE, EventType.ANOMALY_LIKE, EventType.MISSING_DATA, EventType.RECOUNT_LIKE}
     sb.table("changelog").delete().eq("product_id", product_id).gte("event_date", period_start.isoformat()).lte("event_date", period_end.isoformat()).execute()
     rows = []
@@ -336,7 +298,7 @@ def _write_changelog(sb, seller_id: str, product_id: str, aggregates: list[Daily
     return len(rows)
 
 
-def _upsert_or_skip_alert(sb, seller_id: str, product_id: str, kind: str, message: str, payload: dict) -> bool:
+def _upsert_or_skip_alert(sb, seller_id, product_id, kind, message, payload):
     existing = sb.table("alerts").select("id").eq("seller_id", seller_id).eq(
         "product_id", product_id
     ).eq("kind", kind).is_("acknowledged_at", "null").limit(1).execute()
@@ -371,7 +333,7 @@ _HYSTERESIS_KEEP_CHECKS = {
 }
 
 
-def _write_alerts(sb, seller_id: str, product_id: str, m: TVeloMetric, underestimated: bool) -> int:
+def _write_alerts(sb, seller_id, product_id, m, underestimated):
     cov = m.coverage_days
     desired_alerts: list[tuple[str, str]] = []
     if critical_stock_alert(cov):
@@ -409,7 +371,7 @@ def _write_alerts(sb, seller_id: str, product_id: str, m: TVeloMetric, underesti
     return new_count
 
 
-def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict] = None) -> dict:
+def recalc_seller(seller_id, period_days=30, progress=None):
     sb = get_supabase()
     period_end = date.today()
     period_start = period_end - timedelta(days=period_days - 1)
@@ -634,7 +596,7 @@ def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict
     }
 
 
-def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start: date, period_end: date) -> int:
+def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
     if not sku_data:
         return 0
     sku_health_inputs = [
@@ -705,7 +667,7 @@ def _write_store_metrics(sb, seller_id: str, sku_data: list[dict], period_start:
     return 1
 
 
-def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -> dict:
+def recalc_seller_all_periods(seller_id, progress=None):
     result = {"products": 0, "metrics_written": 0, "alerts_written": 0,
               "store_metrics_written": 0, "events_written": 0, "changelog_written": 0,
               "failed_skus": 0, "periods": []}
@@ -732,7 +694,7 @@ def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -
     return result
 
 
-def recalc_all_sellers() -> dict:
+def recalc_all_sellers():
     """БАГ 32: пагинация. БАГ 50: пропускаем sellers с активным manual recalc."""
     sb = get_supabase()
     sellers = fetch_all(sb.table("sellers").select("id"))
