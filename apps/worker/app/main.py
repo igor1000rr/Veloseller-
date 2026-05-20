@@ -86,7 +86,6 @@ if _sentry_dsn:
 _running_recalcs: dict[str, dict] = {}
 _RECALC_STATE_TTL = timedelta(hours=24)
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
-
 _CSV_MAX_SIZE_BYTES = 20 * 1024 * 1024
 
 
@@ -302,17 +301,11 @@ async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
 
     declared_size = getattr(file, "size", None)
     if declared_size is not None and declared_size > _CSV_MAX_SIZE_BYTES:
-        raise HTTPException(
-            413,
-            f"Файл слишком большой: {declared_size} байт (максимум {_CSV_MAX_SIZE_BYTES})",
-        )
+        raise HTTPException(413, f"Файл слишком большой: {declared_size} байт (максимум {_CSV_MAX_SIZE_BYTES})")
 
     content = await file.read()
     if len(content) > _CSV_MAX_SIZE_BYTES:
-        raise HTTPException(
-            413,
-            f"Файл слишком большой: {len(content)} байт (максимум {_CSV_MAX_SIZE_BYTES})",
-        )
+        raise HTTPException(413, f"Файл слишком большой: {len(content)} байт (максимум {_CSV_MAX_SIZE_BYTES})")
 
     try:
         snapshots = csv_upload.parse_csv(content)
@@ -336,10 +329,7 @@ def ingest_google_sheet(connection_id: str, background_tasks: BackgroundTasks) -
         raise HTTPException(400, "config.sheet_url или config.sheet_id обязателен")
     if not _try_acquire_sync_lock(sb, connection_id):
         return {"started": False, "status": "running", "message": "Sync уже идёт"}
-    background_tasks.add_task(
-        _run_google_sheet_sync_bg, connection_id, conn.data["seller_id"], sheet, cfg.get("worksheet_index", 0)
-    )
-    logger.info("google sheet sync enqueued", extra={"connection_id": connection_id})
+    background_tasks.add_task(_run_google_sheet_sync_bg, connection_id, conn.data["seller_id"], sheet, cfg.get("worksheet_index", 0))
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
@@ -359,10 +349,7 @@ def ingest_ozon(connection_id: str, background_tasks: BackgroundTasks) -> dict:
         raise HTTPException(400, "config.client_id и config.api_key обязательны")
     if not _try_acquire_sync_lock(sb, connection_id):
         return {"started": False, "status": "running", "message": "Sync уже идёт"}
-    background_tasks.add_task(
-        _run_ozon_sync_bg, connection_id, conn.data["seller_id"], client_id, api_key
-    )
-    logger.info("ozon sync enqueued", extra={"connection_id": connection_id})
+    background_tasks.add_task(_run_ozon_sync_bg, connection_id, conn.data["seller_id"], client_id, api_key)
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
@@ -381,7 +368,6 @@ def ingest_wb(connection_id: str, background_tasks: BackgroundTasks) -> dict:
     if not _try_acquire_sync_lock(sb, connection_id):
         return {"started": False, "status": "running", "message": "Sync уже идёт"}
     background_tasks.add_task(_run_wb_sync_bg, connection_id, conn.data["seller_id"], token)
-    logger.info("wb sync enqueued", extra={"connection_id": connection_id})
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
@@ -398,38 +384,27 @@ def ingest_feed(connection_id: str, background_tasks: BackgroundTasks) -> dict:
     if not _try_acquire_sync_lock(sb, connection_id):
         return {"started": False, "status": "running", "message": "Sync уже идёт"}
     background_tasks.add_task(_run_feed_sync_bg, connection_id, conn.data["seller_id"], feed_url)
-    logger.info("feed sync enqueued", extra={"connection_id": connection_id})
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
 def _run_recalc_bg(seller_id: str) -> None:
     progress: dict = {
-        "phase": "starting",
-        "processed": 0,
-        "total": 0,
-        "period_days": 30,
-        "current_period_index": 0,
-        "total_periods": 3,
+        "phase": "starting", "processed": 0, "total": 0, "period_days": 30,
+        "current_period_index": 0, "total_periods": 3,
     }
     _running_recalcs[seller_id] = {
         "started_at": datetime.now(timezone.utc).isoformat(),
-        "status": "running",
-        "result": None,
-        "error": None,
-        "progress": progress,
+        "status": "running", "result": None, "error": None, "progress": progress,
     }
     try:
         result = recalc_seller_all_periods(seller_id, progress=progress)
         _running_recalcs[seller_id].update({
-            "status": "done",
-            "finished_at": datetime.now(timezone.utc).isoformat(),
-            "result": result,
+            "status": "done", "finished_at": datetime.now(timezone.utc).isoformat(), "result": result,
         })
         logger.info("recalc done (bg)", extra={"seller_id": seller_id, **{k: v for k, v in result.items() if isinstance(v, (int, float))}})
     except Exception as e:
         _running_recalcs[seller_id].update({
-            "status": "error",
-            "finished_at": datetime.now(timezone.utc).isoformat(),
+            "status": "error", "finished_at": datetime.now(timezone.utc).isoformat(),
             "error": str(e)[:500],
         })
         logger.exception("recalc failed (bg)", extra={"seller_id": seller_id})
@@ -441,23 +416,17 @@ def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: b
 
     existing = _running_recalcs.get(seller_id)
     if existing and existing.get("status") == "running":
-        logger.info("recalc already running, skipping", extra={"seller_id": seller_id})
         return {
-            "started": False,
-            "status": "running",
+            "started": False, "status": "running",
             "started_at": existing.get("started_at"),
             "message": "Расчёт уже идёт, дождитесь завершения",
         }
     if sync:
-        logger.info("recalc start (sync)", extra={"seller_id": seller_id})
         result = recalc_seller_all_periods(seller_id)
-        logger.info("recalc done (sync)", extra={"seller_id": seller_id, **{k: v for k, v in result.items() if isinstance(v, (int, float))}})
         return result
     background_tasks.add_task(_run_recalc_bg, seller_id)
-    logger.info("recalc enqueued (bg)", extra={"seller_id": seller_id})
     return {
-        "started": True,
-        "status": "running",
+        "started": True, "status": "running",
         "started_at": datetime.now(timezone.utc).isoformat(),
         "message": "Расчёт запущен в фоне, цифры появятся через несколько минут",
     }
@@ -480,21 +449,14 @@ def job_recalc_all() -> dict:
 
 
 @app.post("/telegram/webhook")
-async def telegram_webhook(
-    request: Request,
-    x_telegram_bot_api_secret_token: Optional[str] = Header(None),
-) -> dict:
+async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Optional[str] = Header(None)) -> dict:
     from app.telegram import send_message
 
     expected_secret = _os.environ.get("TELEGRAM_WEBHOOK_SECRET")
     if expected_secret:
         if x_telegram_bot_api_secret_token != expected_secret:
-            logger.warning("telegram webhook: invalid or missing secret token", extra={
-                "got_header": bool(x_telegram_bot_api_secret_token),
-            })
             raise HTTPException(403, "Forbidden")
     elif _os.environ.get("ENV", "development") == "production":
-        logger.error("telegram webhook: TELEGRAM_WEBHOOK_SECRET not set in production")
         raise HTTPException(500, "Server misconfigured")
 
     try:
@@ -511,25 +473,17 @@ async def telegram_webhook(
         parts = text.split(maxsplit=1)
         if len(parts) == 2 and parts[1]:
             seller_id = parts[1].strip()
-            if not _UUID_RE.match(seller_id):
-                logger.warning("telegram /start with invalid seller_id format", extra={
-                    "chat_id": chat_id,
-                })
-            else:
+            if _UUID_RE.match(seller_id):
                 try:
                     sb = get_supabase()
                     res = sb.table("sellers").update({
-                        "telegram_chat_id": chat_id,
-                        "notify_telegram": True,
+                        "telegram_chat_id": chat_id, "notify_telegram": True,
                     }).eq("id", seller_id).execute()
                     if res.data:
-                        send_message(chat_id,
-                            "✅ <b>Telegram подключён!</b>\n\nТеперь вы будете получать ежедневный digest по важным уведомлениям.")
-                        logger.info("telegram linked", extra={"seller_id": seller_id, "chat_id": chat_id})
+                        send_message(chat_id, "✅ <b>Telegram подключён!</b>\n\nТеперь вы будете получать ежедневный digest по важным уведомлениям.")
                         return {"ok": True, "linked": True}
                 except Exception:
                     logger.exception("telegram linking failed", extra={"chat_id": chat_id})
-        send_message(chat_id,
-            "Привет! Я бот <b>Veloseller</b>. Чтобы подключить уведомления, откройте Veloseller и нажмите кнопку «Подключить Telegram» в настройках.")
+        send_message(chat_id, "Привет! Я бот <b>Veloseller</b>. Чтобы подключить уведомления, откройте Veloseller и нажмите кнопку «Подключить Telegram» в настройках.")
         return {"ok": True, "linked": False}
     return {"ok": True}
