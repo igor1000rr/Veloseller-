@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
@@ -52,8 +52,36 @@ if _sentry_dsn:
 
 _running_recalcs: dict[str, dict] = {}
 
+# БАГ 27: TTL для finished/error tasks. Без этого _running_recalcs растёт бесконечно
+# (каждый seller добавляет запись, которая никогда не удаляется). За год при 1000 sellers
+# и 24 recalc'ах в сутки это ~8.7M записей — memory leak.
+_RECALC_STATE_TTL = timedelta(hours=24)
+
 # БАГ 52: UUID regex для валидации seller_id из Telegram /start payload.
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+
+
+def _cleanup_old_recalcs() -> None:
+    """Удаляет завершённые задачи старше _RECALC_STATE_TTL.
+
+    Вызывается при каждом новом recalc — амортизированно O(N) где N = кол-во tasks.
+    """
+    cutoff = datetime.now(timezone.utc) - _RECALC_STATE_TTL
+    stale = []
+    for sid, state in _running_recalcs.items():
+        if state.get("status") in ("done", "error"):
+            finished = state.get("finished_at")
+            if finished:
+                try:
+                    if datetime.fromisoformat(finished.replace("Z", "+00:00")) < cutoff:
+                        stale.append(sid)
+                except (ValueError, AttributeError):
+                    # Поломанный timestamp — лучше удалить
+                    stale.append(sid)
+    for sid in stale:
+        del _running_recalcs[sid]
+    if stale:
+        logger.info("cleaned up stale recalc states", extra={"count": len(stale)})
 
 
 @asynccontextmanager
@@ -82,18 +110,13 @@ def health() -> dict:
     return {"status": "ok", "ts": datetime.now(timezone.utc).isoformat()}
 
 
-# Максимум SKU в одном `.in_(...)` запросе. PostgREST URL лимит ~8KB.
-# При средней длине sku 12 символов + JSON-escape, 500 SKU = ~7KB URL — безопасно.
 _PRODUCTS_IN_BATCH = 500
 
 
 def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
     """Upsert products и возвращает маппинг sku -> product_id.
 
-    БАГ 15 fix: батчируем `.in_("sku", [...])` по 500 SKU. Раньше при 1879 SKU
-    URL был ~22KB > PostgREST лимита 8KB, запрос обрезался и часть SKU не возвращалась.
-    Это приводило к тому что 436 SKU создавались через upsert, но их snapshot'ы пропускались
-    в _persist_snapshots (потому что pid=None после неполного маппинга).
+    БАГ 15 fix: батчируем `.in_("sku", [...])` по 500 SKU.
     """
     if not snapshots:
         return {}
@@ -129,7 +152,6 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
     pids = list(sku_to_pid.values())
     last_snapshots: dict[str, dict] = {}
     if pids:
-        from datetime import timedelta
         cutoff = (datetime.now(timezone.utc) - timedelta(days=2)).isoformat()
         IN_BATCH = 200
         for i in range(0, len(pids), IN_BATCH):
@@ -330,6 +352,9 @@ def _run_recalc_bg(seller_id: str) -> None:
 
 @app.post("/jobs/recalc/{seller_id}", dependencies=[Depends(require_worker_secret)])
 def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: bool = False) -> dict:
+    # БАГ 27: cleanup старых finished задач, чтобы _running_recalcs не рос бесконечно
+    _cleanup_old_recalcs()
+
     existing = _running_recalcs.get(seller_id)
     if existing and existing.get("status") == "running":
         logger.info("recalc already running, skipping", extra={"seller_id": seller_id})
@@ -380,17 +405,9 @@ async def telegram_webhook(
     БАГ 52 fix (КРИТИЧНО): проверяем X-Telegram-Bot-Api-Secret-Token header.
     Раньше любой мог послать POST с /start <victim_seller_id> и привязать свой chat_id
     к чужому аккаунту, получая все уведомления жертвы.
-
-    Telegram отправляет этот header, если webhook был зарегистрирован с secret_token:
-      curl -X POST https://api.telegram.org/bot<TOKEN>/setWebhook \
-        -d url=https://veloseller.ru/api/telegram/webhook \
-        -d secret_token=<RANDOM_32_CHARS>
-
-    Также добавлена UUID-валидация seller_id чтобы не делать DB-запросы с мусором.
     """
     from app.telegram import send_message
 
-    # БАГ 52 fix: верификация что запрос реально от Telegram.
     expected_secret = _os.environ.get("TELEGRAM_WEBHOOK_SECRET")
     if expected_secret:
         if x_telegram_bot_api_secret_token != expected_secret:
@@ -398,7 +415,6 @@ async def telegram_webhook(
                 "got_header": bool(x_telegram_bot_api_secret_token),
             })
             raise HTTPException(403, "Forbidden")
-    # Если secret не задан — пропускаем (dev режим), но логируем предупреждение
     elif _os.environ.get("ENV", "development") == "production":
         logger.error("telegram webhook: TELEGRAM_WEBHOOK_SECRET not set in production")
         raise HTTPException(500, "Server misconfigured")
@@ -417,7 +433,6 @@ async def telegram_webhook(
         parts = text.split(maxsplit=1)
         if len(parts) == 2 and parts[1]:
             seller_id = parts[1].strip()
-            # БАГ 52: валидация UUID — не делаем DB-запросы с произвольным мусором
             if not _UUID_RE.match(seller_id):
                 logger.warning("telegram /start with invalid seller_id format", extra={
                     "chat_id": chat_id,
