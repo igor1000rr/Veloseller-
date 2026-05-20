@@ -7,19 +7,16 @@
 БАГ 2 (здесь): pre-period sales-like deltas передаются как history_for_median.
 БАГ 4 (в pipeline.py): confidence штрафует за < 7 sales_like дней.
 БАГ 5 (здесь): hysteresis в _write_alerts.
-БАГ 9 (здесь): median_30d_velocity отдельной колонкой, используется в SkuHealthInput.
-
-БАГ 10 (здесь): pre-period дельты НОРМАЛИЗУЮТСЯ на количество дней между snapshot'ами.
-БАГ 11 (здесь): lost_revenue prices_during_stockout явно исключает MISSING_DATA.
-БАГ 32 (здесь): recalc_all_sellers использует fetch_all (раньше обрезался на 1000).
-БАГ 33 (здесь): _upsert_or_skip_alert ловит race condition через unique index.
+БАГ 9 (здесь): median_30d_velocity отдельной колонкой.
+БАГ 10 (здесь): pre-period дельты нормализуются на дни.
+БАГ 11 (здесь): lost_revenue исключает MISSING_DATA.
+БАГ 32 (здесь): recalc_all_sellers через fetch_all.
+БАГ 33 (здесь): _upsert_or_skip_alert ловит race condition.
+БАГ 92 (здесь): batched fetch snapshots.
+БАГ 93 (здесь): try/except на per-SKU loop.
+БАГ 94 (здесь): детальное логирование failed_skus.
 БАГ 95 (здесь): recalc_all_sellers использует DB lock через recalc_lock module
-  (раньше был in-memory _running_recalcs — per-worker, не multi-worker safe).
-
-БАГ 92 (здесь): batched fetch snapshots для ВСЕХ продуктов одним запросом.
-БАГ 93 (здесь): try/except на per-SKU loop — если один SKU падает, не теряем весь recalc.
-
-БАГ 94 (здесь): детальное логирование failed_skus с exception text.
+  (раньше in-memory _running_recalcs — per-worker, не multi-worker safe).
 """
 from __future__ import annotations
 
@@ -55,20 +52,20 @@ from app.engine.store import (
     total_inventory_value,
     warehouse_health_score,
 )
+# БАГ 95: import на уровне модуля (не внутри функции) — иначе monkeypatch в тестах не работает.
+from app.recalc_lock import (
+    get_recalc_state,
+    mark_recalc_done,
+    mark_recalc_error,
+    try_acquire_recalc_lock,
+)
 from app.schemas import EventType, TVeloMetric
 
 logger = logging.getLogger("veloseller.recalc")
 
-# БАГ 92: размер батча для .in_() — PostgREST безопасно держит ~200 ID в URL.
 _PRODUCT_IN_BATCH = 200
-
-# БАГ 94: первые N фейлов в одном recalc логируем как WARNING с полной инфой.
 _VERBOSE_FAILURES_PER_RECALC = 3
 
-
-# ============================================================================
-# Helpers
-# ============================================================================
 
 def _seller_timezone(sb, seller_id: str) -> str:
     res = sb.table("sellers").select("timezone").eq("id", seller_id).execute()
@@ -113,7 +110,6 @@ def _log_failed_sku(
     exc: BaseException,
     verbose_remaining: int,
 ) -> None:
-    """БАГ 94: логируем failed SKU так чтобы было ВИДНО в journalctl."""
     err_type = type(exc).__name__
     err_msg = str(exc)[:300]
     if verbose_remaining > 0:
@@ -142,7 +138,6 @@ def _fetch_snapshots_batched(
     product_ids: list[str],
     history_start: str,
 ) -> dict[str, list[dict]]:
-    """БАГ 92: один batched fetch вместо per-SKU N запросов."""
     if not product_ids:
         return {}
     result: dict[str, list[dict]] = {pid: [] for pid in product_ids}
@@ -168,7 +163,6 @@ def _extract_pre_period_sales_deltas(
     period_start: date,
     seller_tz: pytz.tzinfo.BaseTzInfo,
 ) -> list[float]:
-    """БАГ 10 fix: делим |delta| на (день_текущий - день_предыдущий)."""
     by_day: dict[date, dict] = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
@@ -202,17 +196,12 @@ def _extract_pre_period_sales_deltas(
     return deltas
 
 
-# ============================================================================
-# Build daily aggregates
-# ============================================================================
-
 def build_daily_aggregates(
     snapshots_rows: list[dict],
     period_start: date,
     period_end: date,
     seller_tz: pytz.tzinfo.BaseTzInfo,
 ) -> tuple[list[DailyAggregate], list[dict]]:
-    """Строит daily aggregates ТОЛЬКО за период [period_start, period_end]."""
     by_day: dict[date, dict] = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
@@ -318,10 +307,6 @@ def build_daily_aggregates(
     return aggregates, event_rows
 
 
-# ============================================================================
-# Persist
-# ============================================================================
-
 def _write_inventory_events(sb, product_id: str, event_rows: list[dict], period_start: date, period_end: date) -> int:
     if not event_rows:
         return 0
@@ -360,7 +345,6 @@ def _write_changelog(sb, seller_id: str, product_id: str, aggregates: list[Daily
 
 
 def _upsert_or_skip_alert(sb, seller_id: str, product_id: str, kind: str, message: str, payload: dict) -> bool:
-    """БАГ 33 fix: race condition handling через partial unique index alerts_unique_unread."""
     existing = sb.table("alerts").select("id").eq("seller_id", seller_id).eq(
         "product_id", product_id
     ).eq("kind", kind).is_("acknowledged_at", "null").limit(1).execute()
@@ -432,10 +416,6 @@ def _write_alerts(sb, seller_id: str, product_id: str, m: TVeloMetric, underesti
             new_count += 1
     return new_count
 
-
-# ============================================================================
-# Main entry point
-# ============================================================================
 
 def recalc_seller(seller_id: str, period_days: int = 30, progress: Optional[dict] = None) -> dict:
     sb = get_supabase()
@@ -761,17 +741,13 @@ def recalc_seller_all_periods(seller_id: str, progress: Optional[dict] = None) -
 
 
 def recalc_all_sellers() -> dict:
-    """БАГ 32: пагинация. БАГ 95: DB-based lock (раньше был in-memory dict — per-worker race).
+    """БАГ 32: пагинация. БАГ 95: DB-based lock (раньше in-memory dict).
 
-    Для каждого seller'а:
-      1. SELECT recalc_jobs — если status='running', skip (manual recalc идёт)
-      2. try_acquire_recalc_lock — atomic UPSERT; если race с manual recalc, skip
-      3. recalc_seller_all_periods + mark_recalc_done/mark_recalc_error
+    Two-phase check:
+      1. get_recalc_state — быстрый SELECT; если status='running', skip
+      2. try_acquire_recalc_lock — atomic UPSERT; race-safe второй guard
+      3. recalc + mark_recalc_done/mark_recalc_error
     """
-    from app.recalc_lock import (
-        try_acquire_recalc_lock, mark_recalc_done, mark_recalc_error, get_recalc_state,
-    )
-
     sb = get_supabase()
     sellers = fetch_all(sb.table("sellers").select("id"))
     summary = {"sellers": 0, "skipped_concurrent": 0, "metrics_written": 0,
@@ -780,7 +756,6 @@ def recalc_all_sellers() -> dict:
     for s in sellers:
         seller_id = s["id"]
 
-        # БАГ 95: сначала проверяем текущий status (быстрый path)
         state = get_recalc_state(sb, seller_id)
         if state and state.get("status") == "running":
             summary["skipped_concurrent"] += 1
@@ -788,8 +763,6 @@ def recalc_all_sellers() -> dict:
                         extra={"seller_id": seller_id})
             continue
 
-        # Атомарный lock acquire (race-safe: если manual recalc взял lock после
-        # нашего SELECT, RPC вернёт False).
         if not try_acquire_recalc_lock(sb, seller_id):
             summary["skipped_concurrent"] += 1
             logger.info("recalc-all: skip seller (lock race)",

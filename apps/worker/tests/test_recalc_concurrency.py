@@ -1,13 +1,13 @@
-"""Тест на БАГ 95 (бывший БАГ 50) — recalc_all_sellers skip при concurrent manual recalc.
+"""Тест на БАГ 95 — recalc_all_sellers skip при concurrent manual recalc.
 
 БАГ 95: заменил in-memory _running_recalcs dict на DB-based lock через recalc_jobs table.
-New test мокает get_recalc_state и try_acquire_recalc_lock из app.recalc_lock.
+Патчим имя в app.jobs.recalc namespace (после module-level import from app.recalc_lock).
 """
 from __future__ import annotations
 import os
 os.environ["ENABLE_SCHEDULER"] = "false"
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 class TestRecalcAllConcurrencyLock:
@@ -20,16 +20,14 @@ class TestRecalcAllConcurrencyLock:
                             lambda q: [{"id": "seller-busy"}, {"id": "seller-free"}])
         monkeypatch.setattr("app.jobs.recalc.get_supabase", lambda: mock_sb)
 
-        # get_recalc_state: для busy → running, для free → None
         def fake_get_state(_sb, seller_id):
             if seller_id == "seller-busy":
                 return {"status": "running", "started_at": "2026-05-20T00:00:00Z"}
             return None
-        monkeypatch.setattr("app.recalc_lock.get_recalc_state", fake_get_state)
-
-        # try_acquire всегда True (для free)
-        monkeypatch.setattr("app.recalc_lock.try_acquire_recalc_lock", lambda _sb, _sid: True)
-        monkeypatch.setattr("app.recalc_lock.mark_recalc_done", lambda _sb, _sid, _r: None)
+        # БАГ 95: патч прямо в app.jobs.recalc namespace (после import from app.recalc_lock)
+        monkeypatch.setattr("app.jobs.recalc.get_recalc_state", fake_get_state)
+        monkeypatch.setattr("app.jobs.recalc.try_acquire_recalc_lock", lambda _sb, _sid: True)
+        monkeypatch.setattr("app.jobs.recalc.mark_recalc_done", lambda _sb, _sid, _r: None)
 
         called_for = []
         def fake_recalc(sid, progress=None):
@@ -41,24 +39,23 @@ class TestRecalcAllConcurrencyLock:
         from app.jobs.recalc import recalc_all_sellers
         result = recalc_all_sellers()
 
-        # seller-busy пропущен, seller-free обработан
         assert "seller-free" in called_for
         assert "seller-busy" not in called_for
         assert result["sellers"] == 1
         assert result["skipped_concurrent"] == 1
 
     def test_processes_done_status_sellers(self, monkeypatch):
-        """Sellers с done статусом НЕ пропускаются — manual recalc уже закончился."""
+        """Sellers с done статусом НЕ пропускаются."""
         mock_sb = MagicMock()
         monkeypatch.setattr("app.jobs.recalc.fetch_all", lambda q: [{"id": "seller-done"}])
         monkeypatch.setattr("app.jobs.recalc.get_supabase", lambda: mock_sb)
 
         monkeypatch.setattr(
-            "app.recalc_lock.get_recalc_state",
+            "app.jobs.recalc.get_recalc_state",
             lambda _sb, _sid: {"status": "done", "finished_at": "2026-05-20T00:00:00Z"},
         )
-        monkeypatch.setattr("app.recalc_lock.try_acquire_recalc_lock", lambda _sb, _sid: True)
-        monkeypatch.setattr("app.recalc_lock.mark_recalc_done", lambda _sb, _sid, _r: None)
+        monkeypatch.setattr("app.jobs.recalc.try_acquire_recalc_lock", lambda _sb, _sid: True)
+        monkeypatch.setattr("app.jobs.recalc.mark_recalc_done", lambda _sb, _sid, _r: None)
 
         called_for = []
         def fake_recalc(sid, progress=None):
@@ -80,9 +77,9 @@ class TestRecalcAllConcurrencyLock:
                             lambda q: [{"id": "s1"}, {"id": "s2"}, {"id": "s3"}])
         monkeypatch.setattr("app.jobs.recalc.get_supabase", lambda: mock_sb)
 
-        monkeypatch.setattr("app.recalc_lock.get_recalc_state", lambda _sb, _sid: None)
-        monkeypatch.setattr("app.recalc_lock.try_acquire_recalc_lock", lambda _sb, _sid: True)
-        monkeypatch.setattr("app.recalc_lock.mark_recalc_done", lambda _sb, _sid, _r: None)
+        monkeypatch.setattr("app.jobs.recalc.get_recalc_state", lambda _sb, _sid: None)
+        monkeypatch.setattr("app.jobs.recalc.try_acquire_recalc_lock", lambda _sb, _sid: True)
+        monkeypatch.setattr("app.jobs.recalc.mark_recalc_done", lambda _sb, _sid, _r: None)
 
         called_for = []
         def fake_recalc(sid, progress=None):
@@ -99,17 +96,16 @@ class TestRecalcAllConcurrencyLock:
         assert result["skipped_concurrent"] == 0
 
     def test_lock_race_after_status_check(self, monkeypatch):
-        """БАГ 95: если status='done' но try_acquire вернул False (race с manual) — skip."""
+        """БАГ 95: status='done' но try_acquire вернул False (race с manual) — skip."""
         mock_sb = MagicMock()
         monkeypatch.setattr("app.jobs.recalc.fetch_all", lambda q: [{"id": "seller-racy"}])
         monkeypatch.setattr("app.jobs.recalc.get_supabase", lambda: mock_sb)
 
         monkeypatch.setattr(
-            "app.recalc_lock.get_recalc_state",
-            lambda _sb, _sid: {"status": "done"},  # свежий SELECT видит done
+            "app.jobs.recalc.get_recalc_state",
+            lambda _sb, _sid: {"status": "done"},
         )
-        # Но между SELECT и UPSERT manual recalc взял lock — try_acquire вернул False
-        monkeypatch.setattr("app.recalc_lock.try_acquire_recalc_lock", lambda _sb, _sid: False)
+        monkeypatch.setattr("app.jobs.recalc.try_acquire_recalc_lock", lambda _sb, _sid: False)
 
         called_for = []
         def fake_recalc(sid, progress=None):
@@ -120,7 +116,6 @@ class TestRecalcAllConcurrencyLock:
         from app.jobs.recalc import recalc_all_sellers
         result = recalc_all_sellers()
 
-        # recalc НЕ выполнялся — skip по race
         assert called_for == []
         assert result["sellers"] == 0
         assert result["skipped_concurrent"] == 1
