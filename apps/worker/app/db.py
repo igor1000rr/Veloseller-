@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from functools import lru_cache
 
 import httpx
@@ -12,17 +13,61 @@ from app.config import settings
 logger = logging.getLogger("veloseller.db")
 
 
+class _RetryingTransport(httpx.HTTPTransport):
+    """HTTP transport с автоматическим retry на RemoteProtocolError.
+
+    БАГ 91: даже после перехода на HTTP/1.1 (БАГ 84) Postgrest закрывает idle
+    connections со своей стороны после ~5-10с (keep-alive timeout). httpx
+    pool думает что connection живой и переиспользует — отправляет request
+    на закрытое соединение → "Server disconnected without sending a response".
+
+    Этот transport ловит RemoteProtocolError на idempotent методах (GET/HEAD/PUT
+    /DELETE — а также POST/PATCH когда мы уверены в идемпотентности через
+    upsert/dedup в БД) и повторяет до 3 раз. Поскольку pool на retry создаёт
+    новое соединение, проблема не повторяется.
+    """
+
+    _MAX_RETRIES = 3
+    _BACKOFF_SECONDS = (0.2, 0.5, 1.0)
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        last_exc: Exception | None = None
+        for attempt in range(self._MAX_RETRIES):
+            try:
+                return super().handle_request(request)
+            except httpx.RemoteProtocolError as e:
+                last_exc = e
+                # Retry на ВСЕ типы запросов (POST/PATCH тоже): recalc upsert'ит
+                # tvelo_metrics, delete+insert inventory_events/changelog —
+                # повторный запрос даёт тот же эффект.
+                if attempt < self._MAX_RETRIES - 1:
+                    logger.warning(
+                        "postgrest connection dropped, retry %d/%d (%s %s)",
+                        attempt + 1, self._MAX_RETRIES,
+                        request.method, str(request.url)[:120],
+                    )
+                    time.sleep(self._BACKOFF_SECONDS[attempt])
+                    continue
+                raise
+        raise last_exc  # type: ignore[misc]
+
+
 def _force_http11_on_postgrest(client: Client) -> None:
-    """БАГ 84 fix: переоткрываем httpx-сессию postgrest с HTTP/1.1.
+    """БАГ 84 + 91: переоткрываем httpx-сессию postgrest с HTTP/1.1 +
+    коротким keepalive_expiry + retry transport.
 
-    HTTP/2 у Supabase Postgrest закрывает соединение через GOAWAY frame после
-    ~20K stream'ов (last_stream_id:19999). Это убивало recalc на 1879 SKU × 3
-    периода = ~45K запросов → httpx.RemoteProtocolError <ConnectionTerminated>.
-    На HTTP/1.1 с keep-alive такого лимита нет.
+    БАГ 84: HTTP/2 у Postgrest закрывает GOAWAY после ~20K stream'ов.
+    БАГ 91: на HTTP/1.1 Postgrest закрывает idle connection через ~5-10с,
+    httpx pool ловит RemoteProtocolError при следующем запросе.
 
-    Поддерживаем две версии postgrest-py:
-      - старая: атрибут `_session` (httpx.Client)
-      - новая:  атрибут `session`
+    Решение:
+    1. http2=False — снимает GOAWAY-лимит.
+    2. keepalive_expiry=4s — httpx сам закрывает idle connections до того
+       как это сделает Postgrest (типичный server-side timeout 5-10с).
+    3. _RetryingTransport — даже если race случится, автоматический retry
+       с новым connection.
+
+    Поддерживаем две версии postgrest-py: атрибут `session` или `_session`.
     """
     try:
         pg = client.postgrest
@@ -37,13 +82,19 @@ def _force_http11_on_postgrest(client: Client) -> None:
             headers=headers,
             timeout=httpx.Timeout(60.0),
             http2=False,
+            transport=_RetryingTransport(http2=False),
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=5,
+                keepalive_expiry=4.0,
+            ),
         )
         old.close()
         if hasattr(pg, "session"):
             pg.session = new_session
         if hasattr(pg, "_session"):
             pg._session = new_session
-        logger.info("postgrest session patched to HTTP/1.1")
+        logger.info("postgrest session patched: HTTP/1.1 + retry transport + keepalive 4s")
     except Exception as e:
         logger.warning("HTTP/1.1 patch failed: %s", e)
 
