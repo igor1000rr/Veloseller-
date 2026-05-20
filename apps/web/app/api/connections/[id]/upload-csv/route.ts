@@ -9,6 +9,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  * Пробрасывает CSV в worker /ingest/csv?seller_id=...
  *
  * БАГ 38-41 fix: rate limit, лимит размера файла 20MB, timeout 120s, валидация ENV.
+ * БАГ 77/78 fix: не светим network errors наружу, worker error text обрезаем до 500 байт.
  */
 
 const MAX_FILE_SIZE = 20 * 1024 * 1024;  // 20MB
@@ -57,9 +58,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const workerUrl = process.env.WORKER_URL;
   const workerSecret = process.env.WORKER_SECRET;
   if (!workerUrl || !workerSecret) {
-    return NextResponse.json({
-      error: "WORKER_URL/WORKER_SECRET не настроены"
-    }, { status: 500 });
+    console.error("[upload-csv] WORKER_URL/WORKER_SECRET not configured");
+    return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
   }
 
   const workerForm = new FormData();
@@ -86,15 +86,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         error: `Worker не ответил за ${WORKER_TIMEOUT_MS / 1000}с`
       }, { status: 504 });
     }
-    return NextResponse.json({
-      error: `Ошибка связи с worker: ${e?.message || String(e)}`
-    }, { status: 502 });
+    // БАГ 77: не светим network errors
+    console.error("[upload-csv] worker network error:", e?.message);
+    return NextResponse.json({ error: "Ошибка связи с worker" }, { status: 502 });
   }
   clearTimeout(timeout);
 
   if (!res.ok) {
+    // Worker text может содержать user-facing message (CSV parse error: ..., 
+    // "колонка sku обязательна" etc.), обрезаем длинные stacktraces
     const text = await res.text();
-    return NextResponse.json({ error: text }, { status: res.status });
+    return NextResponse.json({ error: text.slice(0, 500) }, { status: res.status });
   }
 
   // После успешной загрузки — пометим коннекшн активным
