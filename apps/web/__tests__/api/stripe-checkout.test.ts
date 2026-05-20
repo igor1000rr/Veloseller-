@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+// БАГ 29: тесты обновлены под новое поведение — origin теперь whitelist
+// из APP_URL env, а не user-controlled header. Дефолт APP_URL = https://veloseller.ru
+process.env.APP_URL = "https://veloseller.ru,https://app.veloseller.com";
+
 const getUserMock = vi.fn();
 const selectChainMock = vi.fn();
 const updateChainMock = vi.fn();
@@ -74,15 +78,30 @@ describe("POST /api/stripe/checkout", () => {
     expect(stripeCustomersCreate).toHaveBeenCalledWith({ email: "a@b.com", metadata: { seller_id: "u1" } });
   });
 
-  it("success/cancel URL из origin header", async () => {
+  // БАГ 29: origin берётся из whitelist (env APP_URL), не из header
+  it("whitelist origin — header в whitelist разрешён", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1", email: "a@b.com" } } });
     selectChainMock.mockResolvedValue({ data: { stripe_customer_id: "cus_x", email: "a@b.com" } });
     stripeCheckoutCreate.mockResolvedValue({ url: "https://x" });
     const { POST } = await import("@/app/api/stripe/checkout/route");
-    await POST(req({ plan: "starter" }, "https://myhost.com"));
+    await POST(req({ plan: "starter" }, "https://app.veloseller.com"));
     expect(stripeCheckoutCreate).toHaveBeenCalledWith(expect.objectContaining({
-      success_url: "https://myhost.com/billing?upgraded=1",
-      cancel_url: "https://myhost.com/billing?canceled=1",
+      success_url: "https://app.veloseller.com/billing?upgraded=1",
+      cancel_url: "https://app.veloseller.com/billing?canceled=1",
+    }));
+  });
+
+  // БАГ 29: атакер с произвольным origin не может перенаправить
+  it("whitelist origin — НЕ whitelist origin fallback на дефолт", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1", email: "a@b.com" } } });
+    selectChainMock.mockResolvedValue({ data: { stripe_customer_id: "cus_x", email: "a@b.com" } });
+    stripeCheckoutCreate.mockResolvedValue({ url: "https://x" });
+    const { POST } = await import("@/app/api/stripe/checkout/route");
+    await POST(req({ plan: "starter" }, "https://evil.com"));
+    // Дефолт — первый в whitelist (https://veloseller.ru)
+    expect(stripeCheckoutCreate).toHaveBeenCalledWith(expect.objectContaining({
+      success_url: "https://veloseller.ru/billing?upgraded=1",
+      cancel_url: "https://veloseller.ru/billing?canceled=1",
     }));
   });
 });
