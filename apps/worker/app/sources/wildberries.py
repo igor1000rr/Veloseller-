@@ -1,14 +1,18 @@
-"""Wildberries Statistics API + Content API.
+"""Wildberries Statistics API + Content API + Marketplace API (FBS).
 
 Statistics API (statistics-api.wildberries.ru):
   - /api/v1/supplier/stocks — остатки и цены FBO. Rate-limit 1 req/60s.
 
 Content API (content-api.wildberries.ru):
-  - /content/v2/get/cards/list — карточки товаров с реальным name.
+  - /content/v2/get/cards/list — карточки товаров с реальным name + skus[] баркоды.
     Rate-limit: 100 req/min с тем же токеном.
 
-БАГ 104 fix: раньше product_name заполнялся из поля subject (категория, например
-"Кроссовки"), а не из реального названия карточки. Теперь тянем через Content API.
+Marketplace API (marketplace-api.wildberries.ru) — май 2026, multi-warehouse:
+  - /api/v3/warehouses — список FBS-складов продавца.
+  - /api/v3/stocks/{warehouseId} — остатки по баркодам на конкретном FBS-складе.
+Токен FBS должен иметь категории: Статистика + Маркетплейс + Контент.
+
+БАГ 104 fix: product_name тянется из Content API title вместо subject (категория).
 """
 from __future__ import annotations
 import logging
@@ -23,21 +27,26 @@ logger = logging.getLogger("veloseller.wb")
 
 STOCKS_URL = "https://statistics-api.wildberries.ru/api/v1/supplier/stocks"
 CARDS_URL = "https://content-api.wildberries.ru/content/v2/get/cards/list"
+MARKETPLACE_API = "https://marketplace-api.wildberries.ru"
 
-# Content API возвращает до 100 карточек за раз
 CARDS_PAGE_SIZE = 100
-# Защита от бесконечной пагинации (миллион карточек — заведомо больше реальности)
 MAX_CARDS_PAGES = 1000
+# FBS stocks API ограничение на размер batch'а SKUs
+FBS_STOCKS_BATCH = 1000
 
 
-def _fetch_card_names(cli: httpx.Client, token: str) -> dict[str, str]:
-    """Тащим все карточки продавца через Content API. Возвращает dict {vendorCode: title}.
+def _fetch_card_data(cli: httpx.Client, token: str, with_skus: bool = False) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """Тянем все карточки продавца через Content API.
 
-    Использует cursor-пагинацию: updatedAt + nmID из последней карточки предыдущей страницы.
-    Если Content API недоступен (токен без прав или endpoint упал) — возвращаем {},
-    тогда _ensure_products сделает fallback product_name на SKU.
+    Returns:
+        names: {vendorCode: title}
+        skus_map: {vendorCode: [barcode1, barcode2, ...]} — пустой если with_skus=False.
+
+    Баркоды (skus) нужны для FBS-остатков через Marketplace API — оно работает по баркодам,
+    а не по supplierArticle. FBO Statistics API работает по supplierArticle, баркоды не нужны.
     """
     names: dict[str, str] = {}
+    skus_map: dict[str, list[str]] = {}
     cursor_updated_at = None
     cursor_nm_id = None
     pages = 0
@@ -52,7 +61,7 @@ def _fetch_card_names(cli: httpx.Client, token: str) -> dict[str, str]:
         payload = {
             "settings": {
                 "cursor": settings_cursor,
-                "filter": {"withPhoto": -1},  # -1 = все карточки (с фото и без)
+                "filter": {"withPhoto": -1},
             }
         }
 
@@ -73,19 +82,22 @@ def _fetch_card_names(cli: httpx.Client, token: str) -> dict[str, str]:
             title = (card.get("title") or "").strip()
             if vendor_code and title:
                 names[vendor_code] = title
+            if with_skus and vendor_code:
+                # Каждый размер (sizes[]) имеет свои баркоды (skus[])
+                for size in (card.get("sizes") or []):
+                    for barcode in (size.get("skus") or []):
+                        if barcode:
+                            skus_map.setdefault(vendor_code, []).append(str(barcode).strip())
 
-        # Cursor для следующей страницы: возвращается в data.cursor
         next_cursor = data.get("cursor") or {}
         total = int(next_cursor.get("total") or 0)
         if total < CARDS_PAGE_SIZE:
-            # Меньше чем размер страницы — это последняя страница
             break
 
         new_updated_at = next_cursor.get("updatedAt")
         new_nm_id = next_cursor.get("nmID")
         if not new_updated_at or not new_nm_id:
             break
-        # Защита от зацикливания
         if new_updated_at == cursor_updated_at and new_nm_id == cursor_nm_id:
             break
         cursor_updated_at = new_updated_at
@@ -94,26 +106,28 @@ def _fetch_card_names(cli: httpx.Client, token: str) -> dict[str, str]:
     if pages >= MAX_CARDS_PAGES:
         logger.warning("WB cards fetch hit MAX_CARDS_PAGES=%d", MAX_CARDS_PAGES)
 
-    logger.info("WB cards fetched: %d", len(names))
+    logger.info("WB cards fetched: %d, with_skus=%s", len(names), with_skus)
+    return names, skus_map
+
+
+def _fetch_card_names(cli: httpx.Client, token: str) -> dict[str, str]:
+    """Legacy shim — без баркодов, для старых вызовов в fetch_snapshots."""
+    names, _ = _fetch_card_data(cli, token, with_skus=False)
     return names
 
 
 def fetch_snapshots(token: str) -> list[SnapshotInput]:
-    """Получить snapshots всех SKU продавца с остатками, ценами и реальными названиями."""
+    """FBO snapshots (склады WB) через Statistics API."""
     now = datetime.now(timezone.utc)
     date_from = (now - timedelta(days=1)).isoformat(timespec="seconds")
 
     with httpx.Client(timeout=120.0) as cli:
-        # 1. Остатки + цены через Statistics API
         def _stocks_call():
             resp = cli.get(STOCKS_URL, params={"dateFrom": date_from}, headers={"Authorization": token})
             resp.raise_for_status()
             return resp.json() or []
 
-        # WB Statistics rate-limit 60s -> base_delay=60, max_delay=300
         rows = with_retry(_stocks_call, base_delay=60.0, max_delay=300.0)
-
-        # 2. Реальные названия товаров через Content API (БАГ 104 fix)
         names_by_vendor = _fetch_card_names(cli, token)
 
     grouped: dict[str, dict] = defaultdict(lambda: {"qty": 0, "price": Decimal("0"), "subject": None})
@@ -125,8 +139,6 @@ def fetch_snapshots(token: str) -> list[SnapshotInput]:
         price = r.get("Price") or 0
         if price and grouped[sku]["price"] == 0:
             grouped[sku]["price"] = Decimal(str(price))
-        # subject — это категория ("Кроссовки"), используем как fallback если карточка
-        # не подтянулась через Content API
         if not grouped[sku]["subject"]:
             grouped[sku]["subject"] = r.get("subject")
 
@@ -139,11 +151,10 @@ def fetch_snapshots(token: str) -> list[SnapshotInput]:
             product_name = real_name
             name_found += 1
         elif v["subject"]:
-            # Fallback на категорию — лучше чем артикул, хоть и не идеально
             product_name = v["subject"]
             name_from_subject += 1
         else:
-            product_name = None  # _ensure_products поставит SKU
+            product_name = None
         snapshots.append(SnapshotInput(
             sku=sku,
             product_name=product_name,
@@ -153,7 +164,175 @@ def fetch_snapshots(token: str) -> list[SnapshotInput]:
         ))
 
     logger.info(
-        "WB fetch done: stocks_rows=%d, snapshots=%d, names_from_cards=%d, names_from_subject=%d",
+        "WB FBO fetch done: stocks_rows=%d, snapshots=%d, names_from_cards=%d, names_from_subject=%d",
         len(rows), len(snapshots), name_found, name_from_subject,
     )
     return snapshots
+
+
+# ============== FBS (Marketplace API) ==============
+
+def _fetch_fbs_warehouses(cli: httpx.Client, token: str) -> list[dict]:
+    """GET /api/v3/warehouses — список FBS-складов продавца.
+
+    Returns: список складов с полями id, name, officeId, cargoType, deliveryType.
+    При ошибке — выбрасываем наверх (синк должен упасть, это критичный endpoint).
+    """
+    def _call():
+        resp = cli.get(
+            f"{MARKETPLACE_API}/api/v3/warehouses",
+            headers={"Authorization": token},
+            timeout=30.0,
+        )
+        resp.raise_for_status()
+        return resp.json() or []
+    return with_retry(_call, base_delay=5.0, max_delay=30.0)
+
+
+def _fetch_fbs_stocks(cli: httpx.Client, token: str, warehouse_id: int, skus: list[str]) -> dict[str, int]:
+    """POST /api/v3/stocks/{warehouseId} — остатки по баркодам на конкретном FBS-складе.
+
+    Body: {"skus": [barcode1, ...]}
+    Response: {"stocks": [{"sku": barcode, "amount": qty}]}
+
+    Батчим по FBS_STOCKS_BATCH=1000 — API имеет лимит на размер body.
+
+    Returns: {barcode: amount}. Если batch упал — пропускаем с warning, идём дальше.
+    """
+    if not skus:
+        return {}
+    result: dict[str, int] = {}
+    for i in range(0, len(skus), FBS_STOCKS_BATCH):
+        batch = skus[i:i + FBS_STOCKS_BATCH]
+        def _call(b=batch):
+            resp = cli.post(
+                f"{MARKETPLACE_API}/api/v3/stocks/{warehouse_id}",
+                headers={"Authorization": token},
+                json={"skus": b},
+                timeout=60.0,
+            )
+            resp.raise_for_status()
+            return resp.json() or {}
+        try:
+            data = with_retry(_call, base_delay=5.0, max_delay=30.0)
+        except Exception as e:
+            logger.warning("WB FBS stocks batch failed for warehouse %d (batch %d): %s",
+                           warehouse_id, i // FBS_STOCKS_BATCH, e)
+            continue
+        for item in (data.get("stocks") or []):
+            barcode = (item.get("sku") or "").strip()
+            amount = int(item.get("amount") or 0)
+            if barcode:
+                result[barcode] = amount
+    return result
+
+
+def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
+    """FBS snapshots (ваш склад) через Marketplace API.
+
+    Flow:
+    1. Content API → карточки с vendorCode + title + skus (баркоды)
+    2. Statistics API → цены (цены одинаковые для FBO и FBS)
+    3. Marketplace /api/v3/warehouses → список FBS-складов
+    4. По каждому FBS-складу → /api/v3/stocks/{warehouseId} с barcode batch'ами
+    5. Агрегируем по vendorCode (один товар = несколько баркодов размеров)
+
+    Требует token с правами: Статистика + Маркетплейс + Контент.
+    """
+    now = datetime.now(timezone.utc)
+    date_from = (now - timedelta(days=1)).isoformat(timespec="seconds")
+
+    with httpx.Client(timeout=120.0) as cli:
+        # 1. Карточки с баркодами (самый важный шаг — без этого не работает)
+        names_by_vendor, skus_by_vendor = _fetch_card_data(cli, token, with_skus=True)
+        if not names_by_vendor:
+            logger.warning("WB FBS: no cards found from Content API — nothing to fetch")
+            return []
+
+        # Обратный маппинг: barcode → vendorCode (для агрегации остатков по supplierArticle)
+        barcode_to_vendor: dict[str, str] = {}
+        all_barcodes: list[str] = []
+        for vendor_code, barcodes in skus_by_vendor.items():
+            for barcode in barcodes:
+                barcode_to_vendor[barcode] = vendor_code
+                all_barcodes.append(barcode)
+
+        if not all_barcodes:
+            logger.warning("WB FBS: no barcodes in cards — nothing to fetch stocks for")
+            return []
+
+        # 2. Цены через Statistics API (FBO+FBS имеют единую цену на маркетплейсе)
+        prices_by_vendor: dict[str, Decimal] = {}
+        try:
+            def _stocks_call():
+                resp = cli.get(STOCKS_URL, params={"dateFrom": date_from},
+                               headers={"Authorization": token})
+                resp.raise_for_status()
+                return resp.json() or []
+            rows = with_retry(_stocks_call, base_delay=60.0, max_delay=300.0)
+            for r in rows:
+                vendor = (r.get("supplierArticle") or "").strip()
+                price = r.get("Price") or 0
+                if vendor and price and vendor not in prices_by_vendor:
+                    prices_by_vendor[vendor] = Decimal(str(price))
+        except Exception as e:
+            # Не критично — без цен snapshots сохранятся, только без потерянной выручки в расчёте
+            logger.warning("WB FBS: Statistics API for prices failed: %s", e)
+
+        # 3. Список FBS-складов
+        warehouses = _fetch_fbs_warehouses(cli, token)
+        if not warehouses:
+            logger.warning("WB FBS: no warehouses found via /api/v3/warehouses")
+            # Возвращаем snapshots с 0 остатками — это валидное состояние (юзер ещё не создал FBS-склад)
+            return _build_zero_stock_snapshots(names_by_vendor, prices_by_vendor, now)
+
+        # 4. По каждому FBS-складу — остатки по barcode'ам
+        stocks_by_vendor: dict[str, int] = defaultdict(int)
+        for wh in warehouses:
+            wh_id = wh.get("id")
+            if not wh_id:
+                continue
+            wh_stocks = _fetch_fbs_stocks(cli, token, wh_id, all_barcodes)
+            for barcode, amount in wh_stocks.items():
+                vendor = barcode_to_vendor.get(barcode)
+                if vendor:
+                    stocks_by_vendor[vendor] += amount
+
+    # 5. Собираем snapshots по всем карточкам
+    snapshots = []
+    for vendor_code, title in names_by_vendor.items():
+        qty = stocks_by_vendor.get(vendor_code, 0)
+        price = prices_by_vendor.get(vendor_code, Decimal("0"))
+        snapshots.append(SnapshotInput(
+            sku=vendor_code,
+            product_name=title or vendor_code,
+            stock_quantity=max(0, qty),
+            price=price,
+            snapshot_time=now,
+        ))
+
+    logger.info(
+        "WB FBS fetch done: warehouses=%d, cards=%d, with_stock=%d, with_price=%d, total_barcodes=%d",
+        len(warehouses), len(snapshots),
+        sum(1 for v in stocks_by_vendor.values() if v > 0),
+        len(prices_by_vendor), len(all_barcodes),
+    )
+    return snapshots
+
+
+def _build_zero_stock_snapshots(
+    names_by_vendor: dict[str, str],
+    prices_by_vendor: dict[str, Decimal],
+    now: datetime,
+) -> list[SnapshotInput]:
+    """Собираем snapshots с qty=0 для всех карточек когда у продавца 0 FBS-складов."""
+    return [
+        SnapshotInput(
+            sku=vendor_code,
+            product_name=title or vendor_code,
+            stock_quantity=0,
+            price=prices_by_vendor.get(vendor_code, Decimal("0")),
+            snapshot_time=now,
+        )
+        for vendor_code, title in names_by_vendor.items()
+    ]
