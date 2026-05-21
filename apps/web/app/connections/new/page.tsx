@@ -13,6 +13,7 @@ import { parseApiError, type ParsedError } from "@/lib/error-parser";
  * 5 типов складов, каждый = отдельная "data_connection" в БД с собственным warehouse_kind.
  * Один Ozon API-ключ → 2 склада (FBO + FBS, остатки берутся по разным фильтрам).
  * Один WB token → 2 склада (FBO через Statistics API + FBS через Marketplace API).
+ * Для WB FBS токену нужны категории: Статистика + Маркетплейс + Контент.
  */
 type WarehouseKind = "ozon_fbo" | "ozon_fbs" | "wb_fbo" | "wb_fbs" | "google_sheet";
 
@@ -50,8 +51,8 @@ const WAREHOUSES: WarehouseMeta[] = [
   {
     kind: "wb_fbs",
     title: "Wildberries FBS",
-    text: "Анализ вашего склада через остатки FBS WB (товары на вашем складе).",
-    dot: "#a71179", status: "wip",
+    text: "Анализ вашего склада через остатки FBS WB (товары на вашем складе). Токен с правами Статистика + Маркетплейс + Контент.",
+    dot: "#a71179", status: "ready",
     pair: "wb_fbo",
   },
   {
@@ -96,7 +97,6 @@ export default function NewConnectionPage() {
           kind={kind}
           onCancel={() => setKind(null)}
           onDone={() => {
-            // Если у текущего склада есть парный (FBO↔FBS) — предложить добавить второй
             const meta = WAREHOUSES.find((w) => w.kind === kind);
             const pairKind = meta?.pair;
             const pairMeta = pairKind ? WAREHOUSES.find((w) => w.kind === pairKind) : null;
@@ -169,16 +169,14 @@ function WipPanel({ warehouse, onCancel }: { warehouse: WarehouseMeta; onCancel:
       </div>
 
       <p className="mt-4 text-ink-muted leading-relaxed">
-        {warehouse.kind === "wb_fbs"
-          ? "Интеграция с Wildberries Marketplace API для остатков FBS. Требует указание warehouseId физического склада. Дорабатываем — напишем как только будет готово."
-          : "Эта интеграция в разработке. Напишем, когда будет готово."}
+        Эта интеграция в разработке. Напишем, когда будет готово.
       </p>
 
       <div className="mt-6 rounded-lg border border-lime-deep/30 bg-lime-soft p-4 flex items-start gap-3">
         <span className="text-lime-deep mt-0.5"><Icons.Bell /></span>
         <div>
           <div className="font-medium text-ink">Пока используйте другие склады</div>
-          <p className="mt-1 text-sm text-ink-muted">Ozon FBO, Ozon FBS, Wildberries FBO и Google Sheet уже работают — подключайте их прямо сейчас.</p>
+          <p className="mt-1 text-sm text-ink-muted">Ozon FBO, Ozon FBS, Wildberries FBO/FBS и Google Sheet уже работают — подключайте их прямо сейчас.</p>
         </div>
       </div>
 
@@ -206,6 +204,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
 
   const isOzon = kind === "ozon_fbo" || kind === "ozon_fbs";
   const isWb = kind === "wb_fbo" || kind === "wb_fbs";
+  const isWbFbs = kind === "wb_fbs";
   const isSheet = kind === "google_sheet";
 
   async function handleSubmit(e: React.FormEvent) {
@@ -242,7 +241,6 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
       });
       if (!createRes.ok) {
         const data = await createRes.json().catch(() => ({}));
-        // 402 Payment Required = лимит складов
         if (createRes.status === 402 || data?.code === "warehouse_limit_reached") {
           setModalError({
             kind: "permission",
@@ -280,7 +278,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
         <h2 className="font-display text-2xl md:text-3xl tracking-tight font-medium">{warehouseTitle(kind)}</h2>
 
         {isOzon && <OzonInstructions />}
-        {isWb && <WbInstructions />}
+        {isWb && <WbInstructions isFbs={isWbFbs} />}
         {isSheet && <SheetInstructions />}
 
         <div>
@@ -334,9 +332,16 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
 
         {isWb && (
           <div>
-            <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Статистический токен</label>
+            <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">
+              {isWbFbs ? "Токен WB (Статистика + Маркетплейс + Контент)" : "Статистический токен"}
+            </label>
             <input required type="password" value={wbToken} onChange={(e) => setWbToken(e.target.value)}
               className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+            {isWbFbs && (
+              <p className="mt-1.5 font-mono text-[11px] text-ink-hush">
+                Для FBS нужны три категории прав: Статистика (цены), Маркетплейс (остатки FBS), Контент (карточки).
+              </p>
+            )}
           </div>
         )}
 
@@ -390,7 +395,7 @@ function PairSuggestModal({
 }
 
 // ============================================================
-// Инструкции по получению API-ключей (сохранены из старой версии)
+// Инструкции по получению API-ключей
 // ============================================================
 
 function OzonInstructions() {
@@ -413,7 +418,7 @@ function OzonInstructions() {
   );
 }
 
-function WbInstructions() {
+function WbInstructions({ isFbs }: { isFbs: boolean }) {
   return (
     <div className="rounded-xl border border-line bg-bg-soft p-4 md:p-5 text-sm">
       <h3 className="font-display text-base font-medium text-ink mb-3">Как получить токен</h3>
@@ -424,11 +429,25 @@ function WbInstructions() {
         <li>Для интеграции — <b>вручную</b></li>
         <li>Тип токена — <b>Базовый токен</b></li>
         <li>Название токена — произвольное</li>
-        <li>Категории — <b>Статистика</b></li>
+        {isFbs ? (
+          <li>
+            Категории — <b>Статистика, Маркетплейс, Контент</b>
+            <span className="block ml-5 text-[11px] text-ink-hush mt-0.5">
+              (для FBS нужны все три: Статистика — цены, Маркетплейс — остатки FBS-складов, Контент — карточки)
+            </span>
+          </li>
+        ) : (
+          <li>Категории — <b>Статистика</b></li>
+        )}
         <li>Уровень доступа — <b>Только чтение</b></li>
         <li>Нажать <b>Создать токен</b></li>
-        <li>Скопировать в поле <b>Статистический токен</b></li>
+        <li>Скопировать в поле выше</li>
       </ol>
+      {isFbs && (
+        <p className="mt-3 text-[11px] text-ink-hush">
+          У одного токена WB можно ставить несколько категорий одновременно. Тот же токен подойдёт и для WB FBO.
+        </p>
+      )}
     </div>
   );
 }
@@ -458,6 +477,10 @@ function SheetInstructions() {
           <div className="font-medium text-ink mb-1">2. Range — диапазон со столбцами</div>
           <p className="text-ink-muted">
             Названия столбцов с данными: <b>Артикул, Наименование, Цена, Сток</b>.
+          </p>
+          <p className="mt-1 text-ink-muted">
+            Колонки могут быть не подряд (например A, B, F, H) — вы сами назначаете какая колонка содержит какое поле,
+            мы читаем только указанный диапазон.
           </p>
           <p className="mt-1 text-ink-muted">
             Пример:{" "}
