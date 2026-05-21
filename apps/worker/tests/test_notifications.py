@@ -220,16 +220,19 @@ class TestSyncErrorNotification:
         return result, payload
 
     def test_warning_email_when_not_paused(self, monkeypatch):
-        """auto_paused=False — жёлтый warning, без слов 'поставлен на паузу'."""
+        """auto_paused=False — warning без слов 'поставлен на паузу'."""
         result, payload = self._send(monkeypatch, auto_paused=False, failure_count=2)
         assert result is True
-        assert "Ошибка синхронизации" in payload["subject"]
+        # В коде: subject = f"⚠ Veloseller: ошибка синхронизации склада «{warehouse_name}»"
+        assert "ошибка синхронизации" in payload["subject"]
         assert "Основной склад" in payload["subject"]
         html = payload["html"]
+        # headline в html: "Ошибка синхронизации склада «Основной склад»" (с большой)
+        assert "Ошибка синхронизации" in html
         assert "произошла ошибка" in html
         assert "поставлен на паузу" not in html
-        assert "Ozon FBO" in html  # warehouse_kind развернут в label
-        assert "<b>2</b>" in html  # failure_count
+        assert "Ozon FBO" in html
+        assert "<b>2</b>" in html
 
     def test_paused_email_when_auto_paused(self, monkeypatch):
         """auto_paused=True — красный alert, 'поставлен на паузу'."""
@@ -237,7 +240,7 @@ class TestSyncErrorNotification:
         assert result is True
         assert "паузу" in payload["subject"]
         html = payload["html"]
-        assert "ПРОДАЛИ СИНХРОНИЗАЦИЮ".lower() in html.lower() or "поставлен на паузу" in html
+        assert "поставлен на паузу" in html
         assert "3 раз подряд" in html
 
     def test_warehouse_name_html_escaped(self, monkeypatch):
@@ -259,9 +262,10 @@ class TestSyncErrorNotification:
         long_err = "A" * 1000
         result, payload = self._send(monkeypatch, error_message=long_err)
         html = payload["html"]
-        # В HTML должны пойти только первые 500 "A"
+        # В HTML должны пойти только первые 500 "A".
+        # Другие "A" в шаблоне (typography, font names) могут быть, поэтому с запасом.
         count = html.count("A")
-        assert count <= 510  # с запасом на "<A href=..." в других частях письма
+        assert 500 <= count <= 520, f"Ожидали ~500 A в html, получили {count}"
 
     def test_warehouse_kind_label_mapping(self, monkeypatch):
         """Различные warehouse_kind правильно разворачиваются в читаемые label."""
