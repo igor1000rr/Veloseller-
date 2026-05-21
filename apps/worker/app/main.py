@@ -89,8 +89,6 @@ if _sentry_dsn:
         logger.warning("sentry init failed: %s", _e)
 
 
-_running_recalcs: dict[str, dict] = {}
-_RECALC_STATE_TTL = timedelta(hours=24)
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _CSV_MAX_SIZE_BYTES = 20 * 1024 * 1024
 
@@ -104,22 +102,43 @@ def _is_production() -> bool:
     return env == "production"
 
 
-def _cleanup_old_recalcs() -> None:
-    cutoff = datetime.now(timezone.utc) - _RECALC_STATE_TTL
-    stale = []
-    for sid, state in _running_recalcs.items():
-        if state.get("status") in ("done", "error"):
-            finished = state.get("finished_at")
-            if finished:
-                try:
-                    if datetime.fromisoformat(finished.replace("Z", "+00:00")) < cutoff:
-                        stale.append(sid)
-                except (ValueError, AttributeError):
-                    stale.append(sid)
-    for sid in stale:
-        del _running_recalcs[sid]
-    if stale:
-        logger.info("cleaned up stale recalc states", extra={"count": len(stale)})
+# ============================================================================
+# recalc_jobs — состояние в БД вместо in-memory словаря.
+# Миграция 0008_robokassa_and_recalc_jobs.sql.
+# ============================================================================
+
+def _recalc_get(seller_id: str) -> Optional[dict]:
+    """Прочитать состояние пересчёта из recalc_jobs.
+
+    Возвращает None если записи нет (пользователь никогда не запускал)
+    или при ошибке BD (логируем, но не падаем).
+    """
+    sb = get_supabase()
+    try:
+        res = (
+            sb.table("recalc_jobs")
+            .select("status,started_at,finished_at,result,error,progress")
+            .eq("seller_id", seller_id)
+            .maybe_single()
+            .execute()
+        )
+        return res.data
+    except Exception:
+        logger.exception("recalc_jobs get failed", extra={"seller_id": seller_id})
+        return None
+
+
+def _recalc_upsert(seller_id: str, **fields) -> None:
+    """Upsert состояния пересчёта в recalc_jobs (PK = seller_id)."""
+    sb = get_supabase()
+    row = {"seller_id": seller_id, **fields}
+    try:
+        sb.table("recalc_jobs").upsert(row, on_conflict="seller_id").execute()
+    except Exception:
+        logger.exception(
+            "recalc_jobs upsert failed",
+            extra={"seller_id": seller_id, "status": fields.get("status")},
+        )
 
 
 @asynccontextmanager
@@ -142,16 +161,12 @@ def require_worker_secret(x_worker_secret: Optional[str] = Header(None)) -> None
     SECURITY FIX:
       - hmac.compare_digest вместо != (защита от timing attack).
       - В проде без заданного или с dev-default секретом → 500 (fail-closed).
-        Раньше: if secret пуст или == dev-secret-replace-me — auth полностью отключался.
-        Сейчас: в dev это было удобно (пропускаем без секрета), но в проде вербовалось.
     """
     secret = settings.worker_secret
     is_dev_default = (not secret) or secret == "dev-secret-replace-me"
 
     if is_dev_default:
         if _is_production():
-            # В проде это ошибка конфига (config.py должен был поймать это на старте).
-            # Но на случай если секрет поменялся на dev runtime — fail-closed.
             raise HTTPException(500, "Server misconfigured: worker secret not set")
         # Dev/тесты: пропускаем без секрета
         return
@@ -369,12 +384,7 @@ def _send_sync_error_notifications(
 
 
 def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None) -> None:
-    """Обновляет state склада после попытки sync.
-
-    Успех: status='active', failure_count=0, error_notified_at=NULL.
-    Ошибка: failure_count++; при >=3 status='paused', иначе 'error'.
-    Шлём email/telegram с дедупликацией.
-    """
+    """Обновляет state склада после попытки sync."""
     now_iso = datetime.now(timezone.utc).isoformat()
 
     if error is None:
@@ -477,8 +487,8 @@ def _run_wb_sync_bg(
 ) -> None:
     """BG sync для WB. warehouse_kind определяет flow:
 
-    - wb_fbs → fetch_fbs_snapshots (Marketplace API + Content API + Statistics API для цен)
-    - wb_fbo / legacy / None → fetch_snapshots (Statistics API остатки FBO)
+    - wb_fbs → fetch_fbs_snapshots
+    - wb_fbo / legacy / None → fetch_snapshots
     """
     sb = get_supabase()
     try:
@@ -611,33 +621,56 @@ def ingest_feed(connection_id: str, background_tasks: BackgroundTasks) -> dict:
 
 
 def _run_recalc_bg(seller_id: str) -> None:
+    """BG-задача пересчёта со состоянием в recalc_jobs таблице.
+
+    Раньше состояние хранилось в in-memory словаре _running_recalcs — терялось
+    при рестарте worker'а. Теперь переживает рестарты.
+    """
     progress: dict = {
         "phase": "starting", "processed": 0, "total": 0, "period_days": 30,
         "current_period_index": 0, "total_periods": 3,
     }
-    _running_recalcs[seller_id] = {
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "status": "running", "result": None, "error": None, "progress": progress,
-    }
+    started_at = datetime.now(timezone.utc).isoformat()
+    _recalc_upsert(
+        seller_id,
+        status="running",
+        started_at=started_at,
+        finished_at=None,
+        result=None,
+        error=None,
+        progress=progress,
+    )
     try:
         result = recalc_seller_all_periods(seller_id, progress=progress)
-        _running_recalcs[seller_id].update({
-            "status": "done", "finished_at": datetime.now(timezone.utc).isoformat(), "result": result,
+        _recalc_upsert(
+            seller_id,
+            status="done",
+            started_at=started_at,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            result=result,
+            error=None,
+            progress=progress,
+        )
+        logger.info("recalc done (bg)", extra={
+            "seller_id": seller_id,
+            **{k: v for k, v in result.items() if isinstance(v, (int, float))},
         })
-        logger.info("recalc done (bg)", extra={"seller_id": seller_id, **{k: v for k, v in result.items() if isinstance(v, (int, float))}})
     except Exception as e:
-        _running_recalcs[seller_id].update({
-            "status": "error", "finished_at": datetime.now(timezone.utc).isoformat(),
-            "error": str(e)[:500],
-        })
+        _recalc_upsert(
+            seller_id,
+            status="error",
+            started_at=started_at,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            result=None,
+            error=str(e)[:500],
+            progress=progress,
+        )
         logger.exception("recalc failed (bg)", extra={"seller_id": seller_id})
 
 
 @app.post("/jobs/recalc/{seller_id}", dependencies=[Depends(require_worker_secret)])
 def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: bool = False) -> dict:
-    _cleanup_old_recalcs()
-
-    existing = _running_recalcs.get(seller_id)
+    existing = _recalc_get(seller_id)
     if existing and existing.get("status") == "running":
         return {
             "started": False, "status": "running",
@@ -657,7 +690,7 @@ def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: b
 
 @app.get("/jobs/recalc/{seller_id}/status", dependencies=[Depends(require_worker_secret)])
 def job_recalc_status(seller_id: str) -> dict:
-    state = _running_recalcs.get(seller_id)
+    state = _recalc_get(seller_id)
     if not state:
         return {"status": "idle", "started_at": None, "result": None, "error": None, "progress": None}
     return state
@@ -673,13 +706,7 @@ def job_recalc_all() -> dict:
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Optional[str] = Header(None)) -> dict:
-    """Telegram webhook для связывания telegram_chat_id с seller через /start <seller_uuid>.
-
-    SECURITY FIX (fail-closed): раньше в development при отсутствии
-    TELEGRAM_WEBHOOK_SECRET эндпоинт оставался открыт — это позволяло фрод-webhook'ам
-    привязывать chat_id к любому seller_id. Теперь без секрета всегда 500.
-    (config.py в проде валит старт без этого env — это двойная защита.)
-    """
+    """Telegram webhook для связывания telegram_chat_id с seller через /start <seller_uuid>."""
     from app.telegram import send_message
 
     expected_secret = _os.environ.get("TELEGRAM_WEBHOOK_SECRET")
