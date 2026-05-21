@@ -5,21 +5,21 @@
 После миграции products_scoped_to_connection (май 2026) _ensure_products
 принимает connection_id обязательным параметром, а SELECT для маппинга
 sku→product_id делает .eq('seller_id').eq('connection_id').in_('sku').
+
+Рефакторинг _running_recalcs → recalc_jobs BD: TestCleanupOldRecalcs удалён
+(функция _cleanup_old_recalcs больше не существует — состояние хранится в БД
+по PK seller_id, in-memory TTL не нужен).
 """
 from __future__ import annotations
 import os
 os.environ["ENABLE_SCHEDULER"] = "false"
 
-from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.main import (
-    _ensure_products, _persist_snapshots, _PRODUCTS_IN_BATCH,
-    _cleanup_old_recalcs, _running_recalcs,
-)
+from app.main import _ensure_products, _persist_snapshots, _PRODUCTS_IN_BATCH
 from app.schemas import SnapshotInput, SourceType
 
 
@@ -238,95 +238,3 @@ class TestPersistSnapshotsDedup:
         snaps = [_mk_snap("A1")]
         result = _persist_snapshots("seller-1", None, SourceType.CSV_UPLOAD, snaps)
         assert result == 0
-
-
-# ============================================================================
-# БАГ 27: _cleanup_old_recalcs — TTL для finished tasks
-# ============================================================================
-
-
-class TestCleanupOldRecalcs:
-    """Защита от memory leak — старые finished задачи удаляются."""
-
-    def setup_method(self):
-        """Очищаем перед каждым тестом."""
-        _running_recalcs.clear()
-
-    def teardown_method(self):
-        _running_recalcs.clear()
-
-    def test_keeps_running_tasks(self):
-        """Running задачи никогда не удаляются, даже если давно начались."""
-        old_time = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
-        _running_recalcs["seller-running"] = {
-            "started_at": old_time,
-            "status": "running",
-            "finished_at": None,
-        }
-        _cleanup_old_recalcs()
-        assert "seller-running" in _running_recalcs
-
-    def test_keeps_recent_finished(self):
-        """Finished задачи моложе 24ч остаются."""
-        recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        _running_recalcs["seller-recent"] = {
-            "status": "done",
-            "finished_at": recent,
-        }
-        _cleanup_old_recalcs()
-        assert "seller-recent" in _running_recalcs
-
-    def test_removes_old_done(self):
-        """Done задачи старше 24ч удаляются."""
-        old = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
-        _running_recalcs["seller-old-done"] = {
-            "status": "done",
-            "finished_at": old,
-        }
-        _cleanup_old_recalcs()
-        assert "seller-old-done" not in _running_recalcs
-
-    def test_removes_old_error(self):
-        """Error задачи старше 24ч тоже удаляются."""
-        old = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
-        _running_recalcs["seller-old-error"] = {
-            "status": "error",
-            "finished_at": old,
-            "error": "something failed",
-        }
-        _cleanup_old_recalcs()
-        assert "seller-old-error" not in _running_recalcs
-
-    def test_handles_malformed_finished_at(self):
-        """Поломанный timestamp — удаляем (нельзя оставлять навсегда)."""
-        _running_recalcs["seller-broken"] = {
-            "status": "done",
-            "finished_at": "not-a-date",
-        }
-        _cleanup_old_recalcs()
-        assert "seller-broken" not in _running_recalcs
-
-    def test_handles_missing_finished_at(self):
-        """Если finished_at отсутствует — не падаем, просто оставляем."""
-        _running_recalcs["seller-no-finished"] = {
-            "status": "done",
-            # нет finished_at
-        }
-        # Не должен упасть
-        _cleanup_old_recalcs()
-
-    def test_mixed_cleanup(self):
-        """Смешанные задачи — старые удалены, свежие остались."""
-        old = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
-        recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
-        _running_recalcs["old-1"] = {"status": "done", "finished_at": old}
-        _running_recalcs["old-2"] = {"status": "error", "finished_at": old}
-        _running_recalcs["recent"] = {"status": "done", "finished_at": recent}
-        _running_recalcs["running"] = {"status": "running", "finished_at": None}
-
-        _cleanup_old_recalcs()
-
-        assert "old-1" not in _running_recalcs
-        assert "old-2" not in _running_recalcs
-        assert "recent" in _running_recalcs
-        assert "running" in _running_recalcs
