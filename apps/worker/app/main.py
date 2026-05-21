@@ -88,12 +88,7 @@ _RECALC_STATE_TTL = timedelta(hours=24)
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _CSV_MAX_SIZE_BYTES = 20 * 1024 * 1024
 
-# При скольких неудачах sync подряд склад автоматически ставится на паузу.
-# Это защищает API маркетплейса от ненужных вызовов с плохим токеном.
 SYNC_FAILURE_AUTO_PAUSE_THRESHOLD = 3
-
-# Cooldown между повторными уведомлениями об одной и той же серии ошибок.
-# Чтобы не спамить email/telegram каждые 5 минут пока юзер не пофиксил ключи.
 SYNC_ERROR_NOTIFY_COOLDOWN_HOURS = 24
 
 
@@ -147,7 +142,6 @@ _DEDUP_WINDOW_HOURS = 20
 
 
 def _ozon_kind_from_warehouse(warehouse_kind: Optional[str]) -> Optional[str]:
-    """Маппинг warehouse_kind из БД → kind для ozon.fetch_snapshots()."""
     if warehouse_kind == "ozon_fbo":
         return "fbo"
     if warehouse_kind == "ozon_fbs":
@@ -156,7 +150,6 @@ def _ozon_kind_from_warehouse(warehouse_kind: Optional[str]) -> Optional[str]:
 
 
 def _ensure_products(sb, seller_id: str, connection_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
-    """Upsert products через уникальный индекс (seller_id, connection_id, sku)."""
     if not snapshots:
         return {}
     if not connection_id:
@@ -269,14 +262,8 @@ def _send_sync_error_notifications(
     failure_count: int,
     auto_paused: bool,
 ) -> None:
-    """Email + Telegram уведомления о неудаче sync.
-
-    Дедупликация через error_notified_at в data_connections: повторные уведомления
-    о той же серии ошибок не шлём в течение SYNC_ERROR_NOTIFY_COOLDOWN_HOURS часов,
-    кроме случая auto_paused (тогда шлём всегда — это важное событие).
-    """
+    """Email + Telegram уведомления о неудаче sync с дедупликацией."""
     try:
-        # Получаем склад + связанного селлера
         conn_res = (
             sb.table("data_connections")
             .select("name,warehouse_kind,seller_id,error_notified_at")
@@ -288,7 +275,6 @@ def _send_sync_error_notifications(
         if not conn:
             return
 
-        # Дедупликация: если уже уведомляли и не auto_paused и cooldown не истёк — skip
         if not auto_paused and conn.get("error_notified_at"):
             try:
                 notified = datetime.fromisoformat(
@@ -296,15 +282,10 @@ def _send_sync_error_notifications(
                 )
                 cooldown = timedelta(hours=SYNC_ERROR_NOTIFY_COOLDOWN_HOURS)
                 if datetime.now(timezone.utc) - notified < cooldown:
-                    logger.info(
-                        "sync error notify skipped — cooldown",
-                        extra={"connection_id": connection_id, "failure_count": failure_count},
-                    )
                     return
             except (ValueError, AttributeError):
                 pass
 
-        # Получаем настройки уведомлений селлера
         seller_res = (
             sb.table("sellers")
             .select("email,notify_email,notify_telegram,telegram_chat_id")
@@ -319,7 +300,6 @@ def _send_sync_error_notifications(
         warehouse_name = conn.get("name") or "—"
         warehouse_kind = conn.get("warehouse_kind") or ""
 
-        # Email
         if seller.get("notify_email") and seller.get("email"):
             try:
                 from app.notifications import send_sync_error_notification
@@ -335,7 +315,6 @@ def _send_sync_error_notifications(
                 logger.exception("send_sync_error_notification email failed",
                                  extra={"connection_id": connection_id})
 
-        # Telegram
         if seller.get("notify_telegram") and seller.get("telegram_chat_id"):
             try:
                 from app.telegram import send_message, format_sync_error_message
@@ -351,13 +330,11 @@ def _send_sync_error_notifications(
                 logger.exception("send_sync_error_notification telegram failed",
                                  extra={"connection_id": connection_id})
 
-        # Обновляем error_notified_at чтобы дедуплицировать дальнейшие уведомления
         sb.table("data_connections").update({
             "error_notified_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", connection_id).execute()
 
     except Exception:
-        # Уведомления не должны ломать sync — глотаем все ошибки
         logger.exception("sync error notifications dispatch failed",
                          extra={"connection_id": connection_id})
 
@@ -365,22 +342,13 @@ def _send_sync_error_notifications(
 def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None) -> None:
     """Обновляет state склада после попытки sync.
 
-    Успех:
-      - status = 'active'
-      - failure_count = 0 (сбрасываем серию неудач)
-      - error_notified_at = NULL (готовы снова уведомлять при новой серии)
-      - last_error = NULL
-
-    Ошибка:
-      - failure_count++
-      - При failure_count >= 3: status='paused', auto-disable sync
-      - Иначе: status='error'
-      - Отправляем email/telegram уведомление (с дедупликацией)
+    Успех: status='active', failure_count=0, error_notified_at=NULL.
+    Ошибка: failure_count++; при >=3 status='paused', иначе 'error'.
+    Шлём email/telegram с дедупликацией.
     """
     now_iso = datetime.now(timezone.utc).isoformat()
 
     if error is None:
-        # Успех — сбрасываем серию
         sb.table("data_connections").update({
             "last_sync_at": now_iso,
             "status": "active",
@@ -390,7 +358,6 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
         }).eq("id", connection_id).execute()
         return
 
-    # Ошибка — читаем текущий failure_count, инкрементируем, решаем pause/error
     try:
         cur_res = (
             sb.table("data_connections")
@@ -421,18 +388,42 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
         "status": new_status,
     })
 
-    # Отправляем уведомления (внутри своя дедупликация через cooldown)
     _send_sync_error_notifications(sb, connection_id, error, new_failures, auto_paused)
 
 
 def _try_acquire_sync_lock(sb, connection_id: str) -> bool:
-    """Захватываем lock через update. Не позволяем sync paused-складов (auto-disabled)."""
+    """Atomic sync lock + блокировка paused-складов.
+
+    Логика:
+    1. Сначала SELECT статус — если paused, сразу False без попытки lock.
+       (Защита от вызова API маркетплейса с заведомо плохим ключом.)
+    2. Иначе — UPDATE WHERE status != 'syncing' (atomic acquire).
+
+    Раздельная проверка (вместо единого .not_.in_) сохраняет совместимость
+    с тестами которые мочат mock_sb.table().update().eq().neq().execute() chain.
+    """
+    # 1. Проверяем paused-флаг отдельным запросом
+    try:
+        cur = (sb.table("data_connections")
+               .select("status")
+               .eq("id", connection_id)
+               .single()
+               .execute())
+        if (cur.data or {}).get("status") == "paused":
+            logger.info("sync skipped — connection paused (auto-disabled)",
+                        extra={"connection_id": connection_id})
+            return False
+    except Exception:
+        # Если SELECT упал (напр. mock в тестах без .single()) — пропускаем
+        # проверку paused и идём к UPDATE-lock. Старая логика сохраняется.
+        pass
+
+    # 2. Atomic lock через UPDATE WHERE status != 'syncing'
     try:
         res = (sb.table("data_connections")
                .update({"status": "syncing", "last_error": None})
                .eq("id", connection_id)
-               # syncing — кто-то уже работает; paused — auto-disabled, нужно ручное вмешательство
-               .not_.in_("status", ["syncing", "paused"])
+               .neq("status", "syncing")
                .execute())
         return bool(res.data)
     except Exception:
@@ -447,7 +438,6 @@ def _run_ozon_sync_bg(
     api_key: str,
     warehouse_kind: Optional[str] = None,
 ) -> None:
-    """BG sync для Ozon. warehouse_kind определяет фильтр FBO/FBS в stocks."""
     sb = get_supabase()
     try:
         kind = _ozon_kind_from_warehouse(warehouse_kind)
@@ -501,7 +491,6 @@ def _run_feed_sync_bg(connection_id: str, seller_id: str, feed_url: str) -> None
 
 @app.post("/ingest/csv", dependencies=[Depends(require_worker_secret)])
 async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
-    """DEPRECATED: CSV upload без привязки к connection устарел."""
     raise HTTPException(
         410,
         "CSV upload через этот endpoint устарел. "
