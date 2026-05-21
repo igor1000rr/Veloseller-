@@ -96,26 +96,44 @@ export const RATE_LIMITS = {
   SENSITIVE: { max: 5, windowMs: 60_000 } as RateLimitConfig,
   // Auth эндпоинты (login/register) — защита от brute force
   AUTH: { max: 10, windowMs: 60_000 } as RateLimitConfig,
+  // Webhook (Robokassa Result URL и т.п.) — IP-based анти-флуд
+  WEBHOOK: { max: 60, windowMs: 60_000 } as RateLimitConfig,
 };
 
 /**
- * Простой helper: извлекает IP из NextRequest (учитывая X-Forwarded-For).
+ * Извлекает реальный IP клиента из запроса.
+ *
+ * SECURITY FIX (XFF spoofing): раньше брали первый IP из X-Forwarded-For —
+ * это полностью контролируется клиентом и легко обходит rate-limit
+ * (random XFF на каждый запрос → каждый «другой IP»).
+ *
+ * Правильный порядок при стандартной nginx-конфигурации:
+ *  1. x-real-ip — nginx через proxy_set_header X-Real-IP $remote_addr;
+ *     proxy_set_header перезатирает клиентский header → доверенный.
+ *  2. Последний IP из X-Forwarded-For — nginx через proxy_add_x_forwarded_for
+ *     ДОПИСЫВАЕТ $remote_addr в конец цепочки → последний = доверенный.
+ *  3. fallback "unknown" (dev/тесты без прокси).
  */
 export function getClientIp(req: Request): string {
+  // 1. x-real-ip — nginx перезатирает любое клиентское значение
+  const realIp = req.headers.get("x-real-ip");
+  if (realIp) {
+    const trimmed = realIp.trim();
+    if (trimmed) return trimmed;
+  }
+  // 2. Последний IP в X-Forwarded-For = добавлен nginx через proxy_add_x_forwarded_for
   const xff = req.headers.get("x-forwarded-for");
   if (xff) {
-    // first IP in chain — client's real IP
-    return xff.split(",")[0].trim();
+    const parts = xff.split(",").map(s => s.trim()).filter(Boolean);
+    if (parts.length > 0) return parts[parts.length - 1];
   }
-  const realIp = req.headers.get("x-real-ip");
-  if (realIp) return realIp;
   return "unknown";
 }
 
 /**
  * Из NextRequest извлекает ключ рейтлимита:
  *  - Предпочитает user_id из Supabase cookie (sb-...-auth-token)
- *  - Иначе IP адрес
+ *  - Иначе IP адрес (см. getClientIp — берётся доверенный, не клиентский XFF)
  *
  * @param req NextRequest
  * @param userId optional — если уже извлекли из Supabase auth.getUser()

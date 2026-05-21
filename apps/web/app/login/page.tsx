@@ -8,9 +8,9 @@ import { safeRedirect } from "@/lib/safe-redirect";
 import { Icons } from "../_components/Icons";
 
 /**
- * БАГ 47 fix: open redirect защита через safeRedirect из lib/safe-redirect.ts.
- * Раньше /login?redirect=https://evil.com → router.push("https://evil.com") после login.
- * safeRedirect используется и тут, и в /auth/callback?next= — единый whitelist.
+ * БАГ 47 fix: open redirect защита через safeRedirect (lib/safe-redirect.ts).
+ * Раньше: /login?redirect=https://evil.com → router.push("https://evil.com") после login.
+ * Сейчас: safeRedirect фильтрует всё кроме относительных путей.
  */
 
 function LoginForm() {

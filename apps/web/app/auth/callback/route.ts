@@ -11,8 +11,10 @@ import { safeRedirect } from "@/lib/safe-redirect";
  *
  * URL: /auth/callback?code=<auth_code>&next=<optional_path>
  *
- * БАГ 47 расширен: ?next= защищён через safeRedirect — раньше принимал
- * https://evil.com и редиректил юзера на чужой сайт после успешного входа.
+ * SECURITY FIX (open redirect): параметр `next` контролируется атакующим
+ * через email-фишинг. Раньше new URL(next, origin) для абсолютного URL
+ * возвращал чужой домен (фишинг после подтверждения email). Теперь next
+ * валидируется через safeRedirect — только относительные пути.
  */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
@@ -45,6 +47,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(target);
   }
 
-  // Успех — редирект на confirmed-страницу (или куда просил юзер в ?next=)
+  // Успех — редирект на confirmed-страницу (или валидный относительный путь из ?next=)
   return NextResponse.redirect(new URL(next, url.origin));
 }

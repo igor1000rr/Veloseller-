@@ -1,32 +1,30 @@
-# Veloseller — sudoers для veloseller
+# Veloseller — sudoers для veloseller.
 #
-# Раньше было NOPASSWD: ALL — это давало root через любую RCE в Next.js процессе
-# (он бежит под этим же юзером). Теперь — только конкретные команды для деплоя.
+# SECURITY FIX: раньше было `NOPASSWD: ALL` — полный root на VPS при
+# компрометации SSH-ключа GitHub Actions ИЛИ при RCE в Next.js процессе
+# (он бежит под этим же юзером). Теперь — только узкий набор команд,
+# необходимый деплою.
 #
-# ВАЖНО: чтобы privilege escalation не прошёл через перезапись finalize.sh,
-# выставь владельца root и режим 0755 на ВСЕ скрипты в deploy/:
-#   sudo chown root:root /opt/veloseller/deploy/*.sh
-#   sudo chmod 0755 /opt/veloseller/deploy/*.sh
-# Иначе veloseller может переписать finalize.sh и эскалировать через sudo.
-# При следующем `git pull` владелец сбросится — добавь в post-receive hook
-# или периодический cron: chown root:root /opt/veloseller/deploy/*.sh
+# ВАЖНО: для полной защиты файлы /opt/veloseller/deploy/*.sh должны
+# принадлежать root:root и быть не editable для veloseller. Сейчас
+# finalize.sh редактируется юзером (потому что `chown -R veloseller`
+# в finalize.sh выдаёт владение всем каталогом), и атакующий, получив
+# RCE в Next.js, может переписать finalize.sh и запустить его через
+# sudo. Это TODO для следующего раунда hardening:
 #
-# Если нужны новые команды — добавляй их сюда, а не возвращай ALL.
+#   sudo chown -R root:root /opt/veloseller/deploy
+#   sudo chmod 755 /opt/veloseller/deploy /opt/veloseller/deploy/*.sh
+#   (+ убрать chown в finalize.sh так чтобы deploy/ не перезатирался)
+#
+# Список команд:
+#  - finalize.sh — основной скрипт деплоя
+#  - systemctl daemon-reload + restart/is-active обоих сервисов
+#  - chown /opt/veloseller (нужен для смены владельца после git pull)
 
-veloseller ALL=(root) NOPASSWD: \
-    /bin/systemctl restart veloseller-web, \
-    /bin/systemctl restart veloseller-worker, \
-    /bin/systemctl daemon-reload, \
-    /bin/systemctl is-active veloseller-web, \
-    /bin/systemctl is-active veloseller-worker, \
-    /bin/systemctl status veloseller-web, \
-    /bin/systemctl status veloseller-worker, \
-    /usr/bin/systemctl restart veloseller-web, \
-    /usr/bin/systemctl restart veloseller-worker, \
-    /usr/bin/systemctl daemon-reload, \
-    /usr/bin/systemctl is-active veloseller-web, \
-    /usr/bin/systemctl is-active veloseller-worker, \
-    /usr/bin/systemctl status veloseller-web, \
-    /usr/bin/systemctl status veloseller-worker, \
-    /bin/bash /opt/veloseller/deploy/finalize.sh, \
-    /opt/veloseller/deploy/finalize.sh
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/bash /opt/veloseller/deploy/finalize.sh
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart veloseller-web
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart veloseller-worker
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active veloseller-web
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active veloseller-worker
+veloseller ALL=(ALL) NOPASSWD: /bin/chown -R veloseller\:veloseller /opt/veloseller
