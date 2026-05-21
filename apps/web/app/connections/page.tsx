@@ -8,19 +8,22 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // БАГ 72: явный список колонок вместо select("*") — не тянем config с зашифрованными
-// API ключами и другие поля, которые не нужны для списка.
-const LIST_COLUMNS = "id,name,source,marketplace,status,last_sync_at,last_error,created_at";
+// API ключами. Multi-warehouse: добавлен warehouse_kind для отображения типа склада.
+const LIST_COLUMNS = "id,name,warehouse_kind,source,marketplace,status,last_sync_at,last_error,created_at";
 
 export default async function ConnectionsPage() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: connections } = await supabase
-    .from("data_connections")
-    .select(LIST_COLUMNS)
-    .eq("seller_id", user.id)
-    .order("created_at", { ascending: false });
+  const [connectionsRes, sellerRes] = await Promise.all([
+    supabase.from("data_connections").select(LIST_COLUMNS).eq("seller_id", user.id).order("created_at", { ascending: false }),
+    supabase.from("sellers").select("plan, plan_warehouses_limit").eq("id", user.id).maybeSingle(),
+  ]);
+  const connections = connectionsRes.data;
+  const limit = sellerRes.data?.plan_warehouses_limit ?? 15;
+  const current = connections?.length ?? 0;
+  const atLimit = current >= limit;
 
   return (
     <>
@@ -28,17 +31,28 @@ export default async function ConnectionsPage() {
         <div>
           <div className="inline-flex items-center gap-2 mb-2">
             <span className="size-1 rounded-full bg-lime-deep" />
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Sources</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Warehouses</span>
           </div>
-          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">Источники данных</h1>
-          <p className="mt-1 text-ink-muted text-sm">Подключённые маркетплейсы и файлы — read-only</p>
+          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">Склады</h1>
+          <p className="mt-1 text-ink-muted text-sm">
+            Данные по каждому складу считаются отдельно и не пересекаются · {current}/{limit} складов
+          </p>
         </div>
-        <Link
-          href={"/connections/new" as any}
-          className="inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-5 py-3 text-sm font-semibold hover:bg-ink-soft transition"
-        >
-          <Icons.Plus /> Подключить источник
-        </Link>
+        {atLimit ? (
+          <div className="inline-flex items-center gap-2 rounded-lg border border-orange/30 bg-orange/10 px-4 py-3 text-sm">
+            <span className="text-orange font-semibold">Лимит складов достигнут.</span>
+            <Link href={"/billing" as any} className="text-orange underline hover:no-underline">
+              Обновить тариф →
+            </Link>
+          </div>
+        ) : (
+          <Link
+            href={"/connections/new" as any}
+            className="inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-5 py-3 text-sm font-semibold hover:bg-ink-soft transition"
+          >
+            <Icons.Plus /> Добавить склад
+          </Link>
+        )}
       </div>
 
       <div className="space-y-3">
@@ -60,7 +74,7 @@ export default async function ConnectionsPage() {
                     </span>
                   </Link>
                   <div className="mt-1.5 flex items-center gap-2 flex-wrap font-mono text-xs text-ink-hush">
-                    <span className="uppercase tracking-wider">{sourceLabel(c.source, c.marketplace)}</span>
+                    <span className="uppercase tracking-wider">{warehouseLabel(c.warehouse_kind, c.source, c.marketplace)}</span>
                     {c.last_sync_at ? (
                       <>
                         <span className="size-1 rounded-full bg-line-2" />
@@ -96,13 +110,15 @@ export default async function ConnectionsPage() {
             <div className="size-12 mx-auto rounded-full bg-lime-soft flex items-center justify-center text-lime-deep mb-4">
               <Icons.Plug />
             </div>
-            <p className="font-display text-xl md:text-2xl text-ink font-medium">Ещё нет подключённых источников</p>
-            <p className="mt-2 text-ink-muted text-sm max-w-md mx-auto">Самый быстрый способ начать — Google Sheet или CSV. Для боёвых маркетплейсов выдай read-only API ключ.</p>
+            <p className="font-display text-xl md:text-2xl text-ink font-medium">Ещё нет подключённых складов</p>
+            <p className="mt-2 text-ink-muted text-sm max-w-md mx-auto">
+              Подключите Ozon FBO/FBS, Wildberries или Google Sheet — каждый источник станет отдельным складом с собственной аналитикой.
+            </p>
             <Link
               href={"/connections/new" as any}
               className="mt-6 inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-6 py-3 text-sm font-semibold hover:bg-ink-soft transition"
             >
-              Подключить первый источник <Icons.ArrowRight />
+              Добавить первый склад <Icons.ArrowRight />
             </Link>
           </div>
         )}
@@ -127,7 +143,18 @@ function StatusBadge({ status }: { status: string | null }) {
   );
 }
 
-function sourceLabel(source: string, marketplace: string | null): string {
+/** Отображаемое название типа склада. Приоритет warehouse_kind над legacy source/marketplace. */
+function warehouseLabel(warehouseKind: string | null, source: string, marketplace: string | null): string {
+  if (warehouseKind) {
+    return {
+      ozon_fbo:     "Ozon FBO",
+      ozon_fbs:     "Ozon FBS",
+      wb_fbo:       "Wildberries FBO",
+      wb_fbs:       "Wildberries FBS",
+      google_sheet: "Google Sheet",
+    }[warehouseKind] || warehouseKind;
+  }
+  // Legacy fallback
   if (source === "csv_upload") return "CSV upload";
   if (source === "google_sheet") return "Google Sheet";
   if (source === "feed") return "YML feed";
