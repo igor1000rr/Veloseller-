@@ -1,4 +1,5 @@
 """Тесты notifications.py — email digest через Resend."""
+import base64
 from unittest.mock import patch, MagicMock
 
 
@@ -179,3 +180,198 @@ class TestTelegramHtmlEscape:
         assert "<b>Veloseller" in result
         assert "<code>OK</code>" in result
         assert '<a href="https://veloseller.ru/dashboard/alerts"' in result
+
+
+# ============================================================================
+# send_sync_error_notification — email об ошибке sync склада
+# ============================================================================
+
+
+class TestSyncErrorNotification:
+    """Покрываем send_sync_error_notification — отправка email о падении sync."""
+
+    def test_no_api_key_returns_false(self, monkeypatch):
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        from app.notifications import send_sync_error_notification
+        result = send_sync_error_notification(
+            to_email="u@e.com", warehouse_name="Склад 1",
+            warehouse_kind="ozon_fbo", error_message="timeout",
+            failure_count=1, auto_paused=False,
+        )
+        assert result is False
+
+    def _send(self, monkeypatch, **overrides):
+        """Helper: отправляет sync-error и возвращает кортеж (result, email_payload)."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_123")
+        params = {
+            "to_email": "seller@example.com",
+            "warehouse_name": "Основной склад",
+            "warehouse_kind": "ozon_fbo",
+            "error_message": "connection timeout",
+            "failure_count": 1,
+            "auto_paused": False,
+            **overrides,
+        }
+        mock_resend = MagicMock()
+        with patch.dict("sys.modules", {"resend": mock_resend}):
+            from app.notifications import send_sync_error_notification
+            result = send_sync_error_notification(**params)
+        payload = mock_resend.Emails.send.call_args[0][0] if result else None
+        return result, payload
+
+    def test_warning_email_when_not_paused(self, monkeypatch):
+        """auto_paused=False — жёлтый warning, без слов 'поставлен на паузу'."""
+        result, payload = self._send(monkeypatch, auto_paused=False, failure_count=2)
+        assert result is True
+        assert "Ошибка синхронизации" in payload["subject"]
+        assert "Основной склад" in payload["subject"]
+        html = payload["html"]
+        assert "произошла ошибка" in html
+        assert "поставлен на паузу" not in html
+        assert "Ozon FBO" in html  # warehouse_kind развернут в label
+        assert "<b>2</b>" in html  # failure_count
+
+    def test_paused_email_when_auto_paused(self, monkeypatch):
+        """auto_paused=True — красный alert, 'поставлен на паузу'."""
+        result, payload = self._send(monkeypatch, auto_paused=True, failure_count=3)
+        assert result is True
+        assert "паузу" in payload["subject"]
+        html = payload["html"]
+        assert "ПРОДАЛИ СИНХРОНИЗАЦИЮ".lower() in html.lower() or "поставлен на паузу" in html
+        assert "3 раз подряд" in html
+
+    def test_warehouse_name_html_escaped(self, monkeypatch):
+        """БАГ: warehouse_name '<script>' должен экранироваться."""
+        result, payload = self._send(monkeypatch, warehouse_name="<script>alert(1)</script>")
+        html = payload["html"]
+        assert "<script>alert(1)" not in html
+        assert "&lt;script&gt;" in html
+
+    def test_error_message_html_escaped(self, monkeypatch):
+        """БАГ: error_message '<b>HACK</b>' должен экранироваться."""
+        result, payload = self._send(monkeypatch, error_message="<b>HACK</b> attempt")
+        html = payload["html"]
+        assert "<b>HACK</b>" not in html
+        assert "&lt;b&gt;HACK&lt;/b&gt;" in html
+
+    def test_error_message_truncated_to_500(self, monkeypatch):
+        """error_message больше 500 символов обрезается в HTML."""
+        long_err = "A" * 1000
+        result, payload = self._send(monkeypatch, error_message=long_err)
+        html = payload["html"]
+        # В HTML должны пойти только первые 500 "A"
+        count = html.count("A")
+        assert count <= 510  # с запасом на "<A href=..." в других частях письма
+
+    def test_warehouse_kind_label_mapping(self, monkeypatch):
+        """Различные warehouse_kind правильно разворачиваются в читаемые label."""
+        for kind, label in [
+            ("ozon_fbo", "Ozon FBO"),
+            ("ozon_fbs", "Ozon FBS"),
+            ("wb_fbo", "Wildberries FBO"),
+            ("wb_fbs", "Wildberries FBS"),
+            ("google_sheet", "Google Sheet"),
+        ]:
+            _, payload = self._send(monkeypatch, warehouse_kind=kind)
+            assert label in payload["html"]
+
+    def test_unknown_warehouse_kind_falls_back_to_raw(self, monkeypatch):
+        """Неизвестный warehouse_kind — отображаем как есть."""
+        _, payload = self._send(monkeypatch, warehouse_kind="custom_kind")
+        assert "custom_kind" in payload["html"]
+
+    def test_resend_exception_returns_false(self, monkeypatch):
+        """Resend бросил — возвращаем False, не падаем."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_123")
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = Exception("network error")
+        with patch.dict("sys.modules", {"resend": mock_resend}):
+            from app.notifications import send_sync_error_notification
+            result = send_sync_error_notification(
+                to_email="u@e.com", warehouse_name="X",
+                warehouse_kind="ozon_fbo", error_message="err",
+                failure_count=1, auto_paused=False,
+            )
+        assert result is False
+
+
+# ============================================================================
+# send_weekly_report_email — еженедельный Excel отчёт
+# ============================================================================
+
+
+class TestWeeklyReportEmail:
+    """Покрываем send_weekly_report_email — отправка xlsx attachment."""
+
+    def test_no_api_key_returns_false(self, monkeypatch):
+        monkeypatch.delenv("RESEND_API_KEY", raising=False)
+        from app.notifications import send_weekly_report_email
+        result = send_weekly_report_email(
+            to_email="u@e.com", seller_name="Igor",
+            xlsx_bytes=b"fake-xlsx-content", filename="report.xlsx",
+        )
+        assert result is False
+
+    def _send(self, monkeypatch, **overrides):
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_123")
+        params = {
+            "to_email": "seller@example.com",
+            "seller_name": "Igor",
+            "xlsx_bytes": b"PK\x03\x04fake-xlsx",
+            "filename": "weekly-2026-W21.xlsx",
+            **overrides,
+        }
+        mock_resend = MagicMock()
+        with patch.dict("sys.modules", {"resend": mock_resend}):
+            from app.notifications import send_weekly_report_email
+            result = send_weekly_report_email(**params)
+        payload = mock_resend.Emails.send.call_args[0][0] if result else None
+        return result, payload
+
+    def test_success_attaches_xlsx(self, monkeypatch):
+        """xlsx прилагается к письму как base64."""
+        xlsx = b"PK\x03\x04this-is-fake-xlsx-content"
+        result, payload = self._send(monkeypatch, xlsx_bytes=xlsx, filename="my-report.xlsx")
+        assert result is True
+        assert "еженедельный отчёт" in payload["subject"].lower()
+        assert len(payload["attachments"]) == 1
+        att = payload["attachments"][0]
+        assert att["filename"] == "my-report.xlsx"
+        # Декодируем и сравниваем оригинальные байты
+        assert base64.b64decode(att["content"]) == xlsx
+
+    def test_seller_name_in_html(self, monkeypatch):
+        """seller_name выводится в приветствии."""
+        result, payload = self._send(monkeypatch, seller_name="Александр")
+        assert "Привет, Александр!" in payload["html"]
+
+    def test_no_seller_name_falls_back(self, monkeypatch):
+        """Без seller_name — просто 'Привет!'."""
+        result, payload = self._send(monkeypatch, seller_name=None)
+        assert "Привет!" in payload["html"]
+
+    def test_seller_name_html_escaped(self, monkeypatch):
+        """seller_name экранируется в HTML."""
+        result, payload = self._send(monkeypatch, seller_name="<img src=x>")
+        html = payload["html"]
+        assert "<img src=x>" not in html
+        assert "&lt;img src=x&gt;" in html
+
+    def test_resend_exception_returns_false(self, monkeypatch):
+        """Resend бросил — возвращаем False."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_123")
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = Exception("resend down")
+        with patch.dict("sys.modules", {"resend": mock_resend}):
+            from app.notifications import send_weekly_report_email
+            result = send_weekly_report_email(
+                to_email="u@e.com", seller_name="I",
+                xlsx_bytes=b"x", filename="f.xlsx",
+            )
+        assert result is False
+
+    def test_uses_app_url_for_dashboard_link(self, monkeypatch):
+        """Ссылка на дашборд из APP_URL env."""
+        monkeypatch.setenv("APP_URL", "https://custom.example.com")
+        result, payload = self._send(monkeypatch)
+        assert 'https://custom.example.com/dashboard' in payload["html"]
