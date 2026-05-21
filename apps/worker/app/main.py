@@ -1,6 +1,7 @@
 """Veloseller worker — FastAPI приложение."""
 from __future__ import annotations
 
+import hmac
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -33,8 +34,13 @@ import os as _os
 
 
 def _scrub_sentry_event(event: dict, hint=None) -> Optional[dict]:
-    SENSITIVE_KEYS = {"api_key", "token", "client_id", "password", "secret", "x-worker-secret",
-                       "authorization", "stripe_subscription_id", "stripe_customer_id"}
+    # Расширенный список sensitive ключей: добавили PII (email, chat_id, telegram_chat_id)
+    # и внутренние ID подписок Stripe.
+    SENSITIVE_KEYS = {
+        "api_key", "token", "client_id", "password", "secret", "x-worker-secret",
+        "authorization", "stripe_subscription_id", "stripe_customer_id",
+        "email", "telegram_chat_id", "chat_id",
+    }
 
     def _scrub(obj):
         if isinstance(obj, dict):
@@ -92,6 +98,12 @@ SYNC_FAILURE_AUTO_PAUSE_THRESHOLD = 3
 SYNC_ERROR_NOTIFY_COOLDOWN_HOURS = 24
 
 
+def _is_production() -> bool:
+    """Сервер в проде? Проверяет ENV и SENTRY_ENV (fallback)."""
+    env = _os.environ.get("ENV", _os.environ.get("SENTRY_ENV", "development")).lower()
+    return env == "production"
+
+
 def _cleanup_old_recalcs() -> None:
     cutoff = datetime.now(timezone.utc) - _RECALC_STATE_TTL
     stale = []
@@ -125,9 +137,26 @@ app = FastAPI(title="Veloseller Worker", version="0.1.0", lifespan=lifespan)
 
 
 def require_worker_secret(x_worker_secret: Optional[str] = Header(None)) -> None:
-    if not settings.worker_secret or settings.worker_secret == "dev-secret-replace-me":
+    """Аутентификация Web → Worker через X-Worker-Secret.
+
+    SECURITY FIX:
+      - hmac.compare_digest вместо != (защита от timing attack).
+      - В проде без заданного или с dev-default секретом → 500 (fail-closed).
+        Раньше: if secret пуст или == dev-secret-replace-me — auth полностью отключался.
+        Сейчас: в dev это было удобно (пропускаем без секрета), но в проде вербовалось.
+    """
+    secret = settings.worker_secret
+    is_dev_default = (not secret) or secret == "dev-secret-replace-me"
+
+    if is_dev_default:
+        if _is_production():
+            # В проде это ошибка конфига (config.py должен был поймать это на старте).
+            # Но на случай если секрет поменялся на dev runtime — fail-closed.
+            raise HTTPException(500, "Server misconfigured: worker secret not set")
+        # Dev/тесты: пропускаем без секрета
         return
-    if x_worker_secret != settings.worker_secret:
+
+    if not x_worker_secret or not hmac.compare_digest(x_worker_secret, secret):
         raise HTTPException(401, "Invalid worker secret")
 
 
@@ -644,14 +673,22 @@ def job_recalc_all() -> dict:
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Optional[str] = Header(None)) -> dict:
+    """Telegram webhook для связывания telegram_chat_id с seller через /start <seller_uuid>.
+
+    SECURITY FIX (fail-closed): раньше в development при отсутствии
+    TELEGRAM_WEBHOOK_SECRET эндпоинт оставался открыт — это позволяло фрод-webhook'ам
+    привязывать chat_id к любому seller_id. Теперь без секрета всегда 500.
+    (config.py в проде валит старт без этого env — это двойная защита.)
+    """
     from app.telegram import send_message
 
     expected_secret = _os.environ.get("TELEGRAM_WEBHOOK_SECRET")
-    if expected_secret:
-        if x_telegram_bot_api_secret_token != expected_secret:
-            raise HTTPException(403, "Forbidden")
-    elif _os.environ.get("ENV", "development") == "production":
-        raise HTTPException(500, "Server misconfigured")
+    if not expected_secret:
+        raise HTTPException(500, "Server misconfigured: TELEGRAM_WEBHOOK_SECRET not set")
+    if not x_telegram_bot_api_secret_token or not hmac.compare_digest(
+        x_telegram_bot_api_secret_token, expected_secret
+    ):
+        raise HTTPException(403, "Forbidden")
 
     try:
         update = await request.json()
