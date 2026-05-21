@@ -116,8 +116,10 @@ def _db_persist_recalc_state(
 ) -> None:
     """Сохраняет состояние recalc job в таблицу recalc_jobs.
 
-    Graceful fallback: если миграция 0008 ещё не применена (таблицы нет) —
-    просто логируем warning, не падаем. Это допускает катить код до или после миграции БД.
+    Колонка в БД называется error_text (миграция add_recalc_jobs_table_and_lock_functions),
+    а параметр функции — error для удобства вызывающего кода.
+
+    Graceful fallback: если таблицы нет — просто логируем warning, не падаем.
     """
     try:
         sb = get_supabase()
@@ -132,25 +134,24 @@ def _db_persist_recalc_state(
         if result is not None:
             payload["result"] = result
         if error is not None:
-            payload["error"] = error
+            payload["error_text"] = error  # колонка в БД называется error_text
         sb.table("recalc_jobs").upsert(payload, on_conflict="seller_id").execute()
     except Exception as e:
-        logger.warning("recalc_jobs persist failed (миграция 0008 применена?)",
+        logger.warning("recalc_jobs persist failed",
                        extra={"seller_id": seller_id, "error": str(e)[:200]})
 
 
 def _db_get_recalc_state(seller_id: str) -> Optional[dict]:
     """Читает состояние recalc job из recalc_jobs. Нормализует формат для UI.
 
-    Возвращает None если:
-      - запись отсутствует;
-      - таблицы нет (миграция 0008 не применена);
-      - любая другая ошибка БД.
+    БД хранит ошибку в колонке error_text, наружу отдаём как error (для совместимости с UI).
+
+    Возвращает None если запись отсутствует или ошибка БД.
     """
     try:
         sb = get_supabase()
         res = (sb.table("recalc_jobs")
-               .select("status, started_at, finished_at, result, error")
+               .select("status, started_at, finished_at, result, error_text")
                .eq("seller_id", seller_id)
                .maybe_single()
                .execute())
@@ -162,7 +163,7 @@ def _db_get_recalc_state(seller_id: str) -> Optional[dict]:
             "started_at": data.get("started_at"),
             "finished_at": data.get("finished_at"),
             "result": data.get("result"),
-            "error": data.get("error"),
+            "error": data.get("error_text"),  # error_text → error для UI
             "progress": None,  # в БД не храним runtime progress — он только in-memory
         }
     except Exception:
