@@ -392,17 +392,7 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
 
 
 def _try_acquire_sync_lock(sb, connection_id: str) -> bool:
-    """Atomic sync lock + блокировка paused-складов.
-
-    Логика:
-    1. Сначала SELECT статус — если paused, сразу False без попытки lock.
-       (Защита от вызова API маркетплейса с заведомо плохим ключом.)
-    2. Иначе — UPDATE WHERE status != 'syncing' (atomic acquire).
-
-    Раздельная проверка (вместо единого .not_.in_) сохраняет совместимость
-    с тестами которые мочат mock_sb.table().update().eq().neq().execute() chain.
-    """
-    # 1. Проверяем paused-флаг отдельным запросом
+    """Atomic sync lock + блокировка paused-складов."""
     try:
         cur = (sb.table("data_connections")
                .select("status")
@@ -414,11 +404,8 @@ def _try_acquire_sync_lock(sb, connection_id: str) -> bool:
                         extra={"connection_id": connection_id})
             return False
     except Exception:
-        # Если SELECT упал (напр. mock в тестах без .single()) — пропускаем
-        # проверку paused и идём к UPDATE-lock. Старая логика сохраняется.
         pass
 
-    # 2. Atomic lock через UPDATE WHERE status != 'syncing'
     try:
         res = (sb.table("data_connections")
                .update({"status": "syncing", "last_error": None})
@@ -453,13 +440,31 @@ def _run_ozon_sync_bg(
         logger.exception("ozon sync failed (bg)", extra={"connection_id": connection_id})
 
 
-def _run_wb_sync_bg(connection_id: str, seller_id: str, token: str) -> None:
+def _run_wb_sync_bg(
+    connection_id: str,
+    seller_id: str,
+    token: str,
+    warehouse_kind: Optional[str] = None,
+) -> None:
+    """BG sync для WB. warehouse_kind определяет flow:
+
+    - wb_fbs → fetch_fbs_snapshots (Marketplace API + Content API + Statistics API для цен)
+    - wb_fbo / legacy / None → fetch_snapshots (Statistics API остатки FBO)
+    """
     sb = get_supabase()
     try:
-        snapshots = wildberries.fetch_snapshots(token)
+        if warehouse_kind == "wb_fbs":
+            snapshots = wildberries.fetch_fbs_snapshots(token)
+            wb_flow = "fbs"
+        else:
+            snapshots = wildberries.fetch_snapshots(token)
+            wb_flow = "fbo"
         inserted = _persist_snapshots(seller_id, connection_id, SourceType.MARKETPLACE_API, snapshots)
         _mark_connection_synced(sb, connection_id)
-        logger.info("wb synced (bg)", extra={"connection_id": connection_id, "inserted": inserted})
+        logger.info("wb synced (bg)", extra={
+            "connection_id": connection_id, "warehouse_kind": warehouse_kind,
+            "wb_flow": wb_flow, "inserted": inserted, "fetched_skus": len(snapshots),
+        })
     except Exception as e:
         _mark_connection_synced(sb, connection_id, error=str(e)[:500])
         logger.exception("wb sync failed (bg)", extra={"connection_id": connection_id})
@@ -552,7 +557,11 @@ def ingest_wb(connection_id: str, background_tasks: BackgroundTasks) -> dict:
         raise HTTPException(400, "config.token обязателен")
     if not _try_acquire_sync_lock(sb, connection_id):
         return {"started": False, "status": "running", "message": "Sync уже идёт или склад на паузе"}
-    background_tasks.add_task(_run_wb_sync_bg, connection_id, conn.data["seller_id"], token)
+    warehouse_kind = conn.data.get("warehouse_kind")
+    background_tasks.add_task(
+        _run_wb_sync_bg,
+        connection_id, conn.data["seller_id"], token, warehouse_kind,
+    )
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
