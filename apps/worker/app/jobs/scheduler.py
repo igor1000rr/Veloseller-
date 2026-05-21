@@ -2,6 +2,7 @@
 
 - recalc-all каждый час
 - sync активных marketplace-connections РАЗ В СУТКИ в 02:00 UTC
+- expire-subscriptions в 03:00 UTC (откатываем в trial истёкшие платные подписки)
 - daily digest в 09:00 UTC
 - weekly Excel report по понедельникам в 09:00 UTC (12:00 МСК)
 - snapshots retention в 04:00 UTC (БАГ 89)
@@ -27,6 +28,9 @@ _scheduler: BackgroundScheduler | None = None
 
 _SNAPSHOTS_RETENTION_DAYS = 180
 _STUCK_SYNCING_TIMEOUT_MINUTES = 30
+
+# Лимит складов для trial-плана (при откате из истёкшей подписки)
+_TRIAL_WAREHOUSES_LIMIT = 15
 
 
 def _job_recalc_all() -> None:
@@ -83,6 +87,53 @@ def _job_sync_active_connections() -> None:
                     logger.exception("Failed to mark connection error", extra={"connection_id": conn["id"]})
     except Exception as e:
         logger.exception("Cron sync_active_connections failed: %s", e)
+
+
+def _job_expire_subscriptions() -> None:
+    """Откатывает истёкшие платные подписки в trial.
+
+    Ищет sellers где subscription_expires_at < now() AND plan != 'trial'.
+    Для каждого: plan='trial', plan_warehouses_limit=15, subscription_expires_at=NULL.
+
+    Данные складов НЕ удаляются — юзер может продлить подписку и продолжить.
+    Лимит trial=15 складов — старые склады остаются видимыми даже если их больше 15.
+    """
+    try:
+        sb = get_supabase()
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # Ищем sellers с истёкшей подпиской (plan != trial и дата истекла)
+        expired_res = (
+            sb.table("sellers")
+            .select("id,email,plan,subscription_expires_at")
+            .neq("plan", "trial")
+            .not_.is_("subscription_expires_at", "null")
+            .lt("subscription_expires_at", now_iso)
+            .execute()
+        )
+        expired = expired_res.data or []
+        if not expired:
+            logger.info("expire-subscriptions: nothing to expire")
+            return
+
+        for s in expired:
+            try:
+                sb.table("sellers").update({
+                    "plan": "trial",
+                    "plan_warehouses_limit": _TRIAL_WAREHOUSES_LIMIT,
+                    "subscription_expires_at": None,
+                }).eq("id", s["id"]).execute()
+                logger.info("subscription expired → trial", extra={
+                    "seller_id": s["id"],
+                    "email": s.get("email"),
+                    "prev_plan": s.get("plan"),
+                })
+            except Exception:
+                logger.exception("failed to expire subscription for %s", s.get("id"))
+
+        logger.warning("expire-subscriptions: rolled back %d sellers to trial", len(expired))
+    except Exception:
+        logger.exception("expire-subscriptions job failed")
 
 
 def _job_send_daily_digests() -> None:
@@ -213,6 +264,13 @@ def start_scheduler() -> None:
         _job_sync_active_connections,
         CronTrigger(hour=2, minute=0),
         id="sync-active-connections",
+        replace_existing=True,
+    )
+    # Авто-истечение подписок: ежедневно в 03:00 UTC (между sync в 02:00 и snapshots-retention в 04:00)
+    _scheduler.add_job(
+        _job_expire_subscriptions,
+        CronTrigger(hour=3, minute=0),
+        id="expire-subscriptions",
         replace_existing=True,
     )
     _scheduler.add_job(

@@ -18,13 +18,18 @@ const PLANS = [
     features: ["15 складов"] },
 ];
 
-export default async function BillingPage() {
+export default async function BillingPage({ searchParams }: { searchParams: Promise<{ paid?: string; canceled?: string }> }) {
+  const params = await searchParams;
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
   const [{ data: seller }, { count: warehouseCount }] = await Promise.all([
-    supabase.from("sellers").select("plan,trial_ends_at,plan_warehouses_limit").eq("id", user.id).single(),
+    supabase
+      .from("sellers")
+      .select("plan,trial_ends_at,plan_warehouses_limit,subscription_expires_at")
+      .eq("id", user.id)
+      .single(),
     supabase.from("data_connections").select("id", { count: "exact", head: true }).eq("seller_id", user.id),
   ]);
 
@@ -33,8 +38,53 @@ export default async function BillingPage() {
   const used = warehouseCount ?? 0;
   const currentName = PLANS.find(p => p.id === currentPlan)?.name ?? currentPlan;
 
+  // Скоро ли истекает подписка (< 7 дней)?
+  const expiresAt = seller?.subscription_expires_at ? new Date(seller.subscription_expires_at) : null;
+  const now = new Date();
+  const daysUntilExpire = expiresAt ? Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)) : null;
+  const expiringSoon = currentPlan !== "trial" && daysUntilExpire !== null && daysUntilExpire <= 7 && daysUntilExpire >= 0;
+
   return (
     <div className="max-w-6xl mx-auto space-y-8">
+      {/* Баннер после возврата с Robokassa — успех */}
+      {params.paid === "1" && (
+        <div className="rounded-xl border border-lime-deep/40 bg-lime-soft p-4 flex items-start gap-3">
+          <span className="text-lime-deep mt-0.5 text-lg shrink-0">✅</span>
+          <div className="flex-1 text-sm">
+            <div className="font-medium text-ink">Оплата прошла успешно</div>
+            <p className="mt-1 text-ink-muted">
+              Подписка активна на 30 дней. Обновление плана происходит в фоне — если вы видите старый план, обновите страницу через минуту.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Баннер после отмены оплаты */}
+      {params.canceled === "1" && (
+        <div className="rounded-xl border border-line bg-bg-soft p-4 flex items-start gap-3">
+          <span className="text-ink-muted mt-0.5 text-lg shrink-0">ℹ️</span>
+          <div className="flex-1 text-sm text-ink-muted">
+            Оплата отменена. Можете попробовать ещё раз — с вас ничего не списали.
+          </div>
+        </div>
+      )}
+
+      {/* Предупреждение о скором истечении подписки */}
+      {expiringSoon && (
+        <div className="rounded-xl border border-orange/40 bg-orange/5 p-4 flex items-start gap-3">
+          <span className="text-orange mt-0.5 text-lg shrink-0">⏰</span>
+          <div className="flex-1 text-sm">
+            <div className="font-medium text-ink">
+              Подписка истекает через {daysUntilExpire} {daysUntilExpire === 1 ? "день" : daysUntilExpire && daysUntilExpire < 5 ? "дня" : "дней"}
+            </div>
+            <p className="mt-1 text-ink-muted">
+              {expiresAt!.toLocaleDateString("ru-RU")} — подписка закончится, и вы будете автоматически переведены на триал.
+              Продлите подписку, нажав «Перейти на» в любом платном тарифе ниже.
+            </p>
+          </div>
+        </div>
+      )}
+
       <header>
         <div className="inline-flex items-center gap-2 mb-2">
           <span className="size-1 rounded-full bg-lime-deep" />
@@ -47,6 +97,11 @@ export default async function BillingPage() {
         {currentPlan === "trial" && seller?.trial_ends_at && (
           <p className="text-xs text-ink-hush mt-1 font-mono">
             Триал действует до {new Date(seller.trial_ends_at).toLocaleDateString("ru-RU")}
+          </p>
+        )}
+        {currentPlan !== "trial" && expiresAt && (
+          <p className="text-xs text-ink-hush mt-1 font-mono">
+            Подписка действует до {expiresAt.toLocaleDateString("ru-RU")}
           </p>
         )}
       </header>
@@ -95,7 +150,7 @@ export default async function BillingPage() {
                   {isCurrent ? "Активный" : "—"}
                 </button>
               ) : (
-                <UpgradeButton plan={p.id} isCurrent={isCurrent} label={isCurrent ? "Активный" : `Перейти на ${p.name}`} />
+                <UpgradeButton plan={p.id} isCurrent={isCurrent} label={isCurrent ? "Продлить на 30 дней" : `Перейти на ${p.name}`} />
               )}
             </div>
           );
@@ -117,7 +172,7 @@ export default async function BillingPage() {
 
       <div className="text-center space-y-2">
         {currentPlan !== "trial" && <ManageSubscriptionButton />}
-        <p className="font-mono text-[11px] text-ink-hush">Подписку можно отменить в любой момент.</p>
+        <p className="font-mono text-[11px] text-ink-hush">Подписка продлевается выбором тарифа заново.</p>
       </div>
     </div>
   );
