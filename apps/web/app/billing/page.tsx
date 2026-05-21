@@ -4,17 +4,18 @@ import { Icons } from "../_components/Icons";
 
 export const dynamic = "force-dynamic";
 
-// Правки Игоря: тарифы в рублях, разделение только по количеству магазинов.
-// Весь функционал доступен всем тарифам — детали под карточками.
+// Тарифы Александра (май 2026): multi-warehouse архитектура.
+// Trial=15 складов (как Pro для конверсии), Старт=2, Рост=6, Про=15.
+// Цены: 0 / 2500 / 6900 / 14900 ₽/мес.
 const PLANS = [
   { id: "trial",   name: "Триал",  price: 0,     period: "30 дней бесплатно",
-    features: ["1 магазин", "Весь функционал бесплатно"] },
-  { id: "starter", name: "Старт",  price: 1900,  period: "₽/мес",
-    features: ["1 магазин"] },
+    features: ["15 складов", "Весь функционал бесплатно"] },
+  { id: "starter", name: "Старт",  price: 2500,  period: "₽/мес",
+    features: ["2 склада"] },
   { id: "growth",  name: "Рост",   price: 6900,  period: "₽/мес",
-    features: ["3 магазина"] },
-  { id: "pro",     name: "Про",    price: 19900, period: "₽/мес",
-    features: ["Безлимит магазинов"] },
+    features: ["6 складов"] },
+  { id: "pro",     name: "Про",    price: 14900, period: "₽/мес",
+    features: ["15 складов"] },
 ];
 
 export default async function BillingPage() {
@@ -22,13 +23,14 @@ export default async function BillingPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const [{ data: seller }, { count: skuCount }] = await Promise.all([
-    supabase.from("sellers").select("plan,trial_ends_at").eq("id", user.id).single(),
-    supabase.from("products").select("product_id", { count: "exact", head: true }).eq("seller_id", user.id),
+  const [{ data: seller }, { count: warehouseCount }] = await Promise.all([
+    supabase.from("sellers").select("plan,trial_ends_at,plan_warehouses_limit").eq("id", user.id).single(),
+    supabase.from("data_connections").select("id", { count: "exact", head: true }).eq("seller_id", user.id),
   ]);
 
   const currentPlan = seller?.plan ?? "trial";
-  const used = skuCount ?? 0;
+  const limit = seller?.plan_warehouses_limit ?? 15;
+  const used = warehouseCount ?? 0;
   const currentName = PLANS.find(p => p.id === currentPlan)?.name ?? currentPlan;
 
   return (
@@ -38,9 +40,9 @@ export default async function BillingPage() {
           <span className="size-1 rounded-full bg-lime-deep" />
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Тарифы</span>
         </div>
-        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">Тарифы</h1>
+        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">Тарифы и оплата</h1>
         <p className="mt-2 text-ink-muted text-sm">
-          Текущий план: <span className="font-medium text-lime-deep">{currentName}</span> · загружено <span className="font-medium text-ink tabular">{used}</span> SKU
+          Текущий план: <span className="font-medium text-lime-deep">{currentName}</span> · подключено <span className="font-medium text-ink tabular">{used}/{limit}</span> складов
         </p>
         {currentPlan === "trial" && seller?.trial_ends_at && (
           <p className="text-xs text-ink-hush mt-1 font-mono">
@@ -108,6 +110,10 @@ export default async function BillingPage() {
         <span>Планирование закупки</span><span>·</span>
         <span>Email + Telegram</span>
       </p>
+
+      <div className="text-center font-mono text-[11px] text-ink-hush">
+        Для интеграторов и агентств: <a href="mailto:info@proaim.ru" className="text-lime-deep hover:underline">info@proaim.ru</a>
+      </div>
 
       <div className="text-center space-y-2">
         {currentPlan !== "trial" && <ManageSubscriptionButton />}
