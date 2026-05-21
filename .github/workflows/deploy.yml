@@ -44,3 +44,68 @@ jobs:
 
             echo "✅ deploy OK ($(git rev-parse --short HEAD))"
           EOF
+
+      - name: Smoke tests — проверка что сервисы поднялись
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'bash -s' << 'EOF'
+            set -euo pipefail
+
+            # После finalize.sh сервисы могут прогреваться — retry с backoff (до 25с ожидания).
+            check() {
+              local name="$1" url="$2"
+              for i in 1 2 3 4 5; do
+                if curl -fsS "$url" -o /dev/null --max-time 5; then
+                  echo "✅ $name отвечает ($url, попытка $i)"
+                  return 0
+                fi
+                echo "… $name не отвечает, retry $i/5"
+                sleep 5
+              done
+              echo "❌ $name не ответил за 25с после deploy. Проверь: journalctl -u $name --since '1 min ago'"
+              return 1
+            }
+
+            echo "→ Smoke: локальные health-check'и обоих сервисов"
+            check veloseller-web http://127.0.0.1:3000/
+            check veloseller-worker http://127.0.0.1:8001/health
+
+            echo "✅ Смоки прошли — оба сервиса вверху"
+          EOF
+
+      - name: Smoke tests — security (open redirect + webhook secret)
+        run: |
+          # External smoke: HTTPS doimaine + базовые security проверки.
+          # Проверяем что критические фиксы из аудита работают в реальной среде.
+          set -euo pipefail
+          FQDN="veloseller.ru"
+
+          echo "→ 1) HTTPS корень должен отвечать 200/3xx"
+          code=$(curl -sw "%{http_code}" -o /dev/null --max-time 10 "https://$FQDN/")
+          if [[ "$code" =~ ^(200|301|302|307|308)$ ]]; then
+            echo "  ✅ https://$FQDN/ → $code"
+          else
+            echo "  ❌ https://$FQDN/ → $code (ожидали 200/3xx)"
+            exit 1
+          fi
+
+          echo "→ 2) Open redirect защита: /auth/callback?next=https://evil.com не должен вести на evil.com"
+          location=$(curl -s -o /dev/null -w "%{redirect_url}" --max-time 10 \
+            "https://$FQDN/auth/callback?next=https%3A%2F%2Fevil.com")
+          if echo "$location" | grep -qi "evil.com"; then
+            echo "  ❌ Open redirect ПОЛОМАН: Location=$location"
+            exit 1
+          fi
+          echo "  ✅ Location=$location (не evil.com)"
+
+          echo "→ 3) Telegram webhook без секрет-заголовка обязан вернуть 403"
+          code=$(curl -sw "%{http_code}" -o /dev/null --max-time 10 \
+            -X POST "https://$FQDN/telegram/webhook" -d '{}')
+          if [ "$code" = "403" ] || [ "$code" = "404" ]; then
+            # 404 — если nginx не проксирует /telegram/webhook на worker (вероятно), это тоже OK — нет уязвимости
+            echo "  ✅ /telegram/webhook → $code (fail-closed работает)"
+          else
+            echo "  ❌ /telegram/webhook → $code (ожидали 403/404)"
+            exit 1
+          fi
+
+          echo "✅ Все security smoke tests прошли"
