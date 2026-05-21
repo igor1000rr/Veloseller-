@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { safeRedirect } from "@/lib/safe-redirect";
 
 /**
  * Supabase Auth callback.
@@ -9,11 +10,14 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  * Нужно обменять код на сессию (ставит cookies) и редирекнуть куда-то дальше.
  *
  * URL: /auth/callback?code=<auth_code>&next=<optional_path>
+ *
+ * БАГ 47 расширен: ?next= защищён через safeRedirect — раньше принимал
+ * https://evil.com и редиректил юзера на чужой сайт после успешного входа.
  */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
-  const next = url.searchParams.get("next") || "/auth/confirmed";
+  const next = safeRedirect(url.searchParams.get("next"), "/auth/confirmed");
   const errorParam = url.searchParams.get("error");
   const errorDescription = url.searchParams.get("error_description");
 

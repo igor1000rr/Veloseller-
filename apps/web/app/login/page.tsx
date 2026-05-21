@@ -4,25 +4,14 @@ import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { safeRedirect } from "@/lib/safe-redirect";
 import { Icons } from "../_components/Icons";
 
 /**
- * БАГ 47 fix: open redirect защита через whitelist. Раньше:
- *   /login?redirect=https://evil.com → router.push("https://evil.com") после login
- * Сейчас принимаем только относительные пути, начинающиеся с / и без //, http://, https://.
+ * БАГ 47 fix: open redirect защита через safeRedirect из lib/safe-redirect.ts.
+ * Раньше /login?redirect=https://evil.com → router.push("https://evil.com") после login.
+ * safeRedirect используется и тут, и в /auth/callback?next= — единый whitelist.
  */
-function safeRedirect(raw: string | null): string {
-  if (!raw) return "/dashboard";
-  // Только относительные пути
-  if (!raw.startsWith("/")) return "/dashboard";
-  // Блокируем // (protocol-relative URL: //evil.com)
-  if (raw.startsWith("//")) return "/dashboard";
-  // Блокируем явные схемы
-  if (raw.includes("://")) return "/dashboard";
-  // Блокируем javascript:, data:, etc через URL-encoded схемы
-  if (/^\/[a-z]+:/i.test(raw)) return "/dashboard";
-  return raw;
-}
 
 function LoginForm() {
   const router = useRouter();
