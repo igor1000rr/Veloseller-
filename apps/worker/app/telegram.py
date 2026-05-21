@@ -2,6 +2,8 @@
 
 БАГ 21 fix: SKU и message экранируются через html.escape перед вставкой в HTML.
 БАГ 51 fix: домен из env APP_URL (продакшен veloseller.ru, не .app).
+
+Multi-warehouse (май 2026): format_sync_error_message для уведомлений о ошибках sync.
 """
 from __future__ import annotations
 import html
@@ -70,3 +72,34 @@ def format_alerts_digest(alerts: list[dict]) -> str:
     app_url = _app_url()
     lines.append(f'\n<a href="{app_url}/dashboard/alerts">Открыть в Veloseller</a>')
     return "\n".join(lines)
+
+
+def format_sync_error_message(
+    warehouse_name: str,
+    warehouse_kind: str,
+    error_message: str,
+    failure_count: int,
+    auto_paused: bool,
+) -> str:
+    """HTML-сообщение для Telegram об ошибке sync склада."""
+    name_safe = html.escape(warehouse_name)
+    error_safe = html.escape(error_message[:300])
+    kind_label = {
+        "ozon_fbo": "Ozon FBO", "ozon_fbs": "Ozon FBS",
+        "wb_fbo": "Wildberries FBO", "wb_fbs": "Wildberries FBS",
+        "google_sheet": "Google Sheet",
+    }.get(warehouse_kind, warehouse_kind)
+    app_url = _app_url()
+
+    if auto_paused:
+        title = f"⛔️ <b>Склад «{name_safe}» поставлен на паузу</b>"
+        intro = f"Неудач подряд: <b>{failure_count}</b>. Автосинхронизация отключена."
+    else:
+        title = f"⚠️ <b>Ошибка синхронизации склада «{name_safe}»</b>"
+        intro = f"Тип: {kind_label}\nНеудач подряд: <b>{failure_count}</b>"
+
+    return (
+        f"{title}\n\n{intro}\n\n"
+        f"<code>{error_safe}</code>\n\n"
+        f'<a href="{app_url}/connections">Открыть склад</a>'
+    )
