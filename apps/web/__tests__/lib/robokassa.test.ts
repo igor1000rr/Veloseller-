@@ -1,4 +1,6 @@
-"""Robokassa lib unit-тесты: подпись MD5, валидация, генерация URL."""
+/**
+ * Robokassa lib unit-тесты: подпись MD5, валидация, генерация URL.
+ */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 // Мочим env перед каждым тестом

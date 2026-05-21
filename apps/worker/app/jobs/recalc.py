@@ -23,6 +23,7 @@ from app.engine.store import (
     SkuHealthInput, SkuValue, concentration_50, demand_weight,
     frozen_inventory_value, total_inventory_value, warehouse_health_score,
 )
+from app.holidays import is_holiday
 from app.schemas import EventType, TVeloMetric
 
 logger = logging.getLogger("veloseller.recalc")
@@ -112,6 +113,7 @@ def _fetch_snapshots_batched(sb, product_ids, history_start):
 
 
 def _extract_pre_period_sales_deltas(snapshots_rows, period_start, seller_tz):
+    """Медиана продаж до периода (для anomaly seed). Праздники исключаются."""
     by_day = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
@@ -128,7 +130,8 @@ def _extract_pre_period_sales_deltas(snapshots_rows, period_start, seller_tz):
         stock = int(by_day[day]["stock_quantity"])
         if prev_stock is not None and prev_day is not None:
             d = stock - prev_stock
-            if d < 0:
+            # Праздники не попадают в медиану: в них продажи ведут себя аномально
+            if d < 0 and not is_holiday(day):
                 days_gap = max(1, (day - prev_day).days)
                 per_day_delta = abs(d) / days_gap
                 deltas.append(float(per_day_delta))
@@ -142,6 +145,8 @@ def _extract_pre_period_sales_deltas(snapshots_rows, period_start, seller_tz):
 
 
 def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
+    """Строит dayly aggregates из snapshots. Праздники (федеральные РФ) помечаются excluded=True
+    и не попадают в классификацию anomaly_like — через classify_event(event_date=...)."""
     by_day = {}
     for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
         ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
@@ -164,7 +169,8 @@ def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
             s = int(by_day[d]["stock_quantity"])
             if prev_for_seed is not None and prev_day_for_seed is not None:
                 delta = s - prev_for_seed
-                if delta < 0:
+                # Праздники из seed-истории тоже выкидываем
+                if delta < 0 and not is_holiday(d):
                     days_gap = max(1, (d - prev_day_for_seed).days)
                     per_day = max(1, int(round(abs(delta) / days_gap)))
                     abs_deltas_history.append(per_day)
@@ -183,8 +189,10 @@ def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
             avail = bool(row["availability"])
             delta = (stock - prev_stock) if prev_exists else None
             median_abs = _median(abs_deltas_history) if abs_deltas_history else None
-            et, excluded = classify_event(delta, median_abs, prev_exists)
-            if et == EventType.SALES_LIKE and delta is not None:
+            # Передаём event_date в classify_event — праздники не классифицируются как anomaly
+            et, excluded = classify_event(delta, median_abs, prev_exists, event_date=cur)
+            # Добавляем в медиану ТОЛЬКО sales_like и НЕ праздники
+            if et == EventType.SALES_LIKE and delta is not None and not is_holiday(cur):
                 abs_deltas_history.append(abs(delta))
             aggregates.append(DailyAggregate(
                 day=cur, availability=avail, end_of_day_stock=stock, price=price,
