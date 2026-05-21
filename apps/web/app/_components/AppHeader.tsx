@@ -4,6 +4,8 @@ import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { Icons } from "./Icons";
 import LogoutButton from "../dashboard/LogoutButton";
+import WarehouseSelector from "./WarehouseSelector";
+import type { WarehouseListItem } from "@/lib/warehouse";
 
 const PLAN_LABEL: Record<string, string> = {
   trial: "Trial",
@@ -25,12 +27,16 @@ export default function AppHeader({
   unreadAlerts,
   isAdmin,
   plan,
+  warehouses,
+  selectedWarehouseId,
 }: {
   email: string;
   variant: "dashboard" | "admin";
   unreadAlerts?: number;
   isAdmin?: boolean;
   plan?: string;
+  warehouses?: WarehouseListItem[];
+  selectedWarehouseId?: string | null;
 }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -41,8 +47,6 @@ export default function AppHeader({
   }, [open]);
 
   useEffect(() => { setOpen(false); }, [pathname]);
-
-  // Note: focus/bfcache refresh вынесён в FreshDataGuard (в dashboard layout)
 
   const links = variant === "dashboard"
     ? [
@@ -108,6 +112,10 @@ export default function AppHeader({
         </div>
 
         <div className="flex items-center gap-2">
+          {variant === "dashboard" && warehouses && (
+            <WarehouseSelector warehouses={warehouses} selectedId={selectedWarehouseId ?? null} />
+          )}
+
           {planLabel && variant === "dashboard" && (
             <Link
               href={"/billing" as any}
@@ -165,6 +173,14 @@ export default function AppHeader({
             </button>
           </div>
           <nav className="flex-1 flex flex-col px-4 md:px-8 py-6 gap-1 overflow-y-auto">
+            {variant === "dashboard" && warehouses && warehouses.length > 0 && (
+              <div className="mb-3 px-3 py-2.5 rounded-lg border border-line bg-bg-soft">
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush font-semibold mb-1">
+                  Выбранный склад
+                </div>
+                <WarehouseSelector warehouses={warehouses} selectedId={selectedWarehouseId ?? null} />
+              </div>
+            )}
             {planLabel && variant === "dashboard" && (
               <Link href={"/billing" as any} onClick={() => setOpen(false)}
                 className={`flex items-center justify-between py-3 px-3 mb-2 rounded-lg border ${planClass}`}>
