@@ -2,6 +2,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { VelocitySparkline } from "./VelocitySparkline";
 import { Icons } from "../../_components/Icons";
+import { getSelectedWarehouse, warehouseKindLabel } from "@/lib/warehouse";
 
 const PAGE_SIZE = 50;
 
@@ -28,7 +29,10 @@ export default async function SkusPage({ searchParams }: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: products, count } = await supabase
+  // Multi-warehouse: фильтруем SKU по выбранному складу (cookie vs-warehouse)
+  const selected = await getSelectedWarehouse(supabase, user.id);
+
+  let productsQuery = supabase
     .from("products")
     .select(`
       product_id, sku, product_name,
@@ -39,7 +43,13 @@ export default async function SkusPage({ searchParams }: {
         period_start, period_end
       )
     `, { count: "exact" })
-    .eq("seller_id", user.id)
+    .eq("seller_id", user.id);
+
+  if (selected) {
+    productsQuery = productsQuery.eq("connection_id", selected.id);
+  }
+
+  const { data: products, count } = await productsQuery
     .order("sku").range(from, to);
 
   const productIds = (products ?? []).map((p: any) => p.product_id);
@@ -70,6 +80,12 @@ export default async function SkusPage({ searchParams }: {
 
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
 
+  // Параметры для ссылок экспорта (включают warehouse_id если выбран)
+  const exportParams = new URLSearchParams();
+  exportParams.set("period", String(periodDays));
+  if (selected) exportParams.set("warehouse_id", selected.id);
+  const exportQS = exportParams.toString();
+
   return (
     <div className="space-y-6">
       <header className="flex items-end justify-between gap-4 flex-wrap">
@@ -79,16 +95,35 @@ export default async function SkusPage({ searchParams }: {
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Inventory</span>
           </div>
           <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">SKU</h1>
+          {selected && (
+            <div className="mt-1.5 flex items-center gap-2 flex-wrap text-sm text-ink-muted">
+              <span className="size-1.5 rounded-full bg-lime-deep" />
+              <span className="font-medium text-ink">{selected.name}</span>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
+                {warehouseKindLabel(selected.warehouse_kind)}
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          <a
-            href={`/api/export/metrics?period=${periodDays}`}
-            download
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-line rounded-lg text-ink-muted hover:text-ink hover:bg-bg-soft transition"
-            title="Скачать все метрики в CSV для проверки"
-          >
-            <Icons.ArrowRight size={11} /> CSV ({periodDays}д)
-          </a>
+          <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1">
+            <a
+              href={`/api/export/metrics?${exportQS}&format=xlsx`}
+              download
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition"
+              title="Скачать метрики в Excel (XLSX) со сводкой"
+            >
+              <Icons.ArrowRight size={11} /> Excel
+            </a>
+            <a
+              href={`/api/export/metrics?${exportQS}&format=csv`}
+              download
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition border-l border-line"
+              title="Скачать метрики в CSV"
+            >
+              CSV
+            </a>
+          </div>
           <form className="flex items-center gap-2 text-sm">
             <label className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Закупка на</label>
             <input
@@ -121,6 +156,21 @@ export default async function SkusPage({ searchParams }: {
           </div>
         </div>
       </header>
+
+      {!selected && (
+        <div className="rounded-xl border border-orange/30 bg-orange/5 p-4 flex items-start gap-3">
+          <span className="text-orange mt-0.5 shrink-0">⛔️</span>
+          <div className="flex-1 text-sm">
+            <div className="font-medium text-ink">Ни одного склада не подключено</div>
+            <p className="mt-1 text-ink-muted">
+              <Link href={"/connections/new" as any} className="text-lime-deep underline hover:no-underline">
+                Подключите первый склад
+              </Link>{" "}
+              чтобы начать собирать данные по SKU.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="overflow-x-auto rounded-2xl border border-line bg-paper">
         <table className="min-w-full text-sm">
@@ -193,7 +243,9 @@ export default async function SkusPage({ searchParams }: {
             {!filtered.length && (
               <tr>
                 <td colSpan={13} className="px-4 py-12 text-center text-ink-muted text-sm">
-                  Пока нет данных или ничего не подходит под фильтр.
+                  {selected
+                    ? `Пока нет данных по складу «${selected.name}». Дождитесь первой синхронизации или проверьте фильтр.`
+                    : "Пока нет данных или ничего не подходит под фильтр."}
                 </td>
               </tr>
             )}
