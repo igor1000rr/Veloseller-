@@ -8,6 +8,7 @@ import { DeadInventoryChart } from "./StoreCharts";
 import { HealthScoreBlock } from "./HealthScale";
 import { formatMoney } from "@/lib/format-money";
 import { InfoTooltip } from "../_components/InfoTooltip";
+import { getSelectedWarehouse, listWarehouses, warehouseKindLabel } from "@/lib/warehouse";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -36,6 +37,34 @@ export default async function DashboardOverview({ searchParams }: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
+  // Multi-warehouse: данные показываем только по выбранному складу
+  const [selected, allWarehouses] = await Promise.all([
+    getSelectedWarehouse(supabase, user.id),
+    listWarehouses(supabase, user.id),
+  ]);
+
+  // 0 складов → empty state
+  if (allWarehouses.length === 0) {
+    return (
+      <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center">
+        <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Подключите первый склад</h1>
+        <p className="mx-auto mt-3 max-w-xl text-ink-muted">
+          Чтобы Veloseller начал считать TVelo, нужны ежедневные snapshots остатков и цен.
+          Подключите Ozon FBO/FBS, Wildberries или Google Sheet.
+        </p>
+        <div className="mt-6 flex gap-3 justify-center flex-wrap">
+          <Link href={"/onboarding" as any} className="inline-flex items-center rounded-lg border border-line bg-bg-soft text-ink px-5 py-3 font-semibold hover:border-lime-deep/40 transition">Гид по настройке</Link>
+          <Link href={"/connections/new" as any} className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition">Добавить склад</Link>
+        </div>
+      </div>
+    );
+  }
+
+  // Если selected null — берём первый (защита от edge case)
+  const currentWarehouseId = selected?.id ?? allWarehouses[0].id;
+  const currentWarehouseName = selected?.name ?? allWarehouses[0].name;
+  const currentWarehouseKind = selected?.warehouse_kind ?? allWarehouses[0].warehouse_kind;
+
   const { data: seller } = await supabase
     .from("sellers")
     .select("created_at,currency")
@@ -45,6 +74,8 @@ export default async function DashboardOverview({ searchParams }: {
   const currency = (seller as any)?.currency ?? "RUB";
   const fmt = (n: number | null | undefined) => formatMoney(n, currency);
 
+  // store_metrics пока агрегирует по seller_id (без разбивки по connection_id).
+  // TODO: после рефакторинга recalc per-warehouse заменить на per-склад данные.
   const periodStartDate = new Date(Date.now() - periodDays * 86400_000);
   const periodStartIso = periodStartDate.toISOString().slice(0, 10);
   const { data: storeMetricsRows } = await supabase
@@ -66,11 +97,13 @@ export default async function DashboardOverview({ searchParams }: {
     .order("period_end", { ascending: false })
     .limit(14);
 
+  // tvelo_metrics — фильтруем по products.connection_id выбранного склада
   const tveloRows = await fetchAll<{ adjusted_velocity: number; product_id: string; period_end: string }>(
     async (from, to) => await supabase
       .from("tvelo_metrics")
-      .select("adjusted_velocity,product_id,period_end,products!inner(seller_id)")
+      .select("adjusted_velocity,product_id,period_end,products!inner(seller_id,connection_id)")
       .eq("products.seller_id", user.id)
+      .eq("products.connection_id", currentWarehouseId)
       .order("period_end", { ascending: false })
       .range(from, to),
   );
@@ -91,35 +124,41 @@ export default async function DashboardOverview({ searchParams }: {
     .order("created_at", { ascending: false })
     .limit(5);
 
-  const { count: connectionsCount } = await supabase
-    .from("data_connections")
-    .select("*", { count: "exact", head: true })
-    .eq("seller_id", user.id);
-
-  if ((connectionsCount ?? 0) === 0) {
-    return (
-      <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center">
-        <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Подключи первый источник данных</h1>
-        <p className="mx-auto mt-3 max-w-xl text-ink-muted">
-          Чтобы Veloseller начал считать TVelo, нужны ежедневные snapshots по твоим SKU.
-        </p>
-        <div className="mt-6 flex gap-3 justify-center flex-wrap">
-          <Link href={"/onboarding" as any} className="inline-flex items-center rounded-lg border border-line bg-bg-soft text-ink px-5 py-3 font-semibold hover:border-lime-deep/40 transition">Гид по настройке</Link>
-          <Link href={"/connections/new" as any} className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition">Подключить источник</Link>
-        </div>
-      </div>
-    );
-  }
+  const showMultiWarehouseBanner = allWarehouses.length > 1;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h1 className="font-display text-3xl md:text-4xl font-medium tracking-tight text-ink">Обзор склада</h1>
+        <div>
+          <h1 className="font-display text-3xl md:text-4xl font-medium tracking-tight text-ink">Обзор склада</h1>
+          <div className="mt-1.5 flex items-center gap-2 flex-wrap text-sm text-ink-muted">
+            <span className="size-1.5 rounded-full bg-lime-deep" />
+            <span className="font-medium text-ink">{currentWarehouseName}</span>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
+              {warehouseKindLabel(currentWarehouseKind)}
+            </span>
+          </div>
+        </div>
         <div className="flex items-center gap-3">
           <PeriodSelector current={period} />
           <RecalcButton />
         </div>
       </div>
+
+      {showMultiWarehouseBanner && (
+        <div className="rounded-xl border border-azure/30 bg-azure/5 p-4 flex items-start gap-3">
+          <span className="text-azure mt-0.5 shrink-0"><InfoTooltip text="" /></span>
+          <div className="flex-1 text-sm">
+            <div className="font-medium text-ink">У вас несколько складов</div>
+            <p className="mt-1 text-ink-muted">
+              TVelo и список SKU показаны для выбранного склада <b>{currentWarehouseName}</b>.
+              Агрегаты «Денег в остатках», «Здоровье склада», «Концентрация» и «Неликвид» пока считаются
+              суммарно по всем складам (per-склад агрегаты в разработке). Переключитесь на другой склад
+              через селектор в правом верхнем углу.
+            </p>
+          </div>
+        </div>
+      )}
 
       <DayProgress daysSinceSetup={daysSinceSetup} />
 
@@ -208,11 +247,11 @@ export default async function DashboardOverview({ searchParams }: {
         </div>
       </div>
 
-      {/* 3 скорости продаж */}
+      {/* 3 скорости продаж — на основе выбранного склада */}
       <div>
         <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3 flex items-center">
-          Скорости продаж по SKU
-          <InfoTooltip text="Распределение adjusted_velocity (штук в день) по всем SKU. Быстрая = 90-й перцентиль, Средняя = mean, Медленная = 10-й перцентиль. Помогает понять структуру ассортимента." />
+          Скорости продаж по SKU склада «{currentWarehouseName}»
+          <InfoTooltip text="Распределение adjusted_velocity (штук в день) по всем SKU выбранного склада. Быстрая = 90-й перцентиль, Средняя = mean, Медленная = 10-й перцентиль. Помогает понять структуру ассортимента." />
         </h3>
         <div className="grid grid-cols-3 gap-3">
           <VelocityCard label="Быстрая" value={fastVelocity} sub="топ 10% SKU" tone="fast" tooltip="P90: 90% SKU продаются медленнее, 10% — быстрее. Это твои бестселлеры." />
