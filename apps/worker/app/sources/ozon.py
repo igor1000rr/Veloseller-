@@ -1,20 +1,15 @@
 """Ozon Seller API. Docs: https://docs.ozon.ru/api/seller/
 
-Получаем 4 сущности:
+Получаем 3 сущности:
   1. /v3/product/list — все product_id (без stocks/цен)
   2. /v4/product/info/stocks — остатки (filter+cursor пагинация)
   3. /v5/product/info/prices — цены (тоже filter+cursor)
-  4. /v3/product/info/list — реальные названия товаров (name) по offer_id[]
 
 БАГ 18 fix: добавили MAX_PAGES защиту от бесконечной пагинации (если Ozon API
 возвращает повторяющийся cursor с непустым items).
 
 БАГ 20 fix: для prices ловим более широкий Exception — раньше httpx.HTTPStatusError
 не покрывал timeout/network errors, sync падал на проблемах с prices API.
-
-БАГ 104 fix: /v4/product/info/stocks НЕ возвращает поле name — раньше в БД писался
-SKU вместо названия. Теперь делаем отдельный запрос /v3/product/info/list по offer_id[]
-для получения реальных названий товаров.
 """
 from __future__ import annotations
 import logging
@@ -32,9 +27,6 @@ BASE = "https://api-seller.ozon.ru"
 # чем когда-либо у одного селлера. Если такое случится — что-то не так с API.
 MAX_PAGES_PER_BATCH = 50
 
-# Размер батча для /v3/product/info/list — endpoint ограничен 1000 offer_id за запрос
-INFO_LIST_BATCH = 1000
-
 
 def _headers(client_id: str, api_key: str) -> dict[str, str]:
     return {"Client-Id": client_id, "Api-Key": api_key, "Content-Type": "application/json"}
@@ -50,49 +42,8 @@ def _decimal(v) -> Decimal:
         return Decimal("0")
 
 
-def _fetch_product_names(cli: httpx.Client, client_id: str, api_key: str, offer_ids: list[str]) -> dict[str, str]:
-    """Получить реальные названия товаров по offer_id через /v3/product/info/list.
-
-    Args:
-        offer_ids: список артикулов селлера (offer_id), уже выбранных из stocks.
-
-    Returns:
-        dict {offer_id: name}. Если для какого-то offer_id endpoint не вернул name,
-        ключа в результате просто не будет — вызывающий код должен сделать fallback.
-    """
-    names_by_offer: dict[str, str] = {}
-    for i in range(0, len(offer_ids), INFO_LIST_BATCH):
-        batch = offer_ids[i : i + INFO_LIST_BATCH]
-
-        def _info_call(b=batch):
-            resp = cli.post(
-                f"{BASE}/v3/product/info/list",
-                headers=_headers(client_id, api_key),
-                json={"offer_id": b},
-            )
-            resp.raise_for_status()
-            return resp.json()
-
-        try:
-            data = with_retry(_info_call)
-        except Exception as e:
-            # Имена не критичны — без них fallback на SKU. Логируем и продолжаем.
-            logger.warning("ozon /v3/product/info/list failed for batch %d: %s", i, e)
-            continue
-
-        items = (data.get("items") or [])
-        for item in items:
-            offer_id = str(item.get("offer_id") or "")
-            name = item.get("name")
-            if offer_id and name and isinstance(name, str) and name.strip():
-                names_by_offer[offer_id] = name.strip()
-
-    logger.info("ozon names fetched: %d / %d offer_ids", len(names_by_offer), len(offer_ids))
-    return names_by_offer
-
-
 def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list[SnapshotInput]:
-    """Получить snapshots всех SKU продавца с остатками, ценами и реальными названиями."""
+    """Получить snapshots всех SKU продавца с остатками и ценами."""
     now = datetime.now(timezone.utc)
 
     with httpx.Client(timeout=60.0) as cli:
@@ -170,8 +121,7 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
                     qty = max(0, qty)
                     stocks_by_pid[pid] = {
                         "offer_id": str(item.get("offer_id") or pid),
-                        # name из /v4/product/info/stocks отсутствует — заполним из info/list ниже
-                        "name": None,
+                        "name": item.get("name"),
                         "qty": qty,
                     }
                 new_cursor = data.get("cursor") or ""
@@ -228,27 +178,19 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
                 cursor = new_cursor
 
         # ====================================================================
-        # 4. Реальные названия товаров через /v3/product/info/list (БАГ 104 fix)
-        # ====================================================================
-        unique_offer_ids = sorted({s["offer_id"] for s in stocks_by_pid.values() if s.get("offer_id")})
-        names_by_offer = _fetch_product_names(cli, client_id, api_key, unique_offer_ids)
-
-        # ====================================================================
-        # 5. Собираем SnapshotInput
+        # 4. Собираем SnapshotInput
         # ====================================================================
         out: list[SnapshotInput] = []
         for pid, s in stocks_by_pid.items():
-            offer_id = s["offer_id"]
-            real_name = names_by_offer.get(offer_id)
             out.append(SnapshotInput(
-                sku=offer_id,  # человекочитаемый артикул, не product_id
-                product_name=real_name or None,  # fallback на SKU делает _ensure_products
+                sku=s["offer_id"],  # человекочитаемый артикул, не product_id
+                product_name=s["name"] or None,
                 stock_quantity=s["qty"],
                 price=prices_by_pid.get(pid, Decimal("0")),
                 snapshot_time=now,
             ))
 
-        logger.info("ozon fetch done: product_ids=%d, stocks=%d, prices=%d, names=%d, snapshots=%d",
-                    len(product_ids), len(stocks_by_pid), len(prices_by_pid), len(names_by_offer), len(out))
+        logger.info("ozon fetch done: product_ids=%d, stocks=%d, prices=%d, snapshots=%d",
+                    len(product_ids), len(stocks_by_pid), len(prices_by_pid), len(out))
 
     return out
