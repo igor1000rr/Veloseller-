@@ -15,11 +15,18 @@
 БАГ 104 fix: /v4/product/info/stocks НЕ возвращает поле name — раньше в БД писался
 SKU вместо названия. Теперь делаем отдельный запрос /v3/product/info/list по offer_id[]
 для получения реальных названий товаров.
+
+Multi-warehouse (май 2026): один и тот же Ozon API-ключ может питать два склада:
+  • ozon_fbo — анализ остатков на складах Ozon (FBO)
+  • ozon_fbs — анализ собственного склада через остатки FBS
+Параметр `kind` определяет фильтрацию items[].stocks[type]. Значение None оставлено
+для совместимости (сумма всех типов).
 """
 from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from typing import Optional
 import httpx
 from app.schemas import SnapshotInput
 from app.sources._http import with_retry
@@ -34,6 +41,10 @@ MAX_PAGES_PER_BATCH = 50
 
 # Размер батча для /v3/product/info/list — endpoint ограничен 1000 offer_id за запрос
 INFO_LIST_BATCH = 1000
+
+# Допустимые значения kind: 'fbo' (остатки на складах Ozon), 'fbs' (склад продавца),
+# None — суммировать всё (legacy / обратная совместимость).
+ALLOWED_KINDS = {"fbo", "fbs", None}
 
 
 def _headers(client_id: str, api_key: str) -> dict[str, str]:
@@ -52,9 +63,6 @@ def _decimal(v) -> Decimal:
 
 def _fetch_product_names(cli: httpx.Client, client_id: str, api_key: str, offer_ids: list[str]) -> dict[str, str]:
     """Получить реальные названия товаров по offer_id через /v3/product/info/list.
-
-    Args:
-        offer_ids: список артикулов селлера (offer_id), уже выбранных из stocks.
 
     Returns:
         dict {offer_id: name}. Если для какого-то offer_id endpoint не вернул name,
@@ -76,7 +84,6 @@ def _fetch_product_names(cli: httpx.Client, client_id: str, api_key: str, offer_
         try:
             data = with_retry(_info_call)
         except Exception as e:
-            # Имена не критичны — без них fallback на SKU. Логируем и продолжаем.
             logger.warning("ozon /v3/product/info/list failed for batch %d: %s", i, e)
             continue
 
@@ -91,8 +98,46 @@ def _fetch_product_names(cli: httpx.Client, client_id: str, api_key: str, offer_
     return names_by_offer
 
 
-def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list[SnapshotInput]:
-    """Получить snapshots всех SKU продавца с остатками, ценами и реальными названиями."""
+def _stock_qty(stocks: list[dict], kind: Optional[str]) -> int:
+    """Посчитать доступный остаток с учётом фильтра kind.
+
+    Ozon /v4/product/info/stocks возвращает stocks как массив объектов с полем 'type':
+    [{type: 'fbo', present: 12, reserved: 2}, {type: 'fbs', present: 5, reserved: 0}]
+
+    Args:
+        stocks: массив stock-записей из ответа Ozon API
+        kind: 'fbo' / 'fbs' / None (= все типы, сумма для обратной совместимости)
+
+    Returns:
+        available = max(0, sum(present - reserved)) по отфильтрованным записям
+    """
+    total = 0
+    for s in stocks:
+        if kind is not None:
+            stock_type = (s.get("type") or "").lower()
+            if stock_type != kind:
+                continue
+        total += int(s.get("present", 0)) - int(s.get("reserved", 0))
+    return max(0, total)
+
+
+def fetch_snapshots(
+    client_id: str,
+    api_key: str,
+    page_size: int = 1000,
+    kind: Optional[str] = None,
+) -> list[SnapshotInput]:
+    """Получить snapshots всех SKU продавца с остатками, ценами и реальными названиями.
+
+    Args:
+        client_id, api_key: креды Ozon Seller API.
+        page_size: размер страницы для /v3/product/list.
+        kind: фильтр типа остатков — 'fbo', 'fbs' или None (сумма всех).
+              По warehouse_kind в data_connections: ozon_fbo → 'fbo', ozon_fbs → 'fbs'.
+    """
+    if kind not in ALLOWED_KINDS:
+        raise ValueError(f"Invalid kind={kind!r}, expected one of {ALLOWED_KINDS}")
+
     now = datetime.now(timezone.utc)
 
     with httpx.Client(timeout=60.0) as cli:
@@ -128,7 +173,7 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
         if not product_ids:
             return []
 
-        # 2. Остатки через /v4/product/info/stocks
+        # 2. Остатки через /v4/product/info/stocks (фильтрация по kind)
         stocks_by_pid: dict[str, dict] = {}
 
         for i in range(0, len(product_ids), 1000):
@@ -158,11 +203,7 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
                     if not pid:
                         continue
                     stocks = item.get("stocks", [])
-                    qty = sum(
-                        int(s.get("present", 0)) - int(s.get("reserved", 0))
-                        for s in stocks
-                    )
-                    qty = max(0, qty)
+                    qty = _stock_qty(stocks, kind)
                     stocks_by_pid[pid] = {
                         "offer_id": str(item.get("offer_id") or pid),
                         # name из /v4/product/info/stocks отсутствует — заполним из info/list ниже
@@ -228,14 +269,14 @@ def fetch_snapshots(client_id: str, api_key: str, page_size: int = 1000) -> list
             offer_id = s["offer_id"]
             real_name = names_by_offer.get(offer_id)
             out.append(SnapshotInput(
-                sku=offer_id,  # человекочитаемый артикул, не product_id
-                product_name=real_name or None,  # fallback на SKU делает _ensure_products
+                sku=offer_id,
+                product_name=real_name or None,
                 stock_quantity=s["qty"],
                 price=prices_by_pid.get(pid, Decimal("0")),
                 snapshot_time=now,
             ))
 
-        logger.info("ozon fetch done: product_ids=%d, stocks=%d, prices=%d, names=%d, snapshots=%d",
-                    len(product_ids), len(stocks_by_pid), len(prices_by_pid), len(names_by_offer), len(out))
+        logger.info("ozon fetch done (kind=%s): product_ids=%d, stocks=%d, prices=%d, names=%d, snapshots=%d",
+                    kind, len(product_ids), len(stocks_by_pid), len(prices_by_pid), len(names_by_offer), len(out))
 
     return out
