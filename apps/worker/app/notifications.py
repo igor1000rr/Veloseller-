@@ -8,10 +8,11 @@
 БАГ 51 fix: домен из env APP_URL вместо hardcoded veloseller.app (продакшен
 на veloseller.ru, ссылки вели на несуществующий домен).
 
-Multi-warehouse (май 2026): send_sync_error_notification для уведомлений о неудачах sync.
+Multi-warehouse (май 2026): send_sync_error_notification + send_weekly_report_email.
 """
 from __future__ import annotations
 
+import base64
 import html
 import logging
 import os
@@ -21,10 +22,6 @@ logger = logging.getLogger("veloseller.notifications")
 
 
 def _app_url() -> str:
-    """Возвращает первый URL из APP_URL env (comma-separated whitelist).
-
-    Дефолт — продакшен veloseller.ru.
-    """
     raw = os.getenv("APP_URL") or "https://veloseller.ru"
     return raw.split(",")[0].strip().rstrip("/")
 
@@ -97,16 +94,7 @@ def send_sync_error_notification(
     failure_count: int,
     auto_paused: bool,
 ) -> bool:
-    """Шлёт email о неудаче sync склада.
-
-    Args:
-        to_email: email получателя
-        warehouse_name: юзерское название склада
-        warehouse_kind: ozon_fbo/ozon_fbs/wb_fbo/wb_fbs/google_sheet
-        error_message: текст ошибки от источника
-        failure_count: подряд неудач (для сообщения в письме)
-        auto_paused: True если склад был поставлен на паузу из-за 3+ неудач
-    """
+    """Шлёт email о неудаче sync склада."""
     api_key = os.getenv("RESEND_API_KEY")
     from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
     if not api_key:
@@ -171,4 +159,59 @@ def send_sync_error_notification(
         return True
     except Exception as e:
         logger.exception(f"Resend sync-error notification failed for {to_email}: {e}")
+        return False
+
+
+def send_weekly_report_email(
+    to_email: str,
+    seller_name: Optional[str],
+    xlsx_bytes: bytes,
+    filename: str,
+) -> bool:
+    """Шлёт еженедельный Excel-отчёт как attachment через Resend."""
+    api_key = os.getenv("RESEND_API_KEY")
+    from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
+    if not api_key:
+        logger.info("RESEND_API_KEY не задан — пропускаю weekly report для %s", to_email)
+        return False
+
+    try:
+        import resend
+        resend.api_key = api_key
+    except ImportError:
+        logger.warning("resend SDK не установлен")
+        return False
+
+    safe_name = html.escape(seller_name) if seller_name else ""
+    greeting = f"Привет{', ' + safe_name if safe_name else ''}!"
+    app_url = _app_url()
+
+    html_body = f"""<!DOCTYPE html><html><body style="font-family:-apple-system,sans-serif;color:#0f172a;max-width:680px;margin:0 auto;padding:24px">
+<h2 style="color:#0f766e;margin:0 0 16px">Veloseller — еженедельный отчёт</h2>
+<p>{greeting}</p>
+<p>Прикрепили Excel с тремя листами:</p>
+<ul>
+<li><b>Сводка</b> — динамика ключевых метрик за 14 дней</li>
+<li><b>Топ потерь</b> — 50 SKU с самыми большими потерями выручки</li>
+<li><b>Неликвид</b> — товары с покрытием &gt; 180 дней и их замороженные деньги</li>
+</ul>
+<p style="margin-top:24px"><a href="{app_url}/dashboard" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">Перейти в дашборд</a></p>
+<p style="color:#64748b;font-size:12px;margin-top:32px">Отписаться от еженедельных отчётов можно в настройках профиля.</p>
+</body></html>"""
+
+    try:
+        resend.Emails.send({
+            "from": from_email,
+            "to": [to_email],
+            "subject": "Veloseller — еженедельный отчёт",
+            "html": html_body,
+            "attachments": [{
+                "filename": filename,
+                "content": base64.b64encode(xlsx_bytes).decode("ascii"),
+            }],
+        })
+        logger.info("weekly report email sent", extra={"to": to_email, "size": len(xlsx_bytes)})
+        return True
+    except Exception as e:
+        logger.exception(f"Resend weekly report failed for {to_email}: {e}")
         return False
