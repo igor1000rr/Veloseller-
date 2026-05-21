@@ -3,7 +3,9 @@
 БАГ 21 fix: SKU и message экранируются через html.escape перед вставкой в HTML.
 БАГ 51 fix: домен из env APP_URL (продакшен veloseller.ru, не .app).
 
-Multi-warehouse (май 2026): format_sync_error_message для уведомлений о ошибках sync.
+Multi-warehouse (май 2026):
+- format_sync_error_message — уведомления о ошибках sync
+- send_document — отправка Excel-отчётов через Bot API sendDocument
 """
 from __future__ import annotations
 import html
@@ -39,6 +41,54 @@ def send_message(chat_id: str, text: str, *, parse_mode: str = "HTML") -> bool:
         return True
     except Exception as e:
         logger.exception("Telegram send error: %s", e)
+        return False
+
+
+def send_document(
+    chat_id: str,
+    file_bytes: bytes,
+    filename: str,
+    caption: str = "",
+    parse_mode: str = "HTML",
+) -> bool:
+    """Шлёт файл в telegram через Bot API sendDocument (multipart/form-data).
+
+    Args:
+        chat_id: ID чата (из sellers.telegram_chat_id)
+        file_bytes: бинарные данные файла (напр. Excel xlsx через openpyxl.save())
+        filename: имя файла для получателя (e.g. veloseller-report-2026-05-21.xlsx)
+        caption: HTML-подпись (обязательно для UX, под файлом)
+        parse_mode: HTML или MarkdownV2 для caption
+
+    Ограничения Bot API: файл до 50 MB. Для Excel это более чем достаточно.
+
+    Returns: True если Telegram вернул 200.
+    """
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token or not chat_id:
+        return False
+    try:
+        files = {
+            "document": (filename, file_bytes, "application/octet-stream"),
+        }
+        data = {
+            "chat_id": chat_id,
+        }
+        if caption:
+            data["caption"] = caption
+            data["parse_mode"] = parse_mode
+        r = httpx.post(
+            f"{API_BASE}{token}/sendDocument",
+            data=data,
+            files=files,
+            timeout=60.0,  # больше таймаут чем для текста — upload файла может быть медленным
+        )
+        if r.status_code != 200:
+            logger.warning("Telegram sendDocument %s: %s", r.status_code, r.text[:200])
+            return False
+        return True
+    except Exception as e:
+        logger.exception("Telegram sendDocument error: %s", e)
         return False
 
 

@@ -3,6 +3,7 @@
 - recalc-all каждый час
 - sync активных marketplace-connections РАЗ В СУТКИ в 02:00 UTC
 - daily digest в 09:00 UTC
+- weekly Excel report по понедельникам в 09:00 UTC (12:00 МСК)
 - snapshots retention в 04:00 UTC (БАГ 89)
 - reset stuck syncing каждые 10 минут (БАГ 90)
 """
@@ -24,13 +25,7 @@ logger = logging.getLogger("veloseller.scheduler")
 
 _scheduler: BackgroundScheduler | None = None
 
-# БАГ 89: глубина истории inventory_snapshots.
-# Engine берёт: 90-day period + 30-day pre-period для медианы = 120 дней.
-# Запас 60 дней → 180 дней.
 _SNAPSHOTS_RETENTION_DAYS = 180
-
-# БАГ 90: максимум времени в status='syncing'. Если connection в syncing дольше этого —
-# worker упал/рестартнул. Сбрасываем в error чтобы UI не ждал вечно.
 _STUCK_SYNCING_TIMEOUT_MINUTES = 30
 
 
@@ -43,12 +38,6 @@ def _job_recalc_all() -> None:
 
 
 def _job_sync_active_connections() -> None:
-    """Пинаем активные marketplace-connections раз в сутки.
-
-    БАГ 31: пагинация connections.
-    БАГ 87/90: фильтр по status='active' автоматически пропускает connections в 'syncing'
-    или 'error' — избегаем double-sync race.
-    """
     from app.crypto import decrypt_if_encrypted
     try:
         sb = get_supabase()
@@ -151,6 +140,15 @@ def _job_send_daily_digests() -> None:
         logger.exception("Daily digest job failed: %s", e)
 
 
+def _job_weekly_report() -> None:
+    """Понедельник 09:00 UTC — еженедельный Excel-отчёт по складам."""
+    try:
+        from app.jobs.weekly_report import send_weekly_reports
+        send_weekly_reports()
+    except Exception:
+        logger.exception("weekly_report scheduler job failed")
+
+
 def _job_snapshots_retention() -> None:
     """БАГ 89: удаляем inventory_snapshots старше 180 дней."""
     try:
@@ -171,15 +169,7 @@ def _job_snapshots_retention() -> None:
 
 
 def _job_reset_stuck_syncing() -> None:
-    """БАГ 90: сбрасываем connections в status='syncing' старше N минут в 'error'.
-
-    Сценарий: worker restart (systemctl, OOM, deploy) во время BG sync.
-    BG task теряется, status='syncing' остаётся навсегда, UI поллит вечно.
-    Этот job исправляет в течении 30 минут.
-
-    Ориентируемся по updated_at (триггер trg_data_connections_updated_at выставляет
-    его при любом UPDATE — включая наш "возьми лок" UPDATE status='syncing').
-    """
+    """БАГ 90: сбрасываем connections в status='syncing' старше N минут в 'error'."""
     try:
         sb = get_supabase()
         cutoff = (datetime.now(timezone.utc) - timedelta(minutes=_STUCK_SYNCING_TIMEOUT_MINUTES)).isoformat()
@@ -237,7 +227,13 @@ def start_scheduler() -> None:
         id="daily-digest",
         replace_existing=True,
     )
-    # БАГ 90: каждые 10 минут сбрасываем застрявшие syncing
+    # Еженедельный Excel отчёт: понедельник 09:00 UTC (12:00 МСК)
+    _scheduler.add_job(
+        _job_weekly_report,
+        CronTrigger(day_of_week="mon", hour=9, minute=0),
+        id="weekly-report",
+        replace_existing=True,
+    )
     _scheduler.add_job(
         _job_reset_stuck_syncing,
         CronTrigger(minute="*/10"),
