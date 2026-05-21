@@ -155,7 +155,9 @@ class TestRecalcJobs:
 
     @pytest.fixture(autouse=True)
     def _isolate_db_recalc(self, monkeypatch):
-        monkeypatch.setattr("app.main._db_persist_recalc_state", lambda **kw: None)
+        # _db_persist_recalc_state вызывается с позиционным seller_id + kwargs:
+        # принимаем оба варианта через *a, **kw
+        monkeypatch.setattr("app.main._db_persist_recalc_state", lambda *a, **kw: None)
         monkeypatch.setattr("app.main._db_get_recalc_state", lambda sid: None)
 
     def setup_method(self):
