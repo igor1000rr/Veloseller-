@@ -34,7 +34,7 @@ export default async function HealthPage() {
   // Hourly distribution за 24ч
   const hourly: { hour: number; count: number }[] = Array.from({ length: 24 }, (_, h) => ({ hour: h, count: 0 }));
   for (const row of (snapshots1dRows ?? []) as any[]) {
-    const h = new Date(row.snapshot_time).getHours();
+    const h = new Date(row.snapshot_time).getUTCHours();
     hourly[h].count++;
   }
 
@@ -91,7 +91,7 @@ export default async function HealthPage() {
             <div className="font-mono text-[11px] text-ink-hush">/ {snapshots7d ?? 0} за 7 дней</div>
           </div>
           <HourlyHeatmap data={hourly} />
-          <p className="mt-3 font-mono text-[10px] text-ink-hush">часы 00——6723 UTC, интенсивность по количеству snapshots</p>
+          <p className="mt-3 font-mono text-[10px] text-ink-hush">часы 00–23 UTC, интенсивность по количеству snapshots</p>
         </div>
 
         <div className="rounded-2xl border border-line bg-paper p-5 md:p-6">

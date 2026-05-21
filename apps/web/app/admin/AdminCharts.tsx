@@ -21,6 +21,19 @@ const tooltipStyle = {
   fontFamily: "var(--font-mono)",
 };
 
+/** Компактный формат рублей для осей: 12500 → 12.5K, 1500000 → 1.5M. */
+function compactRub(value: number): string {
+  if (!isFinite(value)) return "—";
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M ₽`;
+  if (abs >= 1_000) return `${(value / 1_000).toFixed(0)}K ₽`;
+  return `${Math.round(value)} ₽`;
+}
+
+function fullRub(value: number): string {
+  return `${new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 0 }).format(value)} ₽`;
+}
+
 export function RegistrationsChart({ data }: { data: { date: string; count: number }[] }) {
   if (!data || data.length === 0) return <Empty>Регистраций пока нет</Empty>;
   return (
@@ -82,7 +95,7 @@ export function MrrChart({ data }: { data: { date: string; mrr: number }[] }) {
   if (!data || data.length === 0) return <Empty>Нет платежей</Empty>;
   return (
     <ResponsiveContainer width="100%" height={260}>
-      <AreaChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+      <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
         <defs>
           <linearGradient id="mrrGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={COLORS.limeDeep} stopOpacity={0.4} />
@@ -91,8 +104,8 @@ export function MrrChart({ data }: { data: { date: string; mrr: number }[] }) {
         </defs>
         <CartesianGrid strokeDasharray="3 3" stroke={COLORS.line} vertical={false} />
         <XAxis dataKey="date" stroke={COLORS.hush} fontSize={10} tickLine={false} axisLine={false} interval="preserveStartEnd" />
-        <YAxis stroke={COLORS.hush} fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
-        <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => `$${v}`} />
+        <YAxis stroke={COLORS.hush} fontSize={10} tickLine={false} axisLine={false} tickFormatter={compactRub} width={70} />
+        <Tooltip contentStyle={tooltipStyle} formatter={(v: any) => fullRub(Number(v))} />
         <Area type="monotone" dataKey="mrr" stroke={COLORS.limeDeep} strokeWidth={2.2} fill="url(#mrrGrad)" />
       </AreaChart>
     </ResponsiveContainer>
@@ -129,7 +142,7 @@ export function ActivityChart({ data }: { data: { date: string; snapshots: numbe
 export function HourlyHeatmap({ data }: { data: { hour: number; count: number }[] }) {
   const max = Math.max(...data.map(d => d.count), 1);
   return (
-    <div className="grid grid-cols-12 gap-1" style={{ gridTemplateColumns: "repeat(24, minmax(0, 1fr))" }}>
+    <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(24, minmax(0, 1fr))" }}>
       {data.map((d) => {
         const intensity = d.count / max;
         const opacity = d.count === 0 ? 0.08 : 0.25 + intensity * 0.75;

@@ -18,20 +18,33 @@ export default async function AdminActivityPage() {
     30,
   );
 
+  // Total snapshots / recalcs вычисляем из bucketed данных для точности
+  const totalSnaps = activity.reduce((s, d) => s + d.snapshots, 0);
+  const totalRecalcs = activity.reduce((s, d) => s + d.recalcs, 0);
+  const avgSnapsDay = Math.round(totalSnaps / 30);
+  const avgRecalcsDay = Math.round(totalRecalcs / 30);
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 md:space-y-10">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Активность</h1>
-        <p className="text-sm text-slate-500 mt-1">Snapshots и расчёты метрик за последние 30 дней</p>
+        <div className="inline-flex items-center gap-2">
+          <span className="size-1 rounded-full bg-azure" />
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-azure font-semibold">Admin / Activity</span>
+        </div>
+        <h1 className="mt-2 font-display text-3xl md:text-4xl tracking-tight font-medium">Активность</h1>
+        <p className="mt-1.5 text-ink-muted text-sm">Snapshots и расчёты метрик за последние 30 дней</p>
       </header>
 
-      <div className="bg-white border border-slate-200 rounded-xl p-5">
-        <ActivityChart data={activity} />
-      </div>
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+        <Stat label="Snapshots за 30д" value={totalSnaps} accent="azure" />
+        <Stat label="Расчётов метрик за 30д" value={totalRecalcs} accent="lime" />
+        <Stat label="Средний snapshots/день" value={avgSnapsDay} accent="azure" />
+        <Stat label="Средний расчётов/день" value={avgRecalcsDay} accent="lime" />
+      </section>
 
-      <div className="grid md:grid-cols-2 gap-4">
-        <Stat label="Всего snapshots, 30д" value={snaps?.length ?? 0} accent="blue" />
-        <Stat label="Расчётов метрик, 30д" value={metrics?.length ?? 0} accent="violet" />
+      <div className="rounded-2xl border border-line bg-paper p-5 md:p-6">
+        <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush mb-4">Динамика по дням</div>
+        <ActivityChart data={activity} />
       </div>
     </div>
   );
@@ -61,12 +74,14 @@ function bucketActivity(snapTs: string[], metricsTs: string[], days: number) {
   }));
 }
 
-function Stat({ label, value, accent }: { label: string; value: number; accent: "violet" | "blue" }) {
-  const colors = accent === "violet" ? "border-l-violet-500" : "border-l-blue-500";
+function Stat({ label, value, accent }: { label: string; value: number; accent: "lime" | "azure" }) {
+  const accentColor = accent === "lime" ? "text-lime-deep" : "text-azure";
   return (
-    <div className={`bg-white border border-slate-200 border-l-4 ${colors} rounded-xl p-5`}>
-      <div className="text-xs text-slate-500 uppercase tracking-wider">{label}</div>
-      <div className="mt-2 text-3xl font-semibold text-slate-900">{value.toLocaleString("ru-RU")}</div>
+    <div className="rounded-2xl border border-line bg-paper p-5">
+      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush">{label}</div>
+      <div className={`mt-2 font-display text-2xl md:text-3xl tracking-tight tabular font-medium ${accentColor}`}>
+        {value.toLocaleString("ru-RU")}
+      </div>
     </div>
   );
 }
