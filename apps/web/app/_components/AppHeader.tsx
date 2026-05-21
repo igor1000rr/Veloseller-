@@ -51,7 +51,7 @@ export default function AppHeader({
         { href: "/dashboard/alerts",    label: "Уведомления", badge: unreadAlerts },
         { href: "/dashboard/dynamics",  label: "Динамика" },
         { href: "/dashboard/changelog", label: "Журнал" },
-        { href: "/connections",         label: "Источники" },
+        { href: "/connections",         label: "Склады" },
         { href: "/dashboard/settings",  label: "Настройки" },
         { href: "/billing",             label: "Тариф" },
       ]
