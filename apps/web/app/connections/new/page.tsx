@@ -8,62 +8,124 @@ import { Icons } from "../../_components/Icons";
 import { ErrorModal } from "../../_components/ErrorModal";
 import { parseApiError, type ParsedError } from "@/lib/error-parser";
 
-type SourceKind = "google_sheet" | "ozon" | "wildberries" | "shopify" | "amazon";
+/**
+ * Multi-warehouse архитектура (май 2026):
+ * 5 типов складов, каждый = отдельная "data_connection" в БД с собственным warehouse_kind.
+ * Один Ozon API-ключ → 2 склада (FBO + FBS, остатки берутся по разным фильтрам).
+ * Один WB token → 2 склада (FBO через Statistics API + FBS через Marketplace API).
+ */
+type WarehouseKind = "ozon_fbo" | "ozon_fbs" | "wb_fbo" | "wb_fbs" | "google_sheet";
 
-type SourceMeta = {
-  kind: SourceKind;
+type WarehouseMeta = {
+  kind: WarehouseKind;
   title: string;
   text: string;
   dot: string;
   status: "ready" | "wip";
+  pair?: WarehouseKind; // для предложения добавить парный склад (FBO ↔ FBS)
 };
 
-// Порядок по правкам Игоря: OZON, WB, Google Sheet, Shopify, Amazon. CSV убран.
-const SOURCES: SourceMeta[] = [
-  { kind: "ozon",         title: "Ozon API",       text: "Read-only ключ из личного кабинета Ozon.",                          dot: "#005bff", status: "ready" },
-  { kind: "wildberries",  title: "Wildberries",    text: "Статистический токен WB — только чтение остатков и цен.",           dot: "#a71179", status: "ready" },
-  { kind: "google_sheet", title: "Google Sheet",   text: "Доступ только для чтения таблицы Google Sheet.",                    dot: "#0F9D58", status: "ready" },
-  { kind: "shopify",      title: "Shopify",        text: "OAuth-подключение к Shopify Admin API. Скоро появится.",            dot: "#95BF47", status: "wip" },
-  { kind: "amazon",       title: "Amazon SP-API",  text: "Amazon Selling Partner API — в процессе одобрения роли Amazon.",    dot: "#FF9900", status: "wip" },
+const WAREHOUSES: WarehouseMeta[] = [
+  {
+    kind: "ozon_fbo",
+    title: "Ozon FBO",
+    text: "Анализ остатков на складах Ozon (товары на FBO-складах маркетплейса).",
+    dot: "#005bff", status: "ready",
+    pair: "ozon_fbs",
+  },
+  {
+    kind: "ozon_fbs",
+    title: "Ozon FBS",
+    text: "Анализ вашего склада через остатки FBS Ozon (товары на вашем складе).",
+    dot: "#005bff", status: "ready",
+    pair: "ozon_fbo",
+  },
+  {
+    kind: "wb_fbo",
+    title: "Wildberries FBO",
+    text: "Анализ остатков на складах WB (товары на FBO-складах маркетплейса).",
+    dot: "#a71179", status: "ready",
+    pair: "wb_fbs",
+  },
+  {
+    kind: "wb_fbs",
+    title: "Wildberries FBS",
+    text: "Анализ вашего склада через остатки FBS WB (товары на вашем складе).",
+    dot: "#a71179", status: "wip",
+    pair: "wb_fbo",
+  },
+  {
+    kind: "google_sheet",
+    title: "Google Sheet",
+    text: "Анализ вашего склада через Google Sheet с остатками и ценами.",
+    dot: "#0F9D58", status: "ready",
+  },
 ];
 
 export default function NewConnectionPage() {
   const router = useRouter();
-  const [kind, setKind] = useState<SourceKind | null>(null);
-  const selected = SOURCES.find((s) => s.kind === kind);
+  const [kind, setKind] = useState<WarehouseKind | null>(null);
+  const [pairSuggest, setPairSuggest] = useState<WarehouseKind | null>(null);
+  const selected = WAREHOUSES.find((s) => s.kind === kind);
 
   return (
     <>
       <Link href={"/connections" as any} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition mb-4">
-        <span className="rotate-180"><Icons.ArrowRight size={12} /></span> К источникам
+        <span className="rotate-180"><Icons.ArrowRight size={12} /></span> К складам
       </Link>
 
       <div className="mb-8">
         <div className="inline-flex items-center gap-2 mb-2">
           <span className="size-1 rounded-full bg-lime-deep" />
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Новый источник</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Новый склад</span>
         </div>
-        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">Новый источник</h1>
-        <p className="mt-1 text-ink-muted text-sm">Выбери вариант подключения</p>
+        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">Новый склад</h1>
+        <p className="mt-1 text-ink-muted text-sm">Выбери источник данных. Каждый склад анализируется отдельно — данные не пересекаются.</p>
       </div>
 
       {!kind ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {SOURCES.map((s) => (
-            <SourceCard key={s.kind} source={s} onClick={() => setKind(s.kind)} />
+          {WAREHOUSES.map((s) => (
+            <WarehouseCard key={s.kind} warehouse={s} onClick={() => setKind(s.kind)} />
           ))}
         </div>
       ) : selected?.status === "wip" ? (
-        <WipPanel source={selected} onCancel={() => setKind(null)} />
+        <WipPanel warehouse={selected} onCancel={() => setKind(null)} />
       ) : (
-        <KindForm kind={kind} onCancel={() => setKind(null)} onDone={() => router.push("/connections")} />
+        <KindForm
+          kind={kind}
+          onCancel={() => setKind(null)}
+          onDone={() => {
+            // Если у текущего склада есть парный (FBO↔FBS) — предложить добавить второй
+            const meta = WAREHOUSES.find((w) => w.kind === kind);
+            const pairKind = meta?.pair;
+            const pairMeta = pairKind ? WAREHOUSES.find((w) => w.kind === pairKind) : null;
+            if (pairMeta && pairMeta.status === "ready") {
+              setPairSuggest(pairKind!);
+            } else {
+              router.push("/connections");
+            }
+          }}
+        />
       )}
+
+      <PairSuggestModal
+        suggest={pairSuggest}
+        onDismiss={() => {
+          setPairSuggest(null);
+          router.push("/connections");
+        }}
+        onAccept={(newKind) => {
+          setPairSuggest(null);
+          setKind(newKind);
+        }}
+      />
     </>
   );
 }
 
-function SourceCard({ source, onClick }: { source: SourceMeta; onClick: () => void }) {
-  const wip = source.status === "wip";
+function WarehouseCard({ warehouse, onClick }: { warehouse: WarehouseMeta; onClick: () => void }) {
+  const wip = warehouse.status === "wip";
   return (
     <button
       onClick={onClick}
@@ -72,18 +134,18 @@ function SourceCard({ source, onClick }: { source: SourceMeta; onClick: () => vo
       }`}
     >
       <div className="flex items-center justify-between">
-        <span className="size-3 rounded-full" style={{ background: source.dot }} />
+        <span className="size-3 rounded-full" style={{ background: warehouse.dot }} />
         {wip ? (
           <span className="font-mono text-[9.5px] text-orange uppercase tracking-[0.18em] font-semibold border border-orange/30 bg-orange/10 px-2 py-0.5 rounded">
-            в разработке
+            скоро
           </span>
         ) : (
           <span className="font-mono text-[9.5px] text-lime-deep uppercase tracking-[0.18em] font-semibold">ready</span>
         )}
       </div>
-      <div className="mt-4 font-display text-xl font-medium text-ink">{source.title}</div>
-      <p className="mt-2 text-sm text-ink-muted leading-relaxed">{source.text}</p>
-      <div className="mt-4 flex items-center gap-1.5 text-xs font-mono text-ink-hush group-hover:text-lime-deep transition">
+      <div className="mt-4 font-display text-xl font-medium text-ink">{warehouse.title}</div>
+      <p className="mt-2 text-sm text-ink-muted leading-relaxed">{warehouse.text}</p>
+      <div className="mt-4 flex items-center gap-1.5 text-xs font-mono text-ink-hush transition">
         <span>{wip ? "узнать больше" : "подключить"}</span>
         <Icons.ArrowRight size={11} />
       </div>
@@ -91,8 +153,7 @@ function SourceCard({ source, onClick }: { source: SourceMeta; onClick: () => vo
   );
 }
 
-function WipPanel({ source, onCancel }: { source: SourceMeta; onCancel: () => void }) {
-  const isShopify = source.kind === "shopify";
+function WipPanel({ warehouse, onCancel }: { warehouse: WarehouseMeta; onCancel: () => void }) {
   return (
     <div className="rounded-2xl border border-line bg-paper p-6 md:p-8">
       <button type="button" onClick={onCancel} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition mb-4">
@@ -100,43 +161,24 @@ function WipPanel({ source, onCancel }: { source: SourceMeta; onCancel: () => vo
       </button>
 
       <div className="flex items-center gap-3 flex-wrap">
-        <span className="size-3 rounded-full" style={{ background: source.dot }} />
-        <h2 className="font-display text-2xl md:text-3xl tracking-tight font-medium">{source.title}</h2>
+        <span className="size-3 rounded-full" style={{ background: warehouse.dot }} />
+        <h2 className="font-display text-2xl md:text-3xl tracking-tight font-medium">{warehouse.title}</h2>
         <span className="font-mono text-[10px] text-orange uppercase tracking-[0.18em] font-semibold border border-orange/30 bg-orange/10 px-2 py-0.5 rounded">
-          в разработке
+          скоро
         </span>
       </div>
 
       <p className="mt-4 text-ink-muted leading-relaxed">
-        {isShopify
-          ? "Интеграция с Shopify Admin GraphQL API. Подключение через OAuth — разрешаешь read_inventory_items, read_products, read_orders, и мы начинаем синхронизировать остатки и продажи каждые 6 часов."
-          : "Интеграция с Amazon Selling Partner API. Подключение через Login with Amazon (LWA OAuth), используем Reports API по FBA Inventory + Sales для регионов NA / EU / FE."}
+        {warehouse.kind === "wb_fbs"
+          ? "Интеграция с Wildberries Marketplace API для остатков FBS. Требует указание warehouseId физического склада. Дорабатываем — напишем как только будет готово."
+          : "Эта интеграция в разработке. Напишем, когда будет готово."}
       </p>
-
-      <div className="mt-6 grid sm:grid-cols-3 gap-3">
-        {(isShopify
-          ? [
-              ["OAuth flow",          "в работе"],
-              ["Остатки и продажи",  "план"],
-              ["Расписание синка",  "план"],
-            ]
-          : [
-              ["Заявка на роль",      "подана"],
-              ["LWA OAuth",           "в работе"],
-              ["Reports API poller",  "план"],
-            ]).map(([label, status]) => (
-          <div key={label} className="rounded-lg border border-line bg-bg-soft p-3">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{label}</div>
-            <div className="mt-1 font-mono text-sm text-ink">{status}</div>
-          </div>
-        ))}
-      </div>
 
       <div className="mt-6 rounded-lg border border-lime-deep/30 bg-lime-soft p-4 flex items-start gap-3">
         <span className="text-lime-deep mt-0.5"><Icons.Bell /></span>
         <div>
-          <div className="font-medium text-ink">Оповестить, когда будет готово</div>
-          <p className="mt-1 text-sm text-ink-muted">Напишем на твой email как только сделаем {source.title}. Пока что подключи Ozon, Wildberries или Google Sheet — это работает уже сейчас.</p>
+          <div className="font-medium text-ink">Пока используйте другие склады</div>
+          <p className="mt-1 text-sm text-ink-muted">Ozon FBO, Ozon FBS, Wildberries FBO и Google Sheet уже работают — подключайте их прямо сейчас.</p>
         </div>
       </div>
 
@@ -151,7 +193,7 @@ function WipPanel({ source, onCancel }: { source: SourceMeta; onCancel: () => vo
   );
 }
 
-function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () => void; onDone: () => void }) {
+function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: () => void; onDone: () => void }) {
   const [name, setName] = useState("");
   const [modalError, setModalError] = useState<ParsedError | null>(null);
   const [loading, setLoading] = useState(false);
@@ -162,11 +204,20 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
   const [apiKey, setApiKey] = useState("");
   const [wbToken, setWbToken] = useState("");
 
+  const isOzon = kind === "ozon_fbo" || kind === "ozon_fbs";
+  const isWb = kind === "wb_fbo" || kind === "wb_fbs";
+  const isSheet = kind === "google_sheet";
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setModalError(null);
-    setLoading(true);
 
+    if (!name.trim()) {
+      setModalError({ kind: "validation", title: "Название склада обязательно", message: "Укажите название, чтобы потом найти склад в списке." });
+      return;
+    }
+
+    setLoading(true);
     try {
       const supabase = createSupabaseBrowserClient();
       const { data: { user } } = await supabase.auth.getUser();
@@ -175,31 +226,32 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
         return;
       }
 
-      let source: string;
-      let marketplace: string | null = null;
       let config: Record<string, unknown> = {};
-
-      if (kind === "google_sheet") {
-        source = "google_sheet";
+      if (isSheet) {
         config = { sheet_id: sheetId, range: sheetRange };
-      } else if (kind === "ozon") {
-        source = "marketplace_api";
-        marketplace = "ozon";
+      } else if (isOzon) {
         config = { client_id: clientId, api_key: apiKey };
-      } else {
-        source = "marketplace_api";
-        marketplace = "wildberries";
+      } else if (isWb) {
         config = { token: wbToken };
       }
 
       const createRes = await fetch("/api/connections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ source, marketplace, name: name || sourceTitle(kind), config }),
+        body: JSON.stringify({ warehouse_kind: kind, name: name.trim(), config }),
       });
       if (!createRes.ok) {
         const data = await createRes.json().catch(() => ({}));
-        setModalError(parseApiError(data, "Не удалось создать подключение"));
+        // 402 Payment Required = лимит складов
+        if (createRes.status === 402 || data?.code === "warehouse_limit_reached") {
+          setModalError({
+            kind: "permission",
+            title: "Лимит складов достигнут",
+            message: `Ваш тариф позволяет ${data?.limit ?? "?"} складов. Обновите тариф в разделе "Тарифы и оплата".`,
+          });
+          return;
+        }
+        setModalError(parseApiError(data, "Не удалось создать склад"));
         return;
       }
       const conn = await createRes.json() as { id: string };
@@ -225,24 +277,27 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
           <span className="rotate-180"><Icons.ArrowRight size={12} /></span> К выбору
         </button>
 
-        <h2 className="font-display text-2xl md:text-3xl tracking-tight font-medium">{sourceTitle(kind)}</h2>
+        <h2 className="font-display text-2xl md:text-3xl tracking-tight font-medium">{warehouseTitle(kind)}</h2>
 
-        {/* Инструкция по правкам Игоря — над полями формы */}
-        {kind === "ozon" && <OzonInstructions />}
-        {kind === "wildberries" && <WbInstructions />}
-        {kind === "google_sheet" && <SheetInstructions />}
+        {isOzon && <OzonInstructions />}
+        {isWb && <WbInstructions />}
+        {isSheet && <SheetInstructions />}
 
         <div>
-          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Название (для себя)</label>
+          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">
+            Название склада <span className="text-rose">*</span>
+          </label>
           <input
+            required
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Например, Мой магазин Ozon"
+            placeholder='Название вашего склада, например: "Склад магазина (через FBS)"'
             className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition"
+            maxLength={200}
           />
         </div>
 
-        {kind === "google_sheet" && (
+        {isSheet && (
           <>
             <div>
               <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Sheet ID</label>
@@ -258,7 +313,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
           </>
         )}
 
-        {kind === "ozon" && (
+        {isOzon && (
           <>
             <div>
               <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Client-Id</label>
@@ -270,10 +325,14 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
               <input required type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
                 className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
             </div>
+            <p className="font-mono text-[11px] text-ink-hush">
+              Один Ozon API-ключ может питать оба склада: Ozon FBO (остатки на складах маркетплейса) и Ozon FBS (ваш склад).
+              После подключения предложим добавить второй.
+            </p>
           </>
         )}
 
-        {kind === "wildberries" && (
+        {isWb && (
           <div>
             <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Статистический токен</label>
             <input required type="password" value={wbToken} onChange={(e) => setWbToken(e.target.value)}
@@ -292,8 +351,46 @@ function KindForm({ kind, onCancel, onDone }: { kind: SourceKind; onCancel: () =
   );
 }
 
+function PairSuggestModal({
+  suggest, onDismiss, onAccept,
+}: { suggest: WarehouseKind | null; onDismiss: () => void; onAccept: (kind: WarehouseKind) => void }) {
+  if (!suggest) return null;
+  const meta = WAREHOUSES.find((w) => w.kind === suggest);
+  if (!meta) return null;
+
+  const isOzonPair = suggest === "ozon_fbs" || suggest === "ozon_fbo";
+  const sameKeyText = isOzonPair
+    ? "У вас тот же API-ключ может дать остатки и из другого источника."
+    : "У вас тот же токен может дать остатки и из другого источника.";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm p-4" onClick={onDismiss}>
+      <div className="relative w-full max-w-md rounded-2xl bg-paper border border-line p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-display text-xl font-medium text-ink">Склад создан ✓</h3>
+        <p className="mt-2 text-sm text-ink-muted">
+          Добавить также склад <b>{meta.title}</b>? {sameKeyText}
+        </p>
+        <div className="mt-5 flex gap-2 flex-wrap">
+          <button
+            onClick={() => onAccept(suggest)}
+            className="inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-4 py-2.5 text-sm font-semibold hover:bg-ink-soft transition"
+          >
+            Да, добавить {meta.title}
+          </button>
+          <button
+            onClick={onDismiss}
+            className="inline-flex items-center gap-2 rounded-lg border border-line bg-paper text-ink px-4 py-2.5 text-sm font-semibold hover:bg-bg-soft transition"
+          >
+            Нет, спасибо
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============================================================
-// Инструкции для каждой интеграции (по правкам Игоря)
+// Инструкции по получению API-ключей (сохранены из старой версии)
 // ============================================================
 
 function OzonInstructions() {
@@ -375,12 +472,12 @@ function SheetInstructions() {
   );
 }
 
-function sourceTitle(kind: SourceKind): string {
+function warehouseTitle(kind: WarehouseKind): string {
   return ({
+    ozon_fbo:     "Ozon FBO",
+    ozon_fbs:     "Ozon FBS",
+    wb_fbo:       "Wildberries FBO",
+    wb_fbs:       "Wildberries FBS",
     google_sheet: "Google Sheet",
-    ozon:         "Ozon API",
-    wildberries:  "Wildberries API",
-    shopify:      "Shopify",
-    amazon:       "Amazon SP-API",
   } as const)[kind];
 }
