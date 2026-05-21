@@ -73,10 +73,11 @@ describe("DayProgress", () => {
     expect(link).toHaveAttribute("href", "/onboarding");
   });
 
-  it("показывает прогресс-полоску с Day 1 / Day 7 / Day 30", () => {
+  it("показывает прогресс-полоску с День 1 / День 7 / День 30", () => {
+    // После русификации dashboard: 'Day 1' → 'День 1' и т.д.
     const { container } = render(<DayProgress daysSinceSetup={3} />);
-    expect(hasText(container, "Day 1")).toBe(true);
-    expect(hasText(container, "Day 7")).toBe(true);
-    expect(hasText(container, "Day 30")).toBe(true);
+    expect(hasText(container, "День 1")).toBe(true);
+    expect(hasText(container, "День 7")).toBe(true);
+    expect(hasText(container, "День 30")).toBe(true);
   });
 });
