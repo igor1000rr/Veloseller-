@@ -15,6 +15,9 @@ client = TestClient(app)
 VALID_UUID = "e113ebfb-3409-4cca-b0ab-0a7d965f4cba"
 SECOND_UUID = "11111111-2222-3333-4444-555555555555"
 
+TELEGRAM_TEST_SECRET = "test-telegram-secret"
+TELEGRAM_TEST_HEADERS = {"X-Telegram-Bot-Api-Secret-Token": TELEGRAM_TEST_SECRET}
+
 
 class TestHealth:
     def test_returns_ok(self):
@@ -47,6 +50,13 @@ class TestWorkerSecret:
         monkeypatch.setattr("app.main.settings.worker_secret", "real-secret-123")
         r = client.post("/jobs/recalc-all", headers={"X-Worker-Secret": "wrong"})
         assert r.status_code == 401
+
+    def test_production_env_without_secret_returns_500(self, monkeypatch):
+        """SECURITY FIX: в проде с dev-default секретом → 500 (fail-closed)."""
+        monkeypatch.setenv("ENV", "production")
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        r = client.post("/jobs/recalc-all", headers={"X-Worker-Secret": "whatever"})
+        assert r.status_code == 500
 
 
 class TestIngestCsvDeprecated:
@@ -207,25 +217,39 @@ class TestRecalcJobs:
 
 
 class TestTelegramWebhook:
+    """SECURITY FIX (fail-closed): TELEGRAM_WEBHOOK_SECRET требуется всегда.
+
+    Без env → 500. С env но без/с неверным заголовком → 403. С верным заголовком → 200.
+    Раньше в dev без env эндпоинт был открыт — фрод-webhook мог привязывать chat_id к любому seller_id.
+    """
+
     def setup_method(self):
-        for var in ("TELEGRAM_WEBHOOK_SECRET", "ENV"):
-            os.environ.pop(var, None)
+        # Для большинства тестов webhook вызывается с заданным env и верным заголовком —
+        # иначе любой запрос вернёт 500/403 вместо прохода к логике.
+        os.environ["TELEGRAM_WEBHOOK_SECRET"] = TELEGRAM_TEST_SECRET
+        os.environ.pop("ENV", None)
+
+    def teardown_method(self):
+        os.environ.pop("TELEGRAM_WEBHOOK_SECRET", None)
+        os.environ.pop("ENV", None)
 
     def test_empty_body_returns_ok_false(self):
-        r = client.post("/telegram/webhook", content=b"not-json")
+        r = client.post("/telegram/webhook", content=b"not-json", headers=TELEGRAM_TEST_HEADERS)
         assert r.status_code == 200
         assert r.json() == {"ok": False}
 
     def test_no_message_returns_ok(self):
-        r = client.post("/telegram/webhook", json={"update_id": 1})
+        r = client.post("/telegram/webhook", json={"update_id": 1}, headers=TELEGRAM_TEST_HEADERS)
         assert r.status_code == 200
         assert r.json() == {"ok": True}
 
     def test_start_without_seller_id_shows_help(self):
         with patch("app.telegram.send_message", return_value=True) as send:
-            r = client.post("/telegram/webhook", json={
-                "message": {"text": "/start", "chat": {"id": 555}}
-            })
+            r = client.post(
+                "/telegram/webhook",
+                json={"message": {"text": "/start", "chat": {"id": 555}}},
+                headers=TELEGRAM_TEST_HEADERS,
+            )
         assert r.status_code == 200
         assert r.json()["linked"] is False
         send.assert_called_once()
@@ -237,9 +261,11 @@ class TestTelegramWebhook:
         )
         with patch("app.main.get_supabase", return_value=mock_sb), \
              patch("app.telegram.send_message", return_value=True):
-            r = client.post("/telegram/webhook", json={
-                "message": {"text": f"/start {VALID_UUID}", "chat": {"id": 777}}
-            })
+            r = client.post(
+                "/telegram/webhook",
+                json={"message": {"text": f"/start {VALID_UUID}", "chat": {"id": 777}}},
+                headers=TELEGRAM_TEST_HEADERS,
+            )
         assert r.status_code == 200
         assert r.json()["linked"] is True
 
@@ -247,29 +273,31 @@ class TestTelegramWebhook:
         mock_sb = MagicMock()
         with patch("app.main.get_supabase", return_value=mock_sb), \
              patch("app.telegram.send_message", return_value=True):
-            r = client.post("/telegram/webhook", json={
-                "message": {"text": "/start not-a-uuid", "chat": {"id": 666}}
-            })
+            r = client.post(
+                "/telegram/webhook",
+                json={"message": {"text": "/start not-a-uuid", "chat": {"id": 666}}},
+                headers=TELEGRAM_TEST_HEADERS,
+            )
         assert r.status_code == 200
         assert r.json()["linked"] is False
         mock_sb.table.assert_not_called()
 
-    def test_secret_token_required_when_env_set(self, monkeypatch):
-        monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "my-secret")
+    def test_secret_required_no_header_returns_403(self):
+        """env есть, заголовка нет → 403."""
         r = client.post("/telegram/webhook", json={"update_id": 1})
         assert r.status_code == 403
 
-    def test_secret_token_accepted_when_correct(self, monkeypatch):
-        monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "my-secret")
+    def test_secret_required_wrong_header_returns_403(self):
+        """env есть, заголовок неверный → 403."""
         r = client.post(
             "/telegram/webhook",
             json={"update_id": 1},
-            headers={"X-Telegram-Bot-Api-Secret-Token": "my-secret"},
+            headers={"X-Telegram-Bot-Api-Secret-Token": "wrong-secret"},
         )
-        assert r.status_code == 200
+        assert r.status_code == 403
 
-    def test_production_without_secret_returns_500(self, monkeypatch):
-        monkeypatch.setenv("ENV", "production")
-        monkeypatch.delenv("TELEGRAM_WEBHOOK_SECRET", raising=False)
+    def test_no_secret_env_returns_500(self):
+        """Без TELEGRAM_WEBHOOK_SECRET в env → 500 (fail-closed, включая dev)."""
+        os.environ.pop("TELEGRAM_WEBHOOK_SECRET", None)
         r = client.post("/telegram/webhook", json={"update_id": 1})
         assert r.status_code == 500

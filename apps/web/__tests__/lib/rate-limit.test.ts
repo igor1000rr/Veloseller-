@@ -72,11 +72,28 @@ describe("checkRateLimit", () => {
 });
 
 describe("getClientIp", () => {
-  it("берёт первый IP из X-Forwarded-For", () => {
+  // SECURITY FIX (XFF spoofing): взятие ПЕРВОГО IP из X-Forwarded-For было
+  // уязвимостью — это пользовательское значение, легко обходит rate-limit.
+  // Нужно брать ПОСЛЕДНИЙ (добавлен nginx через proxy_add_x_forwarded_for)
+  // или x-real-ip (жёстко перезаписывается nginx в sites-enabled/veloseller).
+
+  it("берёт последний IP из X-Forwarded-For (добавлен nginx, доверенный)", () => {
     const req = new Request("http://x", {
       headers: { "x-forwarded-for": "1.2.3.4, 5.6.7.8, 9.10.11.12" },
     });
-    expect(getClientIp(req)).toBe("1.2.3.4");
+    expect(getClientIp(req)).toBe("9.10.11.12");
+  });
+
+  it("x-real-ip имеет приоритет над X-Forwarded-For", () => {
+    // Приоритет x-real-ip — это nginx proxy_set_header X-Real-IP $remote_addr,
+    // который ПЕРЕЗАПИСЫВАЕТ любое клиентское значение (в отличие от add_x_forwarded_for).
+    const req = new Request("http://x", {
+      headers: {
+        "x-real-ip": "5.5.5.5",
+        "x-forwarded-for": "1.2.3.4, 9.9.9.9",
+      },
+    });
+    expect(getClientIp(req)).toBe("5.5.5.5");
   });
 
   it("fallback на X-Real-IP если нет XFF", () => {
@@ -91,9 +108,16 @@ describe("getClientIp", () => {
     expect(getClientIp(req)).toBe("unknown");
   });
 
-  it("trim пробелы", () => {
+  it("trim пробелы вокруг последнего IP", () => {
     const req = new Request("http://x", {
-      headers: { "x-forwarded-for": "  1.2.3.4  ,  5.6.7.8" },
+      headers: { "x-forwarded-for": "  1.2.3.4  ,  5.6.7.8  " },
+    });
+    expect(getClientIp(req)).toBe("5.6.7.8");
+  });
+
+  it("один IP в XFF — возвращает его же", () => {
+    const req = new Request("http://x", {
+      headers: { "x-forwarded-for": "1.2.3.4" },
     });
     expect(getClientIp(req)).toBe("1.2.3.4");
   });
@@ -108,6 +132,7 @@ describe("getRateLimitKey", () => {
   });
 
   it("fallback на IP если user_id нет", () => {
+    // Один IP в XFF = он же последний = выбранный.
     const req = new Request("http://x", {
       headers: { "x-forwarded-for": "1.2.3.4" },
     });
@@ -157,8 +182,11 @@ describe("RATE_LIMITS пресеты", () => {
     expect(RATE_LIMITS.WRITE.max).toBeGreaterThan(RATE_LIMITS.EXPENSIVE.max);
     // EXPENSIVE более либеральный чем SENSITIVE
     expect(RATE_LIMITS.EXPENSIVE.max).toBeGreaterThan(RATE_LIMITS.SENSITIVE.max);
+    // WEBHOOK — IP-based, умеренный, больше WRITE (внешние вызовы платёжной системы)
+    expect(RATE_LIMITS.WEBHOOK.max).toBeGreaterThanOrEqual(RATE_LIMITS.WRITE.max);
     // Все окна = 1 минута
     expect(RATE_LIMITS.READ.windowMs).toBe(60_000);
     expect(RATE_LIMITS.WRITE.windowMs).toBe(60_000);
+    expect(RATE_LIMITS.WEBHOOK.windowMs).toBe(60_000);
   });
 });
