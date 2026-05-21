@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Icons } from "./Icons";
-import { warehouseKindLabel, type WarehouseListItem } from "@/lib/warehouse";
+import { warehouseKindLabel, type WarehouseListItem } from "@/lib/warehouse-types";
 
 /**
  * Селектор склада для AppHeader. Multi-warehouse архитектура:
@@ -14,6 +14,9 @@ import { warehouseKindLabel, type WarehouseListItem } from "@/lib/warehouse";
  * - 0 складов: ссылка "Подключите склад"
  * - 1 склад: показываем как индикатор без выпадашки
  * - 2+ складов: выпадающее меню с переключением
+ *
+ * Импорт типов именно из "@/lib/warehouse-types", НЕ из "@/lib/warehouse":
+ * последний тянет next/headers и сломает build client component.
  */
 export default function WarehouseSelector({
   warehouses, selectedId,
@@ -96,6 +99,7 @@ export default function WarehouseSelector({
               {warehouses.map((w) => {
                 const isSel = w.id === selected.id;
                 const isError = w.status === "error";
+                const isPaused = w.status === "paused";
                 return (
                   <li key={w.id}>
                     <button
@@ -104,12 +108,15 @@ export default function WarehouseSelector({
                         isSel ? "bg-lime-soft" : "hover:bg-bg-soft"
                       }`}
                     >
-                      <span className={`size-1.5 rounded-full ${isError ? "bg-rose" : "bg-lime-deep"}`} />
+                      <span className={`size-1.5 rounded-full ${
+                        isPaused ? "bg-orange" : isError ? "bg-rose" : "bg-lime-deep"
+                      }`} />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-ink truncate">{w.name}</div>
                         <div className="font-mono text-[10px] text-ink-hush uppercase mt-0.5">
                           {warehouseKindLabel(w.warehouse_kind)}
                           {isError && <span className="text-rose ml-1.5">· ошибка</span>}
+                          {isPaused && <span className="text-orange ml-1.5">· пауза</span>}
                         </div>
                       </div>
                       {isSel && <span className="text-lime-deep"><Icons.Check size={12} /></span>}

@@ -5,7 +5,7 @@ import { useState, useEffect } from "react";
 import { Icons } from "./Icons";
 import LogoutButton from "../dashboard/LogoutButton";
 import WarehouseSelector from "./WarehouseSelector";
-import type { WarehouseListItem } from "@/lib/warehouse";
+import type { WarehouseListItem } from "@/lib/warehouse-types";
 
 const PLAN_LABEL: Record<string, string> = {
   trial: "Trial",
