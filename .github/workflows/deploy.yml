@@ -45,36 +45,48 @@ jobs:
             echo "✅ deploy OK ($(git rev-parse --short HEAD))"
           EOF
 
-      - name: Smoke tests — проверка что сервисы поднялись
+      - name: Smoke tests — честный healthcheck (DB + worker + env)
         run: |
           ssh -i ~/.ssh/deploy_key ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} 'bash -s' << 'EOF'
             set -euo pipefail
 
-            # После finalize.sh сервисы могут прогреваться — retry с backoff (до 25с ожидания).
-            check() {
-              local name="$1" url="$2"
-              for i in 1 2 3 4 5; do
-                if curl -fsS "$url" -o /dev/null --max-time 5; then
-                  echo "✅ $name отвечает ($url, попытка $i)"
-                  return 0
-                fi
-                echo "… $name не отвечает, retry $i/5"
-                sleep 5
-              done
-              echo "❌ $name не ответил за 25с после deploy. Проверь: journalctl -u $name --since '1 min ago'"
-              return 1
-            }
+            # /api/health проверяет Supabase + worker + env vars. Возвращает:
+            #   200 — всё живо
+            #   503 — что-то degraded (ДБ down, worker не отвечает, env отсутствуют)
+            # Ретраи — даём Next.js прогреться после рестарта.
+            for i in 1 2 3 4 5; do
+              resp=$(curl -s -w "\n%{http_code}" --max-time 10 http://127.0.0.1:3000/api/health || true)
+              code=$(echo "$resp" | tail -n1)
+              body=$(echo "$resp" | sed '$d')
+              if [ "$code" = "200" ]; then
+                echo "✅ /api/health → 200 (попытка $i)"
+                echo "$body" | head -c 500
+                echo
+                break
+              fi
+              if [ $i -eq 5 ]; then
+                echo "❌ /api/health → $code (ожидали 200)"
+                echo "$body" | head -c 500
+                echo
+                echo "→ подсказка: journalctl -u veloseller-web -u veloseller-worker --since '2 min ago'"
+                exit 1
+              fi
+              echo "… /api/health → $code, retry $i/5"
+              sleep 5
+            done
 
-            echo "→ Smoke: локальные health-check'и обоих сервисов"
-            check veloseller-web http://127.0.0.1:3000/
-            check veloseller-worker http://127.0.0.1:8001/health
-
-            echo "✅ Смоки прошли — оба сервиса вверху"
+            # Дополнительно пингуем worker напрямую — если web под ним виртуалом работает и ответил 200,
+            # а worker upstream не отвечает — /api/health вернёт 503, поэтому вторая проверка для ясности логов.
+            if curl -fsS http://127.0.0.1:8001/health -o /dev/null --max-time 5; then
+              echo "✅ worker /health отвечает напрямую"
+            else
+              echo "⚠️  worker /health не ответил напрямую (но /api/health вернул 200 — возможно race или проблема с портом)"
+            fi
           EOF
 
       - name: Smoke tests — security (open redirect + webhook secret)
         run: |
-          # External smoke: HTTPS doimaine + базовые security проверки.
+          # External smoke: HTTPS домен + базовые security проверки.
           # Проверяем что критические фиксы из аудита работают в реальной среде.
           set -euo pipefail
           FQDN="veloseller.ru"
@@ -88,7 +100,16 @@ jobs:
             exit 1
           fi
 
-          echo "→ 2) Open redirect защита: /auth/callback?next=https://evil.com не должен вести на evil.com"
+          echo "→ 2) /api/health извне должен вернуть 200"
+          code=$(curl -sw "%{http_code}" -o /dev/null --max-time 10 "https://$FQDN/api/health")
+          if [ "$code" = "200" ]; then
+            echo "  ✅ https://$FQDN/api/health → 200"
+          else
+            echo "  ❌ https://$FQDN/api/health → $code"
+            exit 1
+          fi
+
+          echo "→ 3) Open redirect защита: /auth/callback?next=https://evil.com не ведёт на evil.com"
           location=$(curl -s -o /dev/null -w "%{redirect_url}" --max-time 10 \
             "https://$FQDN/auth/callback?next=https%3A%2F%2Fevil.com")
           if echo "$location" | grep -qi "evil.com"; then
@@ -97,11 +118,10 @@ jobs:
           fi
           echo "  ✅ Location=$location (не evil.com)"
 
-          echo "→ 3) Telegram webhook без секрет-заголовка обязан вернуть 403"
+          echo "→ 4) Telegram webhook без секрет-заголовка обязан вернуть 403/404"
           code=$(curl -sw "%{http_code}" -o /dev/null --max-time 10 \
             -X POST "https://$FQDN/telegram/webhook" -d '{}')
           if [ "$code" = "403" ] || [ "$code" = "404" ]; then
-            # 404 — если nginx не проксирует /telegram/webhook на worker (вероятно), это тоже OK — нет уязвимости
             echo "  ✅ /telegram/webhook → $code (fail-closed работает)"
           else
             echo "  ❌ /telegram/webhook → $code (ожидали 403/404)"
