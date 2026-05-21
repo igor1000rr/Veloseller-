@@ -5,6 +5,13 @@ import { Icons } from "../_components/Icons";
 
 export const dynamic = "force-dynamic";
 
+// Цены рублевые (Robokassa). Должны совпадать с PLAN_PRICES в lib/robokassa.ts.
+const PLAN_PRICE_RUB: Record<string, number> = {
+  starter: 2500,
+  growth: 6900,
+  pro: 14900,
+};
+
 export default async function AdminOverview() {
   const supabase = createSupabaseAdminClient();
   const now = new Date();
@@ -18,7 +25,7 @@ export default async function AdminOverview() {
     { count: productsTotal }, { count: snapshotsTotal }, { count: snapshots1d },
     { count: alertsUnack }, { count: alertsCritical },
     { count: connectionsTotal }, { count: connectionsError }, { count: connectionsActive },
-    { count: metricsTotal },
+    { count: metricsTotal }, { count: sellersWithMetrics },
     { data: recentSellers30d }, { data: recentSnapshots30d },
     { data: errorConnections }, { data: recentRegs },
   ] = await Promise.all([
@@ -38,6 +45,8 @@ export default async function AdminOverview() {
     supabase.from("data_connections").select("id", { count: "exact", head: true }).eq("status", "error"),
     supabase.from("data_connections").select("id", { count: "exact", head: true }).eq("status", "active"),
     supabase.from("tvelo_metrics").select("id", { count: "exact", head: true }),
+    // Селлеры с store_metrics хотя бы с одной записью — это «расчёт TVelo выполнён» в воронке
+    supabase.from("store_metrics").select("seller_id", { count: "exact", head: true }),
     supabase.from("sellers").select("created_at").gte("created_at", day30Ago),
     supabase.from("inventory_snapshots").select("snapshot_time").gte("snapshot_time", day30Ago),
     supabase.from("data_connections").select("id,name,source,marketplace,last_error,last_sync_at,seller_id,sellers(email)")
@@ -55,20 +64,25 @@ export default async function AdminOverview() {
     { plan: "pro",     count: sellersPro     ?? 0 },
   ];
 
-  // MRR rough: starter $24, growth $89, pro $299
-  const mrr = (sellersStarter ?? 0) * 24 + (sellersGrowth ?? 0) * 89 + (sellersPro ?? 0) * 299;
+  // MRR в рублях (Robokassa). Было в USD — НЕПРАВИЛЬНО после перехода со Stripe.
+  const mrr = (sellersStarter ?? 0) * PLAN_PRICE_RUB.starter
+            + (sellersGrowth ?? 0)  * PLAN_PRICE_RUB.growth
+            + (sellersPro ?? 0)     * PLAN_PRICE_RUB.pro;
   const paidTotal = (sellersStarter ?? 0) + (sellersGrowth ?? 0) + (sellersPro ?? 0);
   const conversion = (sellersTotal ?? 0) > 0 ? (paidTotal / (sellersTotal ?? 1)) * 100 : 0;
   const arpu = paidTotal > 0 ? mrr / paidTotal : 0;
 
-  // Funnel
+  // Воронка. Баг был: metricsTotal ?? 0 > 0 считалось как metricsTotal ?? (0 > 0) = false.
+  // Правильный шаг #3: сколько селлеров имеют хотя бы 1 store_metrics запись.
   const funnelSteps = [
     { label: "Регистраций",         value: sellersTotal ?? 0 },
-    { label: "Подключено источников", value: connectionsActive ?? 0 },
-    { label: "Расчёт TVelo выполнено", value: metricsTotal ?? 0 > 0 ? 1 : 0 },
-    { label: "Платных селлеров",   value: paidTotal },
+    { label: "Подключёно складов",  value: connectionsActive ?? 0 },
+    { label: "Расчёт TVelo выполнен", value: sellersWithMetrics ?? 0 },
+    { label: "Платных селлеров",    value: paidTotal },
   ];
   const funnelMax = Math.max(...funnelSteps.map(s => s.value), 1);
+
+  const rubFmt = (n: number) => `${n.toLocaleString("ru-RU")} ₽`;
 
   return (
     <div className="space-y-8 md:space-y-10">
@@ -83,15 +97,15 @@ export default async function AdminOverview() {
 
       {/* Главные KPI */}
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-        <BigKpi label="Селлеры" value={sellersTotal ?? 0} delta={`+${sellersNew7d ?? 0} за 7д"`} tone="lime" />
-        <BigKpi label="MRR" value={mrr} prefix="$" delta={`ARPU $${arpu.toFixed(0)}`} tone="emerald" />
-        <BigKpi label="Активных источников" value={connectionsActive ?? 0} delta={`${connectionsError ?? 0} с ошибкой`} tone={connectionsError ? "orange" : "azure"} />
+        <BigKpi label="Селлеры" value={sellersTotal ?? 0} delta={`+${sellersNew7d ?? 0} за 7д`} tone="lime" />
+        <BigKpi label="MRR" valueText={rubFmt(mrr)} delta={`ARPU ${rubFmt(Math.round(arpu))}`} tone="emerald" />
+        <BigKpi label="Активных складов" value={connectionsActive ?? 0} delta={`${connectionsError ?? 0} с ошибкой`} tone={connectionsError ? "orange" : "azure"} />
         <BigKpi label="Conversion trial→paid" value={Number(conversion.toFixed(1))} suffix="%" tone="lime" />
       </section>
 
       {/* Secondary KPIs */}
       <section className="grid grid-cols-2 md:grid-cols-6 gap-2 md:gap-3">
-        <SmallKpi label="SKUв всего" value={productsTotal ?? 0} />
+        <SmallKpi label="SKU всего" value={productsTotal ?? 0} />
         <SmallKpi label="Snapshots за 24ч" value={snapshots1d ?? 0} />
         <SmallKpi label="Всего snapshots" value={snapshotsTotal ?? 0} />
         <SmallKpi label="Метрики" value={metricsTotal ?? 0} />
@@ -224,8 +238,8 @@ function bucketByDay(timestamps: string[], days: number): { date: string; count:
   }));
 }
 
-function BigKpi({ label, value, delta, prefix, suffix, tone }: {
-  label: string; value: number; delta?: string; prefix?: string; suffix?: string;
+function BigKpi({ label, value, valueText, delta, prefix, suffix, tone }: {
+  label: string; value?: number; valueText?: string; delta?: string; prefix?: string; suffix?: string;
   tone: "lime" | "emerald" | "orange" | "azure";
 }) {
   const accents = {
@@ -234,11 +248,14 @@ function BigKpi({ label, value, delta, prefix, suffix, tone }: {
     orange:  "border-orange/30 bg-orange/10 text-orange",
     azure:   "border-azure/30 bg-azure/10 text-azure",
   };
+  const displayValue = valueText !== undefined
+    ? valueText
+    : `${prefix ?? ""}${typeof value === "number" ? value.toLocaleString("ru-RU") : value}${suffix ?? ""}`;
   return (
     <div className="bg-paper border border-line rounded-2xl p-5 md:p-6 hover:shadow-sm transition">
       <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush">{label}</div>
       <div className="mt-2 font-display text-3xl md:text-4xl tracking-tight tabular font-medium text-ink">
-        {prefix}{typeof value === "number" ? value.toLocaleString("ru-RU") : value}{suffix}
+        {displayValue}
       </div>
       {delta && (
         <div className={`inline-flex mt-3 px-2 py-0.5 rounded-md font-mono text-[10px] uppercase tracking-widest border ${accents[tone]}`}>
