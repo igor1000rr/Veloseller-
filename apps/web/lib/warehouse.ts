@@ -6,7 +6,6 @@
  * server-side при каждом рендере dashboard страниц.
  */
 import { cookies } from "next/headers";
-import type { SupabaseClient } from "@supabase/supabase-js";
 
 const COOKIE_NAME = "vs-warehouse";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1 год
@@ -28,9 +27,12 @@ export type WarehouseListItem = {
 /**
  * Возвращает список всех складов пользователя для селектора.
  * Сортирует по дате создания (новые сверху).
+ *
+ * supabase типизирован как any — мы передаём результат createSupabaseServerClient(),
+ * у которого project-специфичный тип, несовместимый с generic SupabaseClient.
  */
 export async function listWarehouses(
-  supabase: SupabaseClient,
+  supabase: any,
   userId: string,
 ): Promise<WarehouseListItem[]> {
   const { data } = await supabase
@@ -52,7 +54,7 @@ export async function listWarehouses(
  *  4. Если у пользователя нет складов — возвращаем null.
  */
 export async function getSelectedWarehouse(
-  supabase: SupabaseClient,
+  supabase: any,
   userId: string,
 ): Promise<SelectedWarehouse | null> {
   const cookieStore = await cookies();
