@@ -5,11 +5,10 @@ import { UpgradeButton, ManageSubscriptionButton } from "@/app/billing/UpgradeBu
 
 beforeEach(() => {
   global.fetch = vi.fn();
-  global.alert = vi.fn();
   Object.defineProperty(window, "location", { value: { href: "" }, writable: true });
 });
 
-describe("UpgradeButton", () => {
+describe("UpgradeButton (Robokassa)", () => {
   it("isCurrent=true → disabled 'Используется'", () => {
     render(<UpgradeButton plan="growth" isCurrent={true} label="Growth" />);
     const btn = screen.getByRole("button");
@@ -22,59 +21,40 @@ describe("UpgradeButton", () => {
     expect(screen.getByRole("button")).toHaveTextContent("Перейти на Growth");
   });
 
-  it("при клике POST'ит /api/stripe/checkout", async () => {
-    (global.fetch as any).mockResolvedValue({ json: async () => ({ url: "https://checkout.stripe.com/abc" }) });
+  it("при клике POST'ит /api/robokassa/create-payment", async () => {
+    (global.fetch as any).mockResolvedValue({ json: async () => ({ url: "https://auth.robokassa.ru/Merchant/Index.aspx?..." }) });
     const user = userEvent.setup();
     render(<UpgradeButton plan="pro" isCurrent={false} label="Pro" />);
     await user.click(screen.getByRole("button"));
     await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith("/api/stripe/checkout", expect.objectContaining({
+      expect(global.fetch).toHaveBeenCalledWith("/api/robokassa/create-payment", expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ plan: "pro" }),
       }));
-      expect(window.location.href).toBe("https://checkout.stripe.com/abc");
+      expect(window.location.href).toBe("https://auth.robokassa.ru/Merchant/Index.aspx?...");
     });
   });
 
-  it("если data.url пуст — alert", async () => {
-    (global.fetch as any).mockResolvedValue({ json: async () => ({ error: "Stripe not configured" }) });
+  it("если data.url пуст — показывает ошибку под кнопкой", async () => {
+    (global.fetch as any).mockResolvedValue({ json: async () => ({ error: "Robokassa не настроена" }) });
     const user = userEvent.setup();
     render(<UpgradeButton plan="starter" isCurrent={false} label="Starter" />);
     await user.click(screen.getByRole("button"));
-    await waitFor(() => expect(global.alert).toHaveBeenCalledWith("Stripe not configured"));
+    await waitFor(() => expect(screen.getByText("Robokassa не настроена")).toBeInTheDocument());
   });
 
-  it("'Открываем Stripe…' пока запрос летит", async () => {
+  it("'Переходим на Робокассу…' пока запрос летит", async () => {
     (global.fetch as any).mockImplementation(() => new Promise(() => {}));
     const user = userEvent.setup();
     render(<UpgradeButton plan="growth" isCurrent={false} label="Growth" />);
     await user.click(screen.getByRole("button"));
-    expect(screen.getByRole("button")).toHaveTextContent("Открываем Stripe…");
+    expect(screen.getByRole("button")).toHaveTextContent("Переходим на Робокассу…");
   });
 });
 
-describe("ManageSubscriptionButton", () => {
-  it("рендерит 'Управление подпиской'", () => {
+describe("ManageSubscriptionButton (Robokassa)", () => {
+  it("рендерит подсказку про ручное продление", () => {
     render(<ManageSubscriptionButton />);
-    expect(screen.getByRole("button")).toHaveTextContent("Управление подпиской");
-  });
-
-  it("клик → POST /api/stripe/portal → редирект", async () => {
-    (global.fetch as any).mockResolvedValue({ json: async () => ({ url: "https://billing.stripe.com/portal/xyz" }) });
-    const user = userEvent.setup();
-    render(<ManageSubscriptionButton />);
-    await user.click(screen.getByRole("button"));
-    await waitFor(() => {
-      expect(global.fetch).toHaveBeenCalledWith("/api/stripe/portal", { method: "POST" });
-      expect(window.location.href).toBe("https://billing.stripe.com/portal/xyz");
-    });
-  });
-
-  it("ошибка → alert", async () => {
-    (global.fetch as any).mockResolvedValue({ json: async () => ({ error: "No customer" }) });
-    const user = userEvent.setup();
-    render(<ManageSubscriptionButton />);
-    await user.click(screen.getByRole("button"));
-    await waitFor(() => expect(global.alert).toHaveBeenCalledWith("No customer"));
+    expect(screen.getByText(/Подписка продлевается вручную/)).toBeInTheDocument();
   });
 });
