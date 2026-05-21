@@ -49,87 +49,29 @@ class TestWorkerSecret:
         assert r.status_code == 401
 
 
-class TestIngestCsv:
-    def test_success(self, monkeypatch):
-        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = MagicMock()
-        mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
-        mock_sb.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = MagicMock(
-            data=[{"product_id": "pid-1", "sku": "A1"}]
-        )
-        mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock()
-        with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.main.fetch_all", return_value=[]):
-            r = client.post(
-                f"/ingest/csv?seller_id={VALID_UUID}",
-                files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
-            )
-        assert r.status_code == 200
-        assert r.json()["skus"] == 1
+class TestIngestCsvDeprecated:
+    """После миграции products → (seller_id, connection_id, sku) CSV-ingest без
+    привязки к connection деактивирован. Endpoint должен возвращать 410 Gone.
+    Пользователи должны создать csv-склад через UI и грузить туда."""
 
-    def test_invalid_csv_returns_400(self, monkeypatch):
+    def test_returns_410_on_valid_request(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         r = client.post(
             f"/ingest/csv?seller_id={VALID_UUID}",
-            files={"file": ("test.csv", b"bad,headers\nnope,nope\n", "text/csv")},
+            files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
         )
-        assert r.status_code == 400
-        assert "CSV parse error" in r.json()["detail"]
+        assert r.status_code == 410
+        detail = r.json()["detail"]
+        assert "устарел" in detail or "deprecated" in detail.lower()
 
-
-class TestIngestCsvValidation:
-    def test_rejects_non_uuid_seller_id(self, monkeypatch):
+    def test_returns_410_even_with_invalid_payload(self, monkeypatch):
+        """410 возвращается ДО валидации payload — endpoint полностью deprecated."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = MagicMock()
-        with patch("app.main.get_supabase", return_value=mock_sb):
-            r = client.post(
-                "/ingest/csv?seller_id=not-a-uuid",
-                files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
-            )
-        assert r.status_code == 400
-        assert "UUID" in r.json()["detail"]
-        mock_sb.table.assert_not_called()
-
-    def test_rejects_sql_injection_in_seller_id(self, monkeypatch):
-        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = MagicMock()
-        with patch("app.main.get_supabase", return_value=mock_sb):
-            r = client.post(
-                "/ingest/csv?seller_id='; DROP TABLE sellers;--",
-                files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
-            )
-        assert r.status_code == 400
-        mock_sb.table.assert_not_called()
-
-    def test_rejects_oversized_file_with_lowered_limit(self, monkeypatch):
-        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        monkeypatch.setattr("app.main._CSV_MAX_SIZE_BYTES", 50)
-        content = b"sku,stock_quantity,price\n" + b"A1,10,100\n" * 10
-        assert len(content) > 50
         r = client.post(
-            f"/ingest/csv?seller_id={VALID_UUID}",
-            files={"file": ("big.csv", content, "text/csv")},
+            "/ingest/csv?seller_id=not-a-uuid",
+            files={"file": ("test.csv", b"garbage\n", "text/csv")},
         )
-        assert r.status_code == 413
-        detail = r.json()["detail"].lower()
-        assert "слишком" in detail or "max" in detail or "большой" in detail
-
-    def test_accepts_normal_size_file(self, monkeypatch):
-        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = MagicMock()
-        mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
-        mock_sb.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = MagicMock(
-            data=[{"product_id": "pid-1", "sku": "A1"}]
-        )
-        mock_sb.table.return_value.insert.return_value.execute.return_value = MagicMock()
-        small_content = b"sku,stock_quantity,price\nA1,10,100\n"
-        with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.main.fetch_all", return_value=[]):
-            r = client.post(
-                f"/ingest/csv?seller_id={VALID_UUID}",
-                files={"file": ("small.csv", small_content, "text/csv")},
-            )
-        assert r.status_code == 200
+        assert r.status_code == 410
 
 
 def _mock_supabase_for_connection(connection_data):

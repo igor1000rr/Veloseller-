@@ -1,6 +1,10 @@
 """Тесты на _ensure_products и _persist_snapshots в main.py.
 
 Покрываем БАГ 15 (батчинг .in_ при больших массивах SKU) и дедупликацию snapshot'ов.
+
+После миграции products_scoped_to_connection (май 2026) _ensure_products
+принимает connection_id обязательным параметром, а SELECT для маппинга
+sku→product_id делает .eq('seller_id').eq('connection_id').in_('sku').
 """
 from __future__ import annotations
 import os
@@ -19,8 +23,18 @@ from app.main import (
 from app.schemas import SnapshotInput, SourceType
 
 
+CONN_ID = "conn-test-1"
+
+
 def _mk_snap(sku: str, stock: int = 10, price: float = 100.0) -> SnapshotInput:
     return SnapshotInput(sku=sku, stock_quantity=stock, price=Decimal(str(price)))
+
+
+def _setup_mock_for_select(mock_sb, products_data):
+    """Настраивает мок для select(...).eq().eq().in_().execute() chain."""
+    chain = mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.in_.return_value
+    chain.execute.return_value = MagicMock(data=products_data)
+    return chain
 
 
 # ============================================================================
@@ -35,15 +49,17 @@ class TestEnsureProductsBatching:
         snaps = [_mk_snap(f"SKU{i}") for i in range(100)]
         mock_sb = MagicMock()
         mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
-        mock_sb.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = MagicMock(
-            data=[{"product_id": f"pid-{i}", "sku": f"SKU{i}"} for i in range(100)]
+        chain = _setup_mock_for_select(mock_sb,
+            [{"product_id": f"pid-{i}", "sku": f"SKU{i}"} for i in range(100)]
         )
 
-        result = _ensure_products(mock_sb, "seller-1", snaps)
+        result = _ensure_products(mock_sb, "seller-1", CONN_ID, snaps)
 
         assert len(result) == 100
         assert result["SKU0"] == "pid-0"
-        assert mock_sb.table.return_value.select.return_value.eq.return_value.in_.call_count == 1
+        # Один SELECT-вызов на 100 SKU (меньше batch=500)
+        in_mock = mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.in_
+        assert in_mock.call_count == 1
 
     def test_large_array_split_into_batches(self):
         """При 1879 SKU должно быть 4 батча (500+500+500+379)."""
@@ -59,17 +75,50 @@ class TestEnsureProductsBatching:
                                     for i in range((call_count["n"] - 1) * _PRODUCTS_IN_BATCH,
                                                    min(call_count["n"] * _PRODUCTS_IN_BATCH, 1879))])
 
-        mock_sb.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.side_effect = execute_side_effect
+        chain = mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.in_.return_value
+        chain.execute.side_effect = execute_side_effect
 
-        result = _ensure_products(mock_sb, "seller-1", snaps)
+        result = _ensure_products(mock_sb, "seller-1", CONN_ID, snaps)
 
         expected_batches = (1879 + _PRODUCTS_IN_BATCH - 1) // _PRODUCTS_IN_BATCH
-        assert mock_sb.table.return_value.select.return_value.eq.return_value.in_.call_count == expected_batches
+        in_mock = mock_sb.table.return_value.select.return_value.eq.return_value.eq.return_value.in_
+        assert in_mock.call_count == expected_batches
         assert len(result) == 1879
 
     def test_empty_snapshots(self):
-        result = _ensure_products(MagicMock(), "seller-1", [])
+        result = _ensure_products(MagicMock(), "seller-1", CONN_ID, [])
         assert result == {}
+
+    def test_missing_connection_id_raises(self):
+        """После миграции products.connection_id NOT NULL — без него ValueError."""
+        snaps = [_mk_snap("A1")]
+        with pytest.raises(ValueError, match="connection_id"):
+            _ensure_products(MagicMock(), "seller-1", None, snaps)
+
+    def test_upsert_includes_connection_id(self):
+        """REGRESSION: products upsert должен включать connection_id в каждой строке."""
+        snaps = [_mk_snap("X1"), _mk_snap("X2")]
+        mock_sb = MagicMock()
+        upsert_payloads = []
+        mock_sb.table.return_value.upsert.side_effect = lambda rows, on_conflict=None: (
+            upsert_payloads.append((rows, on_conflict))
+            or MagicMock(execute=MagicMock(return_value=MagicMock()))
+        )
+        _setup_mock_for_select(mock_sb, [
+            {"product_id": "pid-X1", "sku": "X1"},
+            {"product_id": "pid-X2", "sku": "X2"},
+        ])
+
+        _ensure_products(mock_sb, "seller-1", CONN_ID, snaps)
+
+        assert len(upsert_payloads) == 1
+        rows, on_conflict = upsert_payloads[0]
+        assert on_conflict == "seller_id,connection_id,sku"
+        # Каждая строка имеет connection_id
+        for row in rows:
+            assert row["connection_id"] == CONN_ID
+            assert row["seller_id"] == "seller-1"
+            assert row["sku"] in {"X1", "X2"}
 
 
 # ============================================================================
@@ -80,16 +129,17 @@ class TestEnsureProductsBatching:
 class TestPersistSnapshotsDedup:
     """Snapshot не записывается если stock+price совпадают с последним."""
 
-    def _setup_mock(self, last_snap_data: list[dict]):
+    def _setup_mock(self):
         mock_sb = MagicMock()
         mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
-        mock_sb.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = MagicMock(
-            data=[{"product_id": "pid-A", "sku": "A1"}, {"product_id": "pid-B", "sku": "B2"}]
-        )
+        _setup_mock_for_select(mock_sb, [
+            {"product_id": "pid-A", "sku": "A1"},
+            {"product_id": "pid-B", "sku": "B2"},
+        ])
         return mock_sb
 
     def test_duplicate_skipped(self, monkeypatch):
-        mock_sb = self._setup_mock([])
+        mock_sb = self._setup_mock()
 
         def fake_fetch_all(query):
             return [
@@ -101,13 +151,13 @@ class TestPersistSnapshotsDedup:
         monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1", stock=10, price=100.0)]
-        result = _persist_snapshots("seller-1", "conn-1", SourceType.MARKETPLACE_API, snaps)
+        result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
 
         assert result == 0
         mock_sb.table.return_value.insert.assert_not_called()
 
     def test_stock_changed_inserted(self, monkeypatch):
-        mock_sb = self._setup_mock([])
+        mock_sb = self._setup_mock()
 
         def fake_fetch_all(query):
             return [
@@ -119,13 +169,13 @@ class TestPersistSnapshotsDedup:
         monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1", stock=8, price=100.0)]
-        result = _persist_snapshots("seller-1", "conn-1", SourceType.MARKETPLACE_API, snaps)
+        result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
 
         assert result == 1
         mock_sb.table.return_value.insert.assert_called_once()
 
     def test_price_changed_inserted(self, monkeypatch):
-        mock_sb = self._setup_mock([])
+        mock_sb = self._setup_mock()
 
         def fake_fetch_all(query):
             return [
@@ -137,25 +187,25 @@ class TestPersistSnapshotsDedup:
         monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1", stock=10, price=120.0)]
-        result = _persist_snapshots("seller-1", "conn-1", SourceType.MARKETPLACE_API, snaps)
+        result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
 
         assert result == 1
         mock_sb.table.return_value.insert.assert_called_once()
 
     def test_no_previous_snapshot_inserted(self, monkeypatch):
-        mock_sb = self._setup_mock([])
+        mock_sb = self._setup_mock()
 
         monkeypatch.setattr("app.main.fetch_all", lambda q: [])
         monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1", stock=10, price=100.0)]
-        result = _persist_snapshots("seller-1", "conn-1", SourceType.MARKETPLACE_API, snaps)
+        result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
 
         assert result == 1
         mock_sb.table.return_value.insert.assert_called_once()
 
     def test_tiny_price_difference_treated_as_same(self, monkeypatch):
-        mock_sb = self._setup_mock([])
+        mock_sb = self._setup_mock()
 
         def fake_fetch_all(query):
             return [
@@ -167,23 +217,27 @@ class TestPersistSnapshotsDedup:
         monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1", stock=10, price=100.008)]
-        result = _persist_snapshots("seller-1", "conn-1", SourceType.MARKETPLACE_API, snaps)
+        result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
 
         assert result == 0
 
     def test_unmapped_skus_skipped_safely(self, monkeypatch):
         mock_sb = MagicMock()
         mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
-        mock_sb.table.return_value.select.return_value.eq.return_value.in_.return_value.execute.return_value = MagicMock(
-            data=[{"product_id": "pid-A", "sku": "A1"}]
-        )
+        _setup_mock_for_select(mock_sb, [{"product_id": "pid-A", "sku": "A1"}])
         monkeypatch.setattr("app.main.fetch_all", lambda q: [])
         monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1"), _mk_snap("B2")]
-        result = _persist_snapshots("seller-1", "conn-1", SourceType.MARKETPLACE_API, snaps)
+        result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
 
         assert result == 1
+
+    def test_persist_without_connection_id_returns_zero(self, monkeypatch):
+        """_persist_snapshots с connection_id=None — log warning + return 0."""
+        snaps = [_mk_snap("A1")]
+        result = _persist_snapshots("seller-1", None, SourceType.CSV_UPLOAD, snaps)
+        assert result == 0
 
 
 # ============================================================================
