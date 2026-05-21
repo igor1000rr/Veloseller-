@@ -102,7 +102,7 @@ export default async function LandingPage() {
                 href={(isAuthed ? "/dashboard" : "/register") as any}
                 className="group inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-5 md:px-6 py-3.5 font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.4)]"
               >
-                {isAuthed ? "В кабинет" : "Подключить магазин"}
+                {isAuthed ? "В кабинет" : "Подключить склад"}
                 {!isAuthed && <span className="font-mono text-xs opacity-60">5 мин</span>}
                 <Icons.ArrowRight />
               </Link>
@@ -151,7 +151,7 @@ export default async function LandingPage() {
               </h2>
             </div>
             <p className="text-ink-muted text-sm md:text-[15px] max-w-md">
-              Read-only доступ через API маркетплейсов, CSV или Google Sheets.
+              Read-only доступ через API маркетплейсов или Google Sheets. Каждый источник = отдельный склад.
             </p>
           </div>
         </div>
@@ -365,7 +365,7 @@ export default async function LandingPage() {
             <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
               Простые тарифы. Никаких звёздочек.
             </h2>
-            <p className="mt-3 text-ink-muted text-sm md:text-base">Первый месяц бесплатно. Без карты.</p>
+            <p className="mt-3 text-ink-muted text-sm md:text-base">Триал 30 дней — 15 складов бесплатно. Без карты.</p>
           </div>
           <div className="grid md:grid-cols-3 gap-4 md:gap-6 max-w-6xl mx-auto">
             {plans.map((p) => <PricingCard key={p.name} {...p} isAuthed={isAuthed} />)}
@@ -373,6 +373,9 @@ export default async function LandingPage() {
           <p className="mt-8 md:mt-10 text-center font-mono text-xs text-ink-hush flex items-center justify-center flex-wrap gap-x-2 gap-y-1">
             <span>Все тарифы включают весь функционал:</span>
             <span>TVelo</span><Icons.Dot size={3} /> <span>Покрытие</span><Icons.Dot size={3} /> <span>Потерянная выручка</span><Icons.Dot size={3} /> <span>Планирование закупки</span><Icons.Dot size={3} /> <span>Email + Telegram</span>
+          </p>
+          <p className="mt-3 text-center font-mono text-[11px] text-ink-hush">
+            Для интеграторов и агентств: <a href="mailto:info@proaim.ru" className="text-lime-deep hover:underline">info@proaim.ru</a>
           </p>
         </div>
       </section>
@@ -401,7 +404,7 @@ export default async function LandingPage() {
                 Перестань считать <span className="text-lime-deep italic">скорость продаж вручную.</span>
               </h2>
               <p className="mt-4 md:mt-5 text-ink-muted text-base md:text-lg max-w-2xl leading-relaxed">
-                Подключи источник данных — Google Sheet, CSV или API маркетплейса.
+                Подключи склад — Ozon FBO/FBS, Wildberries или Google Sheet.
                 Первый расчёт через 30 минут, точная аналитика через 7 дней.
               </p>
               <div className="mt-7 md:mt-8 flex flex-wrap gap-3 md:gap-4">
@@ -441,20 +444,16 @@ export default async function LandingPage() {
               ["#faq", "FAQ"],
             ]} />
             <div className="col-span-1 md:col-span-2">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Интеграции</div>
+              <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Типы складов</div>
               <ul className="mt-4 space-y-2.5 text-sm">
-                <li className="text-ink-soft">Ozon API</li>
-                <li className="text-ink-soft">Wildberries API</li>
-                <li className="text-ink-soft">Google Sheets</li>
-                <li className="text-ink-soft">CSV upload</li>
+                <li className="text-ink-soft">Ozon FBO</li>
+                <li className="text-ink-soft">Ozon FBS</li>
+                <li className="text-ink-soft">Wildberries FBO</li>
                 <li className="flex items-center gap-1.5 text-ink-soft">
-                  Shopify
+                  Wildberries FBS
                   <span className="font-mono text-[9px] text-orange uppercase border border-orange/30 bg-orange/10 px-1 rounded">soon</span>
                 </li>
-                <li className="flex items-center gap-1.5 text-ink-soft">
-                  Amazon SP-API
-                  <span className="font-mono text-[9px] text-orange uppercase border border-orange/30 bg-orange/10 px-1 rounded">soon</span>
-                </li>
+                <li className="text-ink-soft">Google Sheet</li>
               </ul>
             </div>
             <FooterCol title="Аккаунт" items={
@@ -464,7 +463,7 @@ export default async function LandingPage() {
             } />
             <FooterCol title="Сообщество" items={[
               ["#", "Telegram"],
-              ["#", "Email"],
+              ["mailto:info@proaim.ru", "info@proaim.ru"],
               ["#", "GitHub"],
             ]} />
           </div>
@@ -578,19 +577,17 @@ function FooterCol({ title, items }: { title: string; items: [string, string][] 
 const stats = [
   { label: "Точность TVelo", value: "+47", unit: "%", sub: "vs обычная скорость продаж" },
   { label: "Среднее время настройки", value: "5", unit: "мин", sub: "от регистрации до данных" },
-  { label: "Источников данных", value: "5", sub: "Sheets, CSV, Ozon, WB, YML" },
+  { label: "Типов складов", value: "5", sub: "Ozon FBO/FBS, WB FBO/FBS, Sheets" },
   { label: "Метрик по каждому SKU", value: "23", sub: "включая достоверность данных" },
 ];
 const integrations = [
-  { name: "Ozon",          tag: "API",       dot: "#005bff" },
-  { name: "Wildberries",   tag: "API",       dot: "#a71179" },
-  { name: "Google Sheets", tag: "READ-ONLY", dot: "#0F9D58" },
-  { name: "CSV",           tag: "UPLOAD",    dot: "#525a4e" },
-  { name: "YML feed",      tag: "FETCH",     dot: "#f97316" },
-  { name: "Shopify",       tag: "SOON",      dot: "#95BF47" },
-  { name: "Amazon SP-API", tag: "SOON",      dot: "#FF9900" },
-  { name: "Telegram",      tag: "BOT",       dot: "#229ED9" },
-  { name: "Resend",        tag: "EMAIL",     dot: "#000" },
+  { name: "Ozon FBO",        tag: "API",       dot: "#005bff" },
+  { name: "Ozon FBS",        tag: "API",       dot: "#005bff" },
+  { name: "Wildberries FBO", tag: "API",       dot: "#a71179" },
+  { name: "Wildberries FBS", tag: "SOON",      dot: "#a71179" },
+  { name: "Google Sheets",   tag: "READ-ONLY", dot: "#0F9D58" },
+  { name: "Telegram",        tag: "BOT",       dot: "#229ED9" },
+  { name: "Resend",          tag: "EMAIL",     dot: "#000" },
 ];
 const compareLeft = [
   "Считаешь скорость продаж вручную раз в месяц",
@@ -604,7 +601,7 @@ const compareRight = [
   "Telegram + email отчёты каждое утро",
 ];
 const steps = [
-  { title: "Подключи источник",     text: "Добавь ссылку на Google Sheet, загрузи CSV или подключи Ozon/WB через API-ключ." },
+  { title: "Подключи склад",     text: "Ozon FBO/FBS, Wildberries или Google Sheet — выбери источник, дай read-only ключ. Каждый источник = отдельный склад с собственной аналитикой." },
   { title: "Получи первый расчёт",   text: "Через 30 минут — сводная информация по складу. Через 7 дней — первые TVelo и другие показатели. Через 30 дней — значительно улучшена достоверность данных." },
   { title: "Управляй запасами на основе данных",   text: "Получай сигналы в Telegram и email, следи за рисками, планируй закупки и контролируй остатки в одном дашборде." },
 ];
@@ -614,7 +611,7 @@ const testimonials = [
   { quote: "Telegram-уведомления — главная фишка. Не сижу в дашборде. Приходит сигнал и пошёл, заказал, забыл.", name: "Дмитрий Беляев", role: "Multi-marketplace, 800 SKU", initials: "ДБ", avatarBg: "#ea580c", avatarColor: "#fff" },
 ];
 const plans = [
-  { name: "Старт", price: 1900,  highlight: false, perks: ["1 магазин"] },
-  { name: "Рост",  price: 6900,  highlight: true,  perks: ["3 магазина"] },
-  { name: "Про",   price: 19900, highlight: false, perks: ["Безлимит магазинов"] },
+  { name: "Старт", price: 2500,  highlight: false, perks: ["2 склада"] },
+  { name: "Рост",  price: 6900,  highlight: true,  perks: ["6 складов"] },
+  { name: "Про",   price: 14900, highlight: false, perks: ["15 складов"] },
 ];
