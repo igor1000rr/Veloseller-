@@ -138,6 +138,20 @@ _INSERT_BATCH = 500
 _DEDUP_WINDOW_HOURS = 20
 
 
+def _ozon_kind_from_warehouse(warehouse_kind: Optional[str]) -> Optional[str]:
+    """Маппинг warehouse_kind из БД → kind для ozon.fetch_snapshots().
+
+    'ozon_fbo' → 'fbo'
+    'ozon_fbs' → 'fbs'
+    Иначе None (legacy connection без warehouse_kind или с другим типом — суммируем всё).
+    """
+    if warehouse_kind == "ozon_fbo":
+        return "fbo"
+    if warehouse_kind == "ozon_fbs":
+        return "fbs"
+    return None
+
+
 def _ensure_products(sb, seller_id: str, connection_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
     """Upsert products через уникальный индекс (seller_id, connection_id, sku).
 
@@ -283,13 +297,24 @@ def _try_acquire_sync_lock(sb, connection_id: str) -> bool:
         return False
 
 
-def _run_ozon_sync_bg(connection_id: str, seller_id: str, client_id: str, api_key: str) -> None:
+def _run_ozon_sync_bg(
+    connection_id: str,
+    seller_id: str,
+    client_id: str,
+    api_key: str,
+    warehouse_kind: Optional[str] = None,
+) -> None:
+    """BG sync для Ozon. warehouse_kind определяет фильтр FBO/FBS в stocks."""
     sb = get_supabase()
     try:
-        snapshots = ozon.fetch_snapshots(client_id, api_key)
+        kind = _ozon_kind_from_warehouse(warehouse_kind)
+        snapshots = ozon.fetch_snapshots(client_id, api_key, kind=kind)
         inserted = _persist_snapshots(seller_id, connection_id, SourceType.MARKETPLACE_API, snapshots)
         _mark_connection_synced(sb, connection_id)
-        logger.info("ozon synced (bg)", extra={"connection_id": connection_id, "inserted": inserted, "fetched_skus": len(snapshots)})
+        logger.info("ozon synced (bg)", extra={
+            "connection_id": connection_id, "warehouse_kind": warehouse_kind,
+            "kind": kind, "inserted": inserted, "fetched_skus": len(snapshots),
+        })
     except Exception as e:
         _mark_connection_synced(sb, connection_id, error=str(e)[:500])
         logger.exception("ozon sync failed (bg)", extra={"connection_id": connection_id})
@@ -374,7 +399,11 @@ def ingest_ozon(connection_id: str, background_tasks: BackgroundTasks) -> dict:
         raise HTTPException(400, "config.client_id и config.api_key обязательны")
     if not _try_acquire_sync_lock(sb, connection_id):
         return {"started": False, "status": "running", "message": "Sync уже идёт"}
-    background_tasks.add_task(_run_ozon_sync_bg, connection_id, conn.data["seller_id"], client_id, api_key)
+    warehouse_kind = conn.data.get("warehouse_kind")
+    background_tasks.add_task(
+        _run_ozon_sync_bg,
+        connection_id, conn.data["seller_id"], client_id, api_key, warehouse_kind,
+    )
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
