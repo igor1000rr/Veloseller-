@@ -29,7 +29,6 @@ export default async function SkusPage({ searchParams }: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // Multi-warehouse: фильтруем SKU по выбранному складу (cookie vs-warehouse)
   const selected = await getSelectedWarehouse(supabase, user.id);
 
   let productsQuery = supabase
@@ -80,7 +79,6 @@ export default async function SkusPage({ searchParams }: {
 
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
 
-  // Параметры для ссылок экспорта (включают warehouse_id если выбран)
   const exportParams = new URLSearchParams();
   exportParams.set("period", String(periodDays));
   if (selected) exportParams.set("warehouse_id", selected.id);
@@ -108,10 +106,10 @@ export default async function SkusPage({ searchParams }: {
         <div className="flex items-center gap-3 flex-wrap">
           <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1">
             <a
-              href={`/api/export/metrics?${exportQS}&format=xlsx`}
+              href={`/api/export/metrics?${exportQS}&format=excel`}
               download
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition"
-              title="Скачать метрики в Excel (XLSX) со сводкой"
+              title="Скачать метрики в Excel-совместимом виде (CSV с BOM + точка-с-запятой)"
             >
               <Icons.ArrowRight size={11} /> Excel
             </a>
