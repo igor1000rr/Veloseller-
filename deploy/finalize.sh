@@ -2,6 +2,14 @@
 # Veloseller — финальный деплой: установка зависимостей + сборка + запуск сервисов.
 # Запускать после заполнения .env-файлов:
 #   sudo /opt/veloseller/deploy/finalize.sh
+#
+# HARDENING: chown только приложенческих каталогов (apps, supabase, node_modules, .git),
+# НЕ /opt/veloseller целиком. Это позволяет deploy/ принадлежать root:root и быть
+# нередактируемым для юзера veloseller — таким образом, при RCE в Next.js
+# атакующий НЕ сможет переписать finalize.sh и эскалировать через sudo.
+# Чтобы включить полный hardening, запустить один раз:
+#   sudo bash /opt/veloseller/deploy/harden-permissions.sh
+
 set -euo pipefail
 
 log() { echo -e "\033[1;32m[finalize]\033[0m $*"; }
@@ -17,8 +25,18 @@ WORKER_ENV="$DEPLOY_DIR/apps/worker/.env"
 [ -f "$WEB_ENV" ] || err "Нет $WEB_ENV — создай (см. deploy/README.md)"
 [ -f "$WORKER_ENV" ] || err "Нет $WORKER_ENV — создай (см. deploy/README.md)"
 
-log "Выравниваем владельца /opt/veloseller на $DEPLOY_USER…"
-chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR"
+log "Выравниваем владельца app-каталогов (НЕ трогая deploy/) на $DEPLOY_USER…"
+# Апп-каталоги — их пишет npm install / npm run build / git pull
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR/apps" 2>/dev/null || true
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR/supabase" 2>/dev/null || true
+chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR/.git" 2>/dev/null || true
+# Корневые файлы npm workspaces — владелец npm-юзер
+chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR"/{package.json,package-lock.json,pnpm-workspace.yaml} 2>/dev/null || true
+chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR"/{README.md,TODO.md,.gitignore,.env.example,docker-compose.yml} 2>/dev/null || true
+if [ -d "$DEPLOY_DIR/node_modules" ]; then
+  chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR/node_modules"
+fi
+# .env — права только владельцу (там API ключи и SECRET_ENCRYPTION_KEY)
 chmod 600 "$WEB_ENV" "$WORKER_ENV"
 
 # ===== Web =====
@@ -80,5 +98,3 @@ echo
 echo "Логи:"
 echo "  journalctl -u veloseller-web -f"
 echo "  journalctl -u veloseller-worker -f"
-echo
-echo "Дальше: отключи парольный SSH — sudo /opt/veloseller/deploy/harden-ssh.sh"

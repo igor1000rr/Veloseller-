@@ -5,9 +5,10 @@ os.environ["ENABLE_SCHEDULER"] = "false"
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, _running_recalcs
 
 
 client = TestClient(app)
@@ -52,7 +53,7 @@ class TestWorkerSecret:
         assert r.status_code == 401
 
     def test_production_env_without_secret_returns_500(self, monkeypatch):
-        """SECURITY FIX: в проде с dev-default секретом → 500 (fail-closed)."""
+        """В проде с dev-default секретом → 500 (fail-closed)."""
         monkeypatch.setenv("ENV", "production")
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         r = client.post("/jobs/recalc-all", headers={"X-Worker-Secret": "whatever"})
@@ -60,9 +61,6 @@ class TestWorkerSecret:
 
 
 class TestIngestCsvDeprecated:
-    """После миграции products → (seller_id, connection_id, sku) CSV-ingest без
-    привязки к connection деактивирован. Endpoint должен возвращать 410 Gone."""
-
     def test_returns_410_on_valid_request(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         r = client.post(
@@ -148,38 +146,25 @@ class TestIngestFeed:
         assert r.status_code == 400
 
 
-def _mock_recalc_supabase(existing_state=None):
-    """Mock get_supabase так что:
-      _recalc_get возвращает existing_state (или None если не задано)
-      _recalc_upsert no-op (но вызов фиксируется через MagicMock)
-    """
-    mock_sb = MagicMock()
-    # select путьрь: sb.table("recalc_jobs").select(...).eq(...).maybe_single().execute() → data
-    select_chain = (
-        mock_sb.table.return_value.select.return_value
-        .eq.return_value.maybe_single.return_value.execute
-    )
-    select_chain.return_value = MagicMock(data=existing_state)
-    # upsert путьрь: sb.table("recalc_jobs").upsert(...).execute() → no-op
-    mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock(data=[{}])
-    return mock_sb
-
-
 class TestRecalcJobs:
-    """Состояние теперь в БД (recalc_jobs), не in-memory словарь.
+    """Расчётные jobs хранятся в in-memory dict + recalc_jobs БД.
 
-    Мокаем get_supabase и проверяем что:
-      - Для нового seller расчёт запускается (recalc_seller_all_periods вызывается).
-      - Если в БД статус "running" — повторный запуск отклоняется.
-      - /status возвращает то что в БД.
+    Для изоляции тестов: мокаем _db_persist_recalc_state и _db_get_recalc_state
+    чтобы никакая реальная БД не трогалась.
     """
+
+    @pytest.fixture(autouse=True)
+    def _isolate_db_recalc(self, monkeypatch):
+        monkeypatch.setattr("app.main._db_persist_recalc_state", lambda **kw: None)
+        monkeypatch.setattr("app.main._db_get_recalc_state", lambda sid: None)
+
+    def setup_method(self):
+        _running_recalcs.clear()
 
     def test_recalc_seller_sync_returns_result(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = _mock_recalc_supabase(existing_state=None)
         mock_result = {"products": 5, "metrics_written": 5, "periods": []}
-        with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.main.recalc_seller_all_periods", return_value=mock_result) as fn:
+        with patch("app.main.recalc_seller_all_periods", return_value=mock_result) as fn:
             r = client.post("/jobs/recalc/seller-uuid-123?sync=true")
         assert r.status_code == 200
         assert r.json() == mock_result
@@ -187,84 +172,94 @@ class TestRecalcJobs:
 
     def test_recalc_seller_async_returns_started(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = _mock_recalc_supabase(existing_state=None)
-        with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.main.recalc_seller_all_periods", return_value={"products": 5}):
+        mock_result = {"products": 5, "metrics_written": 5}
+        with patch("app.main.recalc_seller_all_periods", return_value=mock_result):
             r = client.post("/jobs/recalc/seller-uuid-456")
         assert r.status_code == 200
         body = r.json()
         assert body["started"] is True
         assert body["status"] == "running"
         assert "started_at" in body
-        # BG-задача должна быть upsertнувши в recalc_jobs (running + done)
-        assert mock_sb.table.return_value.upsert.called
+        assert "seller-uuid-456" in _running_recalcs
 
-    def test_recalc_seller_dedup_when_running(self, monkeypatch):
-        """Если в БД уже status='running' — новый запуск отклоняется."""
+    def test_recalc_seller_dedup_when_running_in_memory(self, monkeypatch):
+        """Дедупликация по in-memory state."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = _mock_recalc_supabase(existing_state={
-            "status": "running",
+        _running_recalcs["seller-busy"] = {
             "started_at": "2026-05-19T09:00:00Z",
-            "finished_at": None,
-            "result": None,
-            "error": None,
-            "progress": None,
-        })
-        with patch("app.main.get_supabase", return_value=mock_sb), \
-             patch("app.main.recalc_seller_all_periods") as fn:
+            "status": "running", "result": None, "error": None,
+        }
+        with patch("app.main.recalc_seller_all_periods") as fn:
             r = client.post("/jobs/recalc/seller-busy")
         assert r.status_code == 200
         body = r.json()
         assert body["started"] is False
         assert body["status"] == "running"
-        assert body["started_at"] == "2026-05-19T09:00:00Z"
-        # Главное — повторный recalc НЕ запустился
         fn.assert_not_called()
+
+    def test_recalc_seller_dedup_via_db_when_fresh(self, monkeypatch):
+        """Дедупликация по БД: свежий running → блокируем новый."""
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        from datetime import datetime, timezone
+        fresh = datetime.now(timezone.utc).isoformat()
+        monkeypatch.setattr("app.main._db_get_recalc_state", lambda sid: {
+            "status": "running", "started_at": fresh,
+            "result": None, "error": None, "progress": None, "finished_at": None,
+        })
+        with patch("app.main.recalc_seller_all_periods") as fn:
+            r = client.post("/jobs/recalc/seller-db-busy")
+        assert r.status_code == 200
+        assert r.json()["started"] is False
+        fn.assert_not_called()
+
+    def test_recalc_seller_ignores_stale_db_running(self, monkeypatch):
+        """БД говорит running но старше 1ч (рестарт worker'а) → стартуем заново."""
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        from datetime import datetime, timezone, timedelta
+        stale = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
+        monkeypatch.setattr("app.main._db_get_recalc_state", lambda sid: {
+            "status": "running", "started_at": stale,
+            "result": None, "error": None, "progress": None, "finished_at": None,
+        })
+        with patch("app.main.recalc_seller_all_periods", return_value={"ok": True}):
+            r = client.post("/jobs/recalc/seller-stale")
+        assert r.status_code == 200
+        assert r.json()["started"] is True
 
     def test_recalc_status_idle(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = _mock_recalc_supabase(existing_state=None)
-        with patch("app.main.get_supabase", return_value=mock_sb):
-            r = client.get("/jobs/recalc/some-unknown-seller/status")
+        r = client.get("/jobs/recalc/some-unknown-seller/status")
         assert r.status_code == 200
         assert r.json()["status"] == "idle"
 
-    def test_recalc_status_returns_running_state(self, monkeypatch):
+    def test_recalc_status_returns_running_from_memory(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        mock_sb = _mock_recalc_supabase(existing_state={
-            "status": "running",
+        _running_recalcs["seller-running"] = {
             "started_at": "2026-05-19T09:00:00Z",
-            "finished_at": None,
-            "result": None,
-            "error": None,
-            "progress": None,
-        })
-        with patch("app.main.get_supabase", return_value=mock_sb):
-            r = client.get("/jobs/recalc/seller-running/status")
+            "status": "running", "result": None, "error": None,
+        }
+        r = client.get("/jobs/recalc/seller-running/status")
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "running"
         assert body["started_at"] == "2026-05-19T09:00:00Z"
 
-    def test_recalc_status_returns_done_state(self, monkeypatch):
-        """После рестарта worker'а раньше in-memory state терялся.
-        Теперь статус done сохраняется в БД."""
+    def test_recalc_status_returns_done_from_db(self, monkeypatch):
+        """Когда in-memory пуст (рестарт) — возвращаем исторический результат из БД."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        result = {"products": 42, "metrics_written": 42}
-        mock_sb = _mock_recalc_supabase(existing_state={
+        monkeypatch.setattr("app.main._db_get_recalc_state", lambda sid: {
             "status": "done",
-            "started_at": "2026-05-19T09:00:00Z",
-            "finished_at": "2026-05-19T09:05:00Z",
-            "result": result,
+            "started_at": "2026-05-19T08:00:00Z",
+            "finished_at": "2026-05-19T08:05:00Z",
+            "result": {"products": 42},
             "error": None,
             "progress": None,
         })
-        with patch("app.main.get_supabase", return_value=mock_sb):
-            r = client.get("/jobs/recalc/seller-done/status")
+        r = client.get("/jobs/recalc/seller-historical/status")
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "done"
-        assert body["result"] == result
+        assert body["result"] == {"products": 42}
 
     def test_recalc_all(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
@@ -276,10 +271,7 @@ class TestRecalcJobs:
 
 
 class TestTelegramWebhook:
-    """SECURITY FIX (fail-closed): TELEGRAM_WEBHOOK_SECRET требуется всегда.
-
-    Без env → 500. С env но без/с неверным заголовком → 403. С верным заголовком → 200.
-    """
+    """SECURITY: TELEGRAM_WEBHOOK_SECRET требуется всегда (fail-closed)."""
 
     def setup_method(self):
         os.environ["TELEGRAM_WEBHOOK_SECRET"] = TELEGRAM_TEST_SECRET
