@@ -4,13 +4,12 @@ import { Icons } from "../_components/Icons";
 type Props = { daysSinceSetup: number };
 
 /**
- * Онбординг-баннер по разделу «Продающие данные» из Project.docx.
- * Показывает селлеру что у него уже сейчас и что появится дальше.
+ * Онбординг-баннер: что у селлера сейчас, что появится дальше.
  *
- *  Day 1   (сегодня, daysSinceSetup === 0)        — рассказываем что данные записали
- *  Day 1-7 (daysSinceSetup 1..6)                  — ждём семидневного окна для TVelo
- *  Day 7-30 (daysSinceSetup 7..29)                — TVelo работает, копим историю
- *  Day 30+                                        — баннер не показываем (Full insights)
+ *  День 1   (daysSinceSetup === 0)        — рассказываем что данные записали
+ *  День 1-7 (daysSinceSetup 1..6)         — ждём семидневного окна для TVelo
+ *  День 7-30 (daysSinceSetup 7..29)       — TVelo работает, копим историю
+ *  День 30+                               — баннер не показываем (полные данные)
  */
 export function DayProgress({ daysSinceSetup }: Props) {
   if (daysSinceSetup >= 30) return null;
@@ -22,23 +21,23 @@ export function DayProgress({ daysSinceSetup }: Props) {
 
   const content = {
     day1: {
-      stageLabel: "Day 1",
+      stageLabel: "День 1",
       title: "Данные записаны",
       body: "За сегодня мы всё записали, но нам понадобится несколько дней, чтобы дать больше полезной информации.",
-      next: "Через 7 дней появится: TVelo по каждому SKU, скорости продаж, lost revenue, заканчивающиеся остатки.",
+      next: "Через 7 дней появится: TVelo по каждому SKU, скорости продаж, потерянная выручка, заканчивающиеся остатки.",
       progress: 5,
     },
     day7: {
-      stageLabel: `Day ${daysSinceSetup}`,
+      stageLabel: `День ${daysSinceSetup}`,
       title: "Первые расчёты в работе",
       body: `Прошло ${daysSinceSetup} ${pluralDay(daysSinceSetup)}. Накапливаем семидневное окно — TVelo входит в силу, когда будет 7 дней истории.`,
-      next: `Через ${7 - daysSinceSetup} ${pluralDay(7 - daysSinceSetup)}: TVelo по SKU, OOS дни, lost revenue, заканчивающиеся остатки.`,
+      next: `Через ${7 - daysSinceSetup} ${pluralDay(7 - daysSinceSetup)}: TVelo по SKU, дни отсутствия товара, потерянная выручка, заканчивающиеся остатки.`,
       progress: Math.round((daysSinceSetup / 30) * 100),
     },
     day30: {
-      stageLabel: `Day ${daysSinceSetup}`,
+      stageLabel: `День ${daysSinceSetup}`,
       title: "TVelo работает",
-      body: `Прошло ${daysSinceSetup} ${pluralDay(daysSinceSetup)}. Скорость продаж, покрытие и OOS уже видны — но confidence растёт каждый день.`,
+      body: `Прошло ${daysSinceSetup} ${pluralDay(daysSinceSetup)}. Скорость продаж, покрытие и дни без товара уже видны — но достоверность данных растёт каждый день.`,
       next: `Через ${30 - daysSinceSetup} ${pluralDay(30 - daysSinceSetup)}: помесячная динамика, недооценённые SKU, влияние цены, точные сегменты.`,
       progress: Math.round((daysSinceSetup / 30) * 100),
     },
@@ -52,7 +51,7 @@ export function DayProgress({ daysSinceSetup }: Props) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-lime-deep font-semibold">
-                {content.stageLabel} / Onboarding
+                {content.stageLabel} / Подключение
               </span>
               <span className="font-mono text-[10px] tabular text-ink-hush">{content.progress}%</span>
             </div>
@@ -64,12 +63,20 @@ export function DayProgress({ daysSinceSetup }: Props) {
             </p>
           </div>
         </div>
-        <Link
-          href={"/onboarding" as any}
-          className="hidden md:inline-flex items-center gap-1 text-xs text-ink-muted hover:text-lime-deep transition whitespace-nowrap shrink-0"
-        >
-          Гид <Icons.ArrowRight size={11} />
-        </Link>
+        <div className="hidden md:flex flex-col items-end gap-1.5 shrink-0">
+          <Link
+            href={"/onboarding" as any}
+            className="inline-flex items-center gap-1 text-xs text-ink-muted hover:text-lime-deep transition whitespace-nowrap"
+          >
+            Гид <Icons.ArrowRight size={11} />
+          </Link>
+          <Link
+            href={"/connections" as any}
+            className="inline-flex items-center gap-1 text-xs text-ink-muted hover:text-lime-deep transition whitespace-nowrap"
+          >
+            Проверить синхронизацию <Icons.ArrowRight size={11} />
+          </Link>
+        </div>
       </div>
 
       {/* Полоска прогресса 30 дней */}
@@ -80,9 +87,9 @@ export function DayProgress({ daysSinceSetup }: Props) {
         />
       </div>
       <div className="mt-1.5 flex justify-between font-mono text-[9px] text-ink-hush uppercase tracking-wider">
-        <span>Day 1</span>
-        <span>Day 7</span>
-        <span>Day 30 — full insights</span>
+        <span>День 1</span>
+        <span>День 7</span>
+        <span>День 30 — полные данные</span>
       </div>
     </div>
   );

@@ -131,7 +131,7 @@ export default async function DashboardOverview({ searchParams }: {
           value={storeMetrics?.total_sku_count ?? "—"}
         />
         <Kpi
-          label="Out-of-stock"
+          label="Нет в наличии"
           tooltip="SKU с нулевым остатком на момент последнего синка. Прямые потери продаж — товара нет, заявки уходят к конкурентам."
           value={storeMetrics?.oos_sku_count ?? "—"}
           tone="warn"
@@ -198,13 +198,13 @@ export default async function DashboardOverview({ searchParams }: {
         </div>
         <div className="rounded-2xl border border-rose/30 bg-rose/5 p-5">
           <div className="font-mono text-[10px] uppercase tracking-widest text-rose font-semibold flex items-center">
-            Lost revenue
+            Потерянная выручка
             <InfoTooltip text="Σ (adjusted_velocity × stockout_days × avg_price) по всем SKU. Сколько денег не получено за период из-за того что товар был out-of-stock — clients ушли к конкуренту." />
           </div>
           <div className="mt-2 font-display text-2xl tabular text-rose font-medium">
             {fmt(storeMetrics?.lost_revenue)}
           </div>
-          <div className="mt-1 text-xs text-rose/80">недополучено за период из-за OOS</div>
+          <div className="mt-1 text-xs text-rose/80">недополучено за период из-за отсутствия товара</div>
         </div>
       </div>
 
@@ -223,13 +223,13 @@ export default async function DashboardOverview({ searchParams }: {
 
       {/* Графики */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <ChartCard title="Health за 14 дней" tooltip="Изменение warehouse_health_score за последние 14 пересчётов. Тренд вверх = склад здоровеет, вниз = ухудшение.">
+        <ChartCard title="Здоровье склада за 14 дней" tooltip="Изменение warehouse_health_score за последние 14 пересчётов. Тренд вверх = склад здоровеет, вниз = ухудшение.">
           <HealthTrend history={storeHistory ?? []} />
         </ChartCard>
-        <ChartCard title="Lost revenue за 14 дней" tooltip="Динамика потерь из-за OOS. Если растёт — нужно срочно пополнять дефицитные SKU.">
+        <ChartCard title="Потерянная выручка за 14 дней" tooltip="Динамика потерь из-за отсутствия товара. Если растёт — нужно срочно пополнять дефицитные SKU.">
           <LostRevenueTrend history={storeHistory ?? []} currency={currency} />
         </ChartCard>
-        <ChartCard title="Распределение по сегментам" tooltip="Сегментация SKU по паттерну спроса: stable (стабильные), fast_movers (быстрые), slow_movers (медленные), seasonal, sparse_data, insufficient_data.">
+        <ChartCard title="Распределение по сегментам" tooltip="Сегментация SKU по паттерну спроса: стабильные, быстрые, медленные, неликвид, мало данных.">
           <SegmentPie distribution={storeMetrics?.demand_pattern_distribution as any} />
         </ChartCard>
       </div>

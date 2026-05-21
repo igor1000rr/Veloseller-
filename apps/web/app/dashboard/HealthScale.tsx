@@ -1,10 +1,10 @@
 /**
- * Шкала Inventory Health по Rule 13.2 из ТЗ:
- *  90-100 = Excellent
- *  75-89  = Good
- *  60-74  = Warning
- *  40-59  = Risky
- *  0-39   = Critical
+ * Шкала здоровья склада по Rule 13.2:
+ *  90-100 = Отлично
+ *  75-89  = Хорошо
+ *  60-74  = Внимание
+ *  40-59  = Риск
+ *  0-39   = Критично
  */
 export function HealthScale({
   score,
@@ -42,7 +42,7 @@ export function HealthScale({
 }
 
 /**
- * Большой блок Health: число + бейдж шкалы + визуальная полоска.
+ * Большой блок здоровья склада: число + бейдж шкалы + визуальная полоска.
  * Используется на dashboard вместо простого числа.
  */
 export function HealthScoreBlock({ score }: { score: number | null | undefined }) {
@@ -54,7 +54,7 @@ export function HealthScoreBlock({ score }: { score: number | null | undefined }
     <div className="rounded-2xl border border-line bg-paper p-6">
       <div className="flex items-center justify-between">
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">
-          Inventory Health Score
+          Состояние склада
         </div>
         <HealthScale score={v} size="md" />
       </div>
@@ -105,31 +105,31 @@ type Tier = {
 
 function pickTier(score: number): Tier {
   if (score >= 90) return {
-    label: "Excellent",
+    label: "Отлично",
     cls: "text-lime-deep border-lime-deep/40 bg-lime-soft",
     numberColor: "#3f6212",
     hint: "Склад в отличной форме — нет ни дефицита, ни неликвида.",
   };
   if (score >= 75) return {
-    label: "Good",
+    label: "Хорошо",
     cls: "text-lime-deep border-lime-deep/30 bg-lime-soft",
     numberColor: "#3f6212",
     hint: "Склад работает хорошо — есть небольшие точки роста.",
   };
   if (score >= 60) return {
-    label: "Warning",
+    label: "Внимание",
     cls: "text-orange border-orange/30 bg-orange/10",
     numberColor: "#b45309",
     hint: "Есть риски — проверь заканчивающиеся SKU и неликвид.",
   };
   if (score >= 40) return {
-    label: "Risky",
+    label: "Риск",
     cls: "text-orange border-orange/40 bg-orange/15",
     numberColor: "#9a3412",
-    hint: "Нужно вмешательство — много OOS или замороженных денег.",
+    hint: "Нужно вмешательство — много отсутствующих или замороженных позиций.",
   };
   return {
-    label: "Critical",
+    label: "Критично",
     cls: "text-rose border-rose/40 bg-rose/15",
     numberColor: "#be123c",
     hint: "Критическое состояние склада — срочно разбирайся с дефицитом или неликвидом.",

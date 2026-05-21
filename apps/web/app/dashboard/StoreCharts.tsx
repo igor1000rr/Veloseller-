@@ -60,8 +60,8 @@ export function HealthTrend({ history }: { history: HistoryPoint[] }) {
         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
         <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
         <YAxis domain={[0, 100]} stroke="#64748b" fontSize={12} />
-        <Tooltip formatter={(v: number) => [`${v?.toFixed(1) ?? "—"}/100`, "Health"]} />
-        <Line type="monotone" dataKey="score" stroke="#0f766e" strokeWidth={2} dot={{ r: 3 }} name="Health" />
+        <Tooltip formatter={(v: number) => [`${v?.toFixed(1) ?? "—"}/100`, "Состояние склада"]} />
+        <Line type="monotone" dataKey="score" stroke="#0f766e" strokeWidth={2} dot={{ r: 3 }} name="Состояние склада" />
       </LineChart>
     </ResponsiveContainer>
   );
@@ -84,8 +84,8 @@ export function LostRevenueTrend({ history, currency = "RUB" }: { history: Histo
         <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
         <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
         <YAxis stroke="#64748b" fontSize={12} tickFormatter={(v) => compactMoney(v, symbol)} width={70} />
-        <Tooltip formatter={(v: number) => [fullMoney(v, symbol), "Lost revenue"]} />
-        <Line type="monotone" dataKey="lost" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} name="Lost revenue" />
+        <Tooltip formatter={(v: number) => [fullMoney(v, symbol), "Потерянная выручка"]} />
+        <Line type="monotone" dataKey="lost" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} name="Потерянная выручка" />
       </LineChart>
     </ResponsiveContainer>
   );
