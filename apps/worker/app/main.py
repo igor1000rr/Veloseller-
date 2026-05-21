@@ -88,6 +88,14 @@ _RECALC_STATE_TTL = timedelta(hours=24)
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _CSV_MAX_SIZE_BYTES = 20 * 1024 * 1024
 
+# При скольких неудачах sync подряд склад автоматически ставится на паузу.
+# Это защищает API маркетплейса от ненужных вызовов с плохим токеном.
+SYNC_FAILURE_AUTO_PAUSE_THRESHOLD = 3
+
+# Cooldown между повторными уведомлениями об одной и той же серии ошибок.
+# Чтобы не спамить email/telegram каждые 5 минут пока юзер не пофиксил ключи.
+SYNC_ERROR_NOTIFY_COOLDOWN_HOURS = 24
+
 
 def _cleanup_old_recalcs() -> None:
     cutoff = datetime.now(timezone.utc) - _RECALC_STATE_TTL
@@ -139,12 +147,7 @@ _DEDUP_WINDOW_HOURS = 20
 
 
 def _ozon_kind_from_warehouse(warehouse_kind: Optional[str]) -> Optional[str]:
-    """Маппинг warehouse_kind из БД → kind для ozon.fetch_snapshots().
-
-    'ozon_fbo' → 'fbo'
-    'ozon_fbs' → 'fbs'
-    Иначе None (legacy connection без warehouse_kind или с другим типом — суммируем всё).
-    """
+    """Маппинг warehouse_kind из БД → kind для ozon.fetch_snapshots()."""
     if warehouse_kind == "ozon_fbo":
         return "fbo"
     if warehouse_kind == "ozon_fbs":
@@ -153,24 +156,10 @@ def _ozon_kind_from_warehouse(warehouse_kind: Optional[str]) -> Optional[str]:
 
 
 def _ensure_products(sb, seller_id: str, connection_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
-    """Upsert products через уникальный индекс (seller_id, connection_id, sku).
-
-    После миграции products_scoped_to_connection каждый product принадлежит ровно
-    одному складу (connection). Одинаковые SKU на разных складах = разные products,
-    это позволяет хранить раздельно остатки Ozon FBO и Ozon FBS для одного артикула.
-
-    Args:
-        seller_id: владелец склада
-        connection_id: к какому складу относятся snapshot'ы. Обязателен (NOT NULL в БД)
-        snapshots: список SKU для upsert
-
-    Returns:
-        {sku: product_id} — для всех snapshot'ов внутри указанного connection
-    """
+    """Upsert products через уникальный индекс (seller_id, connection_id, sku)."""
     if not snapshots:
         return {}
     if not connection_id:
-        # После миграции products.connection_id NOT NULL — без него вставка невозможна.
         raise ValueError("_ensure_products требует connection_id (NOT NULL в products)")
 
     rows = [{
@@ -204,9 +193,6 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
     if not snapshots:
         return 0
     if not connection_id:
-        # CSV upload (legacy) больше не поддерживает product upsert — нужен connection.
-        # На текущем этапе CSV-ingest deprecated: пользователь должен создать csv-склад
-        # через UI и грузить файл в него. См. план Александра.
         logger.warning("persist_snapshots called without connection_id — skipping product upsert",
                        extra={"seller_id": seller_id, "skus": len(snapshots)})
         return 0
@@ -276,20 +262,177 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
     return len(rows)
 
 
+def _send_sync_error_notifications(
+    sb,
+    connection_id: str,
+    error_message: str,
+    failure_count: int,
+    auto_paused: bool,
+) -> None:
+    """Email + Telegram уведомления о неудаче sync.
+
+    Дедупликация через error_notified_at в data_connections: повторные уведомления
+    о той же серии ошибок не шлём в течение SYNC_ERROR_NOTIFY_COOLDOWN_HOURS часов,
+    кроме случая auto_paused (тогда шлём всегда — это важное событие).
+    """
+    try:
+        # Получаем склад + связанного селлера
+        conn_res = (
+            sb.table("data_connections")
+            .select("name,warehouse_kind,seller_id,error_notified_at")
+            .eq("id", connection_id)
+            .single()
+            .execute()
+        )
+        conn = conn_res.data
+        if not conn:
+            return
+
+        # Дедупликация: если уже уведомляли и не auto_paused и cooldown не истёк — skip
+        if not auto_paused and conn.get("error_notified_at"):
+            try:
+                notified = datetime.fromisoformat(
+                    conn["error_notified_at"].replace("Z", "+00:00")
+                )
+                cooldown = timedelta(hours=SYNC_ERROR_NOTIFY_COOLDOWN_HOURS)
+                if datetime.now(timezone.utc) - notified < cooldown:
+                    logger.info(
+                        "sync error notify skipped — cooldown",
+                        extra={"connection_id": connection_id, "failure_count": failure_count},
+                    )
+                    return
+            except (ValueError, AttributeError):
+                pass
+
+        # Получаем настройки уведомлений селлера
+        seller_res = (
+            sb.table("sellers")
+            .select("email,notify_email,notify_telegram,telegram_chat_id")
+            .eq("id", conn["seller_id"])
+            .single()
+            .execute()
+        )
+        seller = seller_res.data
+        if not seller:
+            return
+
+        warehouse_name = conn.get("name") or "—"
+        warehouse_kind = conn.get("warehouse_kind") or ""
+
+        # Email
+        if seller.get("notify_email") and seller.get("email"):
+            try:
+                from app.notifications import send_sync_error_notification
+                send_sync_error_notification(
+                    to_email=seller["email"],
+                    warehouse_name=warehouse_name,
+                    warehouse_kind=warehouse_kind,
+                    error_message=error_message,
+                    failure_count=failure_count,
+                    auto_paused=auto_paused,
+                )
+            except Exception:
+                logger.exception("send_sync_error_notification email failed",
+                                 extra={"connection_id": connection_id})
+
+        # Telegram
+        if seller.get("notify_telegram") and seller.get("telegram_chat_id"):
+            try:
+                from app.telegram import send_message, format_sync_error_message
+                msg = format_sync_error_message(
+                    warehouse_name=warehouse_name,
+                    warehouse_kind=warehouse_kind,
+                    error_message=error_message,
+                    failure_count=failure_count,
+                    auto_paused=auto_paused,
+                )
+                send_message(seller["telegram_chat_id"], msg)
+            except Exception:
+                logger.exception("send_sync_error_notification telegram failed",
+                                 extra={"connection_id": connection_id})
+
+        # Обновляем error_notified_at чтобы дедуплицировать дальнейшие уведомления
+        sb.table("data_connections").update({
+            "error_notified_at": datetime.now(timezone.utc).isoformat(),
+        }).eq("id", connection_id).execute()
+
+    except Exception:
+        # Уведомления не должны ломать sync — глотаем все ошибки
+        logger.exception("sync error notifications dispatch failed",
+                         extra={"connection_id": connection_id})
+
+
 def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None) -> None:
+    """Обновляет state склада после попытки sync.
+
+    Успех:
+      - status = 'active'
+      - failure_count = 0 (сбрасываем серию неудач)
+      - error_notified_at = NULL (готовы снова уведомлять при новой серии)
+      - last_error = NULL
+
+    Ошибка:
+      - failure_count++
+      - При failure_count >= 3: status='paused', auto-disable sync
+      - Иначе: status='error'
+      - Отправляем email/telegram уведомление (с дедупликацией)
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if error is None:
+        # Успех — сбрасываем серию
+        sb.table("data_connections").update({
+            "last_sync_at": now_iso,
+            "status": "active",
+            "last_error": None,
+            "failure_count": 0,
+            "error_notified_at": None,
+        }).eq("id", connection_id).execute()
+        return
+
+    # Ошибка — читаем текущий failure_count, инкрементируем, решаем pause/error
+    try:
+        cur_res = (
+            sb.table("data_connections")
+            .select("failure_count")
+            .eq("id", connection_id)
+            .single()
+            .execute()
+        )
+        cur_failures = int((cur_res.data or {}).get("failure_count") or 0)
+    except Exception:
+        cur_failures = 0
+
+    new_failures = cur_failures + 1
+    auto_paused = new_failures >= SYNC_FAILURE_AUTO_PAUSE_THRESHOLD
+    new_status = "paused" if auto_paused else "error"
+
     sb.table("data_connections").update({
-        "last_sync_at": datetime.now(timezone.utc).isoformat(),
-        "status": "error" if error else "active",
+        "last_sync_at": now_iso,
+        "status": new_status,
         "last_error": error,
+        "failure_count": new_failures,
     }).eq("id", connection_id).execute()
+
+    logger.warning("sync failure tracked", extra={
+        "connection_id": connection_id,
+        "failure_count": new_failures,
+        "auto_paused": auto_paused,
+        "status": new_status,
+    })
+
+    # Отправляем уведомления (внутри своя дедупликация через cooldown)
+    _send_sync_error_notifications(sb, connection_id, error, new_failures, auto_paused)
 
 
 def _try_acquire_sync_lock(sb, connection_id: str) -> bool:
+    """Захватываем lock через update. Не позволяем sync paused-складов (auto-disabled)."""
     try:
         res = (sb.table("data_connections")
                .update({"status": "syncing", "last_error": None})
                .eq("id", connection_id)
-               .neq("status", "syncing")
+               # syncing — кто-то уже работает; paused — auto-disabled, нужно ручное вмешательство
+               .not_.in_("status", ["syncing", "paused"])
                .execute())
         return bool(res.data)
     except Exception:
@@ -358,8 +501,7 @@ def _run_feed_sync_bg(connection_id: str, seller_id: str, feed_url: str) -> None
 
 @app.post("/ingest/csv", dependencies=[Depends(require_worker_secret)])
 async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
-    """DEPRECATED: CSV upload без привязки к connection устарел после миграции
-    products → (seller_id, connection_id, sku). Создавайте csv-склад через UI."""
+    """DEPRECATED: CSV upload без привязки к connection устарел."""
     raise HTTPException(
         410,
         "CSV upload через этот endpoint устарел. "
@@ -378,7 +520,7 @@ def ingest_google_sheet(connection_id: str, background_tasks: BackgroundTasks) -
     if not sheet:
         raise HTTPException(400, "config.sheet_url или config.sheet_id обязателен")
     if not _try_acquire_sync_lock(sb, connection_id):
-        return {"started": False, "status": "running", "message": "Sync уже идёт"}
+        return {"started": False, "status": "running", "message": "Sync уже идёт или склад на паузе"}
     background_tasks.add_task(_run_google_sheet_sync_bg, connection_id, conn.data["seller_id"], sheet, cfg.get("worksheet_index", 0))
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
@@ -398,7 +540,7 @@ def ingest_ozon(connection_id: str, background_tasks: BackgroundTasks) -> dict:
     if not client_id or not api_key:
         raise HTTPException(400, "config.client_id и config.api_key обязательны")
     if not _try_acquire_sync_lock(sb, connection_id):
-        return {"started": False, "status": "running", "message": "Sync уже идёт"}
+        return {"started": False, "status": "running", "message": "Sync уже идёт или склад на паузе"}
     warehouse_kind = conn.data.get("warehouse_kind")
     background_tasks.add_task(
         _run_ozon_sync_bg,
@@ -420,7 +562,7 @@ def ingest_wb(connection_id: str, background_tasks: BackgroundTasks) -> dict:
     if not token:
         raise HTTPException(400, "config.token обязателен")
     if not _try_acquire_sync_lock(sb, connection_id):
-        return {"started": False, "status": "running", "message": "Sync уже идёт"}
+        return {"started": False, "status": "running", "message": "Sync уже идёт или склад на паузе"}
     background_tasks.add_task(_run_wb_sync_bg, connection_id, conn.data["seller_id"], token)
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
@@ -436,7 +578,7 @@ def ingest_feed(connection_id: str, background_tasks: BackgroundTasks) -> dict:
     if not feed_url:
         raise HTTPException(400, "config.feed_url обязателен")
     if not _try_acquire_sync_lock(sb, connection_id):
-        return {"started": False, "status": "running", "message": "Sync уже идёт"}
+        return {"started": False, "status": "running", "message": "Sync уже идёт или склад на паузе"}
     background_tasks.add_task(_run_feed_sync_bg, connection_id, conn.data["seller_id"], feed_url)
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
