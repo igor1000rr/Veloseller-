@@ -2,20 +2,34 @@
 
 import { useState } from "react";
 
+/**
+ * Кнопка «Купить тариф» — перенаправляет на Robokassa.
+ *
+ * Раньше вела на Stripe Checkout, теперь на Robokassa (рублевые платежи для РФ).
+ * Stripe endpoints остаются в коде как fallback для зарубежных клиентов (будет
+ * отдельная кнопка «Оплатить картой (USD)» позже).
+ */
 export function UpgradeButton({ plan, isCurrent, label }: { plan: string; isCurrent: boolean; label: string }) {
   const [busy, setBusy] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   async function handleUpgrade() {
     setBusy(true);
+    setErrorMsg(null);
     try {
-      const res = await fetch("/api/stripe/checkout", {
+      const res = await fetch("/api/robokassa/create-payment", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ plan }),
       });
       const data = await res.json();
-      if (data.url) window.location.href = data.url;
-      else alert(data.error || "Ошибка");
+      if (data.url) {
+        window.location.href = data.url;
+        return;
+      }
+      setErrorMsg(data.error || "Не удалось создать платёж");
+    } catch (e: any) {
+      setErrorMsg(e?.message || "Ошибка сети");
     } finally {
       setBusy(false);
     }
@@ -29,28 +43,27 @@ export function UpgradeButton({ plan, isCurrent, label }: { plan: string; isCurr
     );
   }
   return (
-    <button onClick={handleUpgrade} disabled={busy}
-            className="mt-6 w-full py-2.5 rounded-lg text-sm font-medium bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white">
-      {busy ? "Открываем Stripe…" : label}
-    </button>
+    <>
+      <button onClick={handleUpgrade} disabled={busy}
+              className="mt-6 w-full py-2.5 rounded-lg text-sm font-medium bg-violet-600 hover:bg-violet-700 disabled:opacity-60 text-white">
+        {busy ? "Переходим на Робокассу…" : label}
+      </button>
+      {errorMsg && (
+        <p className="mt-2 text-xs text-rose-600">{errorMsg}</p>
+      )}
+    </>
   );
 }
 
+/**
+ * Кнопка «Управление подпиской» — в Robokassa нет customer portal,
+ * подписка это разовые платежи раз в 30 дней. Поэтому просто
+ * показываем текст "Продлить в следующем месяце — выберите тариф повторно".
+ */
 export function ManageSubscriptionButton() {
-  const [busy, setBusy] = useState(false);
-  async function handleManage() {
-    setBusy(true);
-    try {
-      const res = await fetch("/api/stripe/portal", { method: "POST" });
-      const data = await res.json();
-      if (data.url) window.location.href = data.url;
-      else alert(data.error || "Ошибка");
-    } finally { setBusy(false); }
-  }
   return (
-    <button onClick={handleManage} disabled={busy}
-            className="text-sm text-violet-700 hover:text-violet-900 font-medium">
-      {busy ? "..." : "Управление подпиской →"}
-    </button>
+    <span className="text-sm text-slate-500">
+      Подписка продлевается вручную: выберите тариф повторно, когда истекает 30 дней.
+    </span>
   );
 }
