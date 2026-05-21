@@ -53,7 +53,6 @@ class TestWorkerSecret:
         assert r.status_code == 401
 
     def test_production_env_without_secret_returns_500(self, monkeypatch):
-        """В проде с dev-default секретом → 500 (fail-closed)."""
         monkeypatch.setenv("ENV", "production")
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         r = client.post("/jobs/recalc-all", headers={"X-Worker-Secret": "whatever"})
@@ -147,17 +146,15 @@ class TestIngestFeed:
 
 
 class TestRecalcJobs:
-    """Расчётные jobs хранятся в in-memory dict + recalc_jobs БД.
-
-    Для изоляции тестов: мокаем _db_persist_recalc_state и _db_get_recalc_state
-    чтобы никакая реальная БД не трогалась.
-    """
+    """Recalc jobs: in-memory быстрый path + БД try_acquire_recalc_lock RPC для атомарности."""
 
     @pytest.fixture(autouse=True)
-    def _isolate_db_recalc(self, monkeypatch):
-        # _db_persist_recalc_state вызывается с позиционным seller_id + kwargs,
-        # поэтому лямбда принимает *args, **kwargs (было только **kw — TypeError).
-        monkeypatch.setattr("app.main._db_persist_recalc_state", lambda *a, **kw: None)
+    def _isolate_lock_rpc(self, monkeypatch):
+        # По дефолту _try_acquire_recalc_lock возвращает True (лок взят).
+        # Отдельные тесты переопределяют поле.
+        monkeypatch.setattr("app.main._try_acquire_recalc_lock", lambda sid: True)
+        monkeypatch.setattr("app.main._mark_recalc_done", lambda sid, result: None)
+        monkeypatch.setattr("app.main._mark_recalc_error", lambda sid, err: None)
         monkeypatch.setattr("app.main._db_get_recalc_state", lambda sid: None)
 
     def setup_method(self):
@@ -185,7 +182,7 @@ class TestRecalcJobs:
         assert "seller-uuid-456" in _running_recalcs
 
     def test_recalc_seller_dedup_when_running_in_memory(self, monkeypatch):
-        """Дедупликация по in-memory state."""
+        """Быстрый путь: in-memory dict блокирует без RPC."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         _running_recalcs["seller-busy"] = {
             "started_at": "2026-05-19T09:00:00Z",
@@ -199,30 +196,27 @@ class TestRecalcJobs:
         assert body["status"] == "running"
         fn.assert_not_called()
 
-    def test_recalc_seller_dedup_via_db_when_fresh(self, monkeypatch):
-        """Дедупликация по БД: свежий running → блокируем новый."""
+    def test_recalc_seller_dedup_via_rpc_lock(self, monkeypatch):
+        """Свежий расчёт в другом процессе → try_acquire_recalc_lock вернёт False."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        from datetime import datetime, timezone
-        fresh = datetime.now(timezone.utc).isoformat()
+        monkeypatch.setattr("app.main._try_acquire_recalc_lock", lambda sid: False)
         monkeypatch.setattr("app.main._db_get_recalc_state", lambda sid: {
-            "status": "running", "started_at": fresh,
+            "status": "running", "started_at": "2026-05-19T09:00:00Z",
             "result": None, "error": None, "progress": None, "finished_at": None,
         })
         with patch("app.main.recalc_seller_all_periods") as fn:
-            r = client.post("/jobs/recalc/seller-db-busy")
+            r = client.post("/jobs/recalc/seller-locked")
         assert r.status_code == 200
-        assert r.json()["started"] is False
+        body = r.json()
+        assert body["started"] is False
+        assert body["status"] == "running"
+        assert body["started_at"] == "2026-05-19T09:00:00Z"
         fn.assert_not_called()
 
-    def test_recalc_seller_ignores_stale_db_running(self, monkeypatch):
-        """БД говорит running но старше 1ч (рестарт worker'а) → стартуем заново."""
+    def test_recalc_seller_acquires_stale_lock(self, monkeypatch):
+        """Stale running (>1ч) — БД-функция перехватывает лок, RPC вернет True."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        from datetime import datetime, timezone, timedelta
-        stale = (datetime.now(timezone.utc) - timedelta(hours=3)).isoformat()
-        monkeypatch.setattr("app.main._db_get_recalc_state", lambda sid: {
-            "status": "running", "started_at": stale,
-            "result": None, "error": None, "progress": None, "finished_at": None,
-        })
+        # Дефолтный fixture уже возвращает True — это как раз stale-сценарий
         with patch("app.main.recalc_seller_all_periods", return_value={"ok": True}):
             r = client.post("/jobs/recalc/seller-stale")
         assert r.status_code == 200

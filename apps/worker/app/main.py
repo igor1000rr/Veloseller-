@@ -4,6 +4,7 @@ from __future__ import annotations
 import hmac
 import logging
 import re
+import socket
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -87,12 +88,12 @@ if _sentry_dsn:
         logger.warning("sentry init failed: %s", _e)
 
 
-# In-memory dict для runtime progress активных recalc jobs (обновляется в ходе выполнения).
-# История (done/error) дополнительно пишется в таблицу recalc_jobs — это выживает
-# рестарт worker'а, и UI при опросе status видит финальный результат, а не «idle».
+# In-memory dict для быстрого рунтайм-статуса в рамках этого worker-процесса.
+# Сам лок и персистентный статус в БД (функции try_acquire_recalc_lock /
+# mark_recalc_done / mark_recalc_error из миграции 0009).
 _running_recalcs: dict[str, dict] = {}
 _RECALC_STATE_TTL = timedelta(hours=24)
-_DB_RECALC_STALE_AFTER = timedelta(hours=1)  # был рестарт — running > 1ч признаём stale
+_WORKER_ID = f"{socket.gethostname()}:{_os.getpid()}"
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 _CSV_MAX_SIZE_BYTES = 20 * 1024 * 1024
 
@@ -106,52 +107,60 @@ def _is_production() -> bool:
     return env == "production"
 
 
-def _db_persist_recalc_state(
-    seller_id: str,
-    status: str,
-    started_at: str,
-    finished_at: Optional[str] = None,
-    result: Optional[dict] = None,
-    error: Optional[str] = None,
-) -> None:
-    """Сохраняет состояние recalc job в таблицу recalc_jobs.
+def _try_acquire_recalc_lock(seller_id: str) -> bool:
+    """Атомарный try-lock через БД-функцию public.try_acquire_recalc_lock.
 
-    Колонка в БД называется error_text (миграция add_recalc_jobs_table_and_lock_functions),
-    а параметр функции — error для удобства вызывающего кода.
+    Возвращает True если лок взят (можно запускать recalc), False — если взят
+    другим процессом и свежий (<1ч). Stale-локи БД перехватывает автоматически.
 
-    Graceful fallback: если таблицы нет — просто логируем warning, не падаем.
+    При ошибке БД (функция не существует, сеть) — возвращаем True (graceful fallback,
+    чтобы worker не блокировался из-за проблем с lock-системой).
     """
     try:
         sb = get_supabase()
-        payload: dict = {
-            "seller_id": seller_id,
-            "status": status,
-            "started_at": started_at,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }
-        if finished_at is not None:
-            payload["finished_at"] = finished_at
-        if result is not None:
-            payload["result"] = result
-        if error is not None:
-            payload["error_text"] = error  # колонка в БД называется error_text
-        sb.table("recalc_jobs").upsert(payload, on_conflict="seller_id").execute()
-    except Exception as e:
-        logger.warning("recalc_jobs persist failed",
-                       extra={"seller_id": seller_id, "error": str(e)[:200]})
+        res = sb.rpc("try_acquire_recalc_lock", {
+            "p_seller_id": seller_id,
+            "p_worker_id": _WORKER_ID,
+            "p_stale_after": "01:00:00",
+        }).execute()
+        return bool(getattr(res, "data", False))
+    except Exception:
+        logger.exception("try_acquire_recalc_lock RPC failed — fallback to optimistic acquire",
+                         extra={"seller_id": seller_id})
+        return True
+
+
+def _mark_recalc_done(seller_id: str, result: dict) -> None:
+    try:
+        sb = get_supabase()
+        sb.rpc("mark_recalc_done", {
+            "p_seller_id": seller_id, "p_result": result,
+        }).execute()
+    except Exception:
+        logger.exception("mark_recalc_done RPC failed", extra={"seller_id": seller_id})
+
+
+def _mark_recalc_error(seller_id: str, err: str) -> None:
+    try:
+        sb = get_supabase()
+        sb.rpc("mark_recalc_error", {
+            "p_seller_id": seller_id, "p_error_text": err,
+        }).execute()
+    except Exception:
+        logger.exception("mark_recalc_error RPC failed", extra={"seller_id": seller_id})
 
 
 def _db_get_recalc_state(seller_id: str) -> Optional[dict]:
-    """Читает состояние recalc job из recalc_jobs. Нормализует формат для UI.
+    """Читает состояние recalc job из recalc_jobs. Используется /status endpointом
+    когда in-memory пуст (после рестарта worker'а) и при дедупликации в job_recalc_seller.
 
-    БД хранит ошибку в колонке error_text, наружу отдаём как error (для совместимости с UI).
-
-    Возвращает None если запись отсутствует или ошибка БД.
+    БД хранит ошибку в колонке error_text, наружу отдаём как error (для UI).
+    Возвращает None если записи нет или ошибка БД.
     """
     try:
         sb = get_supabase()
         res = (sb.table("recalc_jobs")
-               .select("status, started_at, finished_at, result, error_text")
+               .select("status, started_at, finished_at, result, error_text, progress")
                .eq("seller_id", seller_id)
                .maybe_single()
                .execute())
@@ -163,16 +172,19 @@ def _db_get_recalc_state(seller_id: str) -> Optional[dict]:
             "started_at": data.get("started_at"),
             "finished_at": data.get("finished_at"),
             "result": data.get("result"),
-            "error": data.get("error_text"),  # error_text → error для UI
-            "progress": None,  # в БД не храним runtime progress — он только in-memory
+            "error": data.get("error_text"),
+            "progress": data.get("progress"),
         }
     except Exception:
         return None
 
 
 def _cleanup_old_recalcs() -> None:
-    """Чистика in-memory dict и старых записей в БД."""
-    # In-memory: удаляем завершённые старше 24ч (и результат в БД уже есть)
+    """Чистика in-memory dict от старых done/error записей + БД от завершённых >7д.
+
+    Stale running-записи не трогаем — их перехватит try_acquire_recalc_lock
+    в следующий раз. БД записи старше 7 дней больше не полезны.
+    """
     cutoff = datetime.now(timezone.utc) - _RECALC_STATE_TTL
     stale = []
     for sid, state in _running_recalcs.items():
@@ -189,7 +201,6 @@ def _cleanup_old_recalcs() -> None:
     if stale:
         logger.info("cleaned up stale recalc states (memory)", extra={"count": len(stale)})
 
-    # БД: удаляем done/error записи старше 7 дней (реже всего нужны)
     try:
         db_cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
         sb = get_supabase()
@@ -199,7 +210,6 @@ def _cleanup_old_recalcs() -> None:
          .in_("status", ["done", "error"])
          .execute())
     except Exception:
-        # Таблицы может не быть (миграция не применена) — игнорируем.
         pass
 
 
@@ -218,12 +228,7 @@ app = FastAPI(title="Veloseller Worker", version="0.1.0", lifespan=lifespan)
 
 
 def require_worker_secret(x_worker_secret: Optional[str] = Header(None)) -> None:
-    """Аутентификация Web → Worker через X-Worker-Secret.
-
-    SECURITY:
-      - hmac.compare_digest вместо != (timing attack защита).
-      - В проде без заданного или с dev-default секретом → 500 (fail-closed).
-    """
+    """Аутентификация Web → Worker через X-Worker-Secret."""
     secret = settings.worker_secret
     is_dev_default = (not secret) or secret == "dev-secret-replace-me"
 
@@ -367,7 +372,6 @@ def _send_sync_error_notifications(
     failure_count: int,
     auto_paused: bool,
 ) -> None:
-    """Email + Telegram уведомления о неудаче sync с дедупликацией."""
     try:
         conn_res = (
             sb.table("data_connections")
@@ -491,7 +495,6 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
 
 
 def _try_acquire_sync_lock(sb, connection_id: str) -> bool:
-    """Atomic sync lock + блокировка paused-складов."""
     try:
         cur = (sb.table("data_connections")
                .select("status")
@@ -678,9 +681,12 @@ def ingest_feed(connection_id: str, background_tasks: BackgroundTasks) -> dict:
 def _run_recalc_bg(seller_id: str) -> None:
     """Background расчёт всех периодов для селлера.
 
+    Лок уже взят в job_recalc_seller через try_acquire_recalc_lock RPC.
+    Здесь только выполняем работу и фиксируем итог через mark_recalc_done/error.
+
     Состояние пишется в два места:
-      - in-memory _running_recalcs[seller_id] — с runtime progress (обновляется в ходе)
-      - БД recalc_jobs — только финальный итог (started/done/error), выживает рестарт
+      - in-memory _running_recalcs[seller_id] — быстрый runtime status для этого процесса
+      - БД recalc_jobs через RPC — история, выживает рестарт
     """
     progress: dict = {
         "phase": "starting", "processed": 0, "total": 0, "period_days": 30,
@@ -691,7 +697,6 @@ def _run_recalc_bg(seller_id: str) -> None:
         "started_at": started_iso,
         "status": "running", "result": None, "error": None, "progress": progress,
     }
-    _db_persist_recalc_state(seller_id, status="running", started_at=started_iso)
 
     try:
         result = recalc_seller_all_periods(seller_id, progress=progress)
@@ -699,10 +704,7 @@ def _run_recalc_bg(seller_id: str) -> None:
         _running_recalcs[seller_id].update({
             "status": "done", "finished_at": finished_iso, "result": result,
         })
-        _db_persist_recalc_state(
-            seller_id, status="done",
-            started_at=started_iso, finished_at=finished_iso, result=result,
-        )
+        _mark_recalc_done(seller_id, result)
         logger.info("recalc done (bg)", extra={
             "seller_id": seller_id,
             **{k: v for k, v in result.items() if isinstance(v, (int, float))},
@@ -713,10 +715,7 @@ def _run_recalc_bg(seller_id: str) -> None:
         _running_recalcs[seller_id].update({
             "status": "error", "finished_at": finished_iso, "error": err,
         })
-        _db_persist_recalc_state(
-            seller_id, status="error",
-            started_at=started_iso, finished_at=finished_iso, error=err,
-        )
+        _mark_recalc_error(seller_id, err)
         logger.exception("recalc failed (bg)", extra={"seller_id": seller_id})
 
 
@@ -724,7 +723,7 @@ def _run_recalc_bg(seller_id: str) -> None:
 def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: bool = False) -> dict:
     _cleanup_old_recalcs()
 
-    # Дедупликация #1: in-memory (быстрый путь — работа идёт в этом же процессе).
+    # Быстрый путь: этот процесс уже считает. БД-лок бы всё равно отклонил, но без RPC быстрее.
     existing = _running_recalcs.get(seller_id)
     if existing and existing.get("status") == "running":
         return {
@@ -733,26 +732,25 @@ def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: b
             "message": "Расчёт уже идёт, дождитесь завершения",
         }
 
-    # Дедупликация #2: БД (на случай если работа была выполнена в другом процессе или
-    # переживает рестарт). Если status=running свежее 1ч — блокируем. Иначе stale, игнорируем.
-    db_state = _db_get_recalc_state(seller_id)
-    if db_state and db_state.get("status") == "running":
-        started = db_state.get("started_at")
-        if started:
-            try:
-                started_dt = datetime.fromisoformat(str(started).replace("Z", "+00:00"))
-                if datetime.now(timezone.utc) - started_dt < _DB_RECALC_STALE_AFTER:
-                    return {
-                        "started": False, "status": "running",
-                        "started_at": started,
-                        "message": "Расчёт уже идёт, дождитесь завершения",
-                    }
-            except (ValueError, AttributeError, TypeError):
-                pass
+    # Атомарный БД-лок. Обрабатывает stale running (>1ч — перехват) сам.
+    if not _try_acquire_recalc_lock(seller_id):
+        db_state = _db_get_recalc_state(seller_id)
+        return {
+            "started": False, "status": "running",
+            "started_at": db_state.get("started_at") if db_state else None,
+            "message": "Расчёт уже идёт в другом процессе, дождитесь завершения",
+        }
 
     if sync:
-        result = recalc_seller_all_periods(seller_id)
-        return result
+        # Sync режим: лок взят, выполняем напрямую и фиксируем результат.
+        try:
+            result = recalc_seller_all_periods(seller_id)
+            _mark_recalc_done(seller_id, result)
+            return result
+        except Exception as e:
+            _mark_recalc_error(seller_id, str(e)[:500])
+            raise
+
     background_tasks.add_task(_run_recalc_bg, seller_id)
     return {
         "started": True, "status": "running",
@@ -786,10 +784,6 @@ def job_recalc_all() -> dict:
 
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Optional[str] = Header(None)) -> dict:
-    """Telegram webhook для связывания telegram_chat_id с seller через /start <seller_uuid>.
-
-    SECURITY: TELEGRAM_WEBHOOK_SECRET обязателен всегда (fail-closed).
-    """
     from app.telegram import send_message
 
     expected_secret = _os.environ.get("TELEGRAM_WEBHOOK_SECRET")
