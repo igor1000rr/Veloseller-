@@ -138,19 +138,47 @@ _INSERT_BATCH = 500
 _DEDUP_WINDOW_HOURS = 20
 
 
-def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
+def _ensure_products(sb, seller_id: str, connection_id: str, snapshots: list[SnapshotInput]) -> dict[str, str]:
+    """Upsert products через уникальный индекс (seller_id, connection_id, sku).
+
+    После миграции products_scoped_to_connection каждый product принадлежит ровно
+    одному складу (connection). Одинаковые SKU на разных складах = разные products,
+    это позволяет хранить раздельно остатки Ozon FBO и Ozon FBS для одного артикула.
+
+    Args:
+        seller_id: владелец склада
+        connection_id: к какому складу относятся snapshot'ы. Обязателен (NOT NULL в БД)
+        snapshots: список SKU для upsert
+
+    Returns:
+        {sku: product_id} — для всех snapshot'ов внутри указанного connection
+    """
     if not snapshots:
         return {}
-    rows = [{"seller_id": seller_id, "sku": s.sku, "product_name": s.product_name or s.sku} for s in snapshots]
+    if not connection_id:
+        # После миграции products.connection_id NOT NULL — без него вставка невозможна.
+        raise ValueError("_ensure_products требует connection_id (NOT NULL в products)")
+
+    rows = [{
+        "seller_id": seller_id,
+        "connection_id": connection_id,
+        "sku": s.sku,
+        "product_name": s.product_name or s.sku,
+    } for s in snapshots]
     for i in range(0, len(rows), _PRODUCTS_IN_BATCH):
-        sb.table("products").upsert(rows[i:i + _PRODUCTS_IN_BATCH], on_conflict="seller_id,sku").execute()
+        sb.table("products").upsert(
+            rows[i:i + _PRODUCTS_IN_BATCH],
+            on_conflict="seller_id,connection_id,sku",
+        ).execute()
 
     all_skus = [s.sku for s in snapshots]
     sku_to_pid: dict[str, str] = {}
     for i in range(0, len(all_skus), _PRODUCTS_IN_BATCH):
         batch = all_skus[i:i + _PRODUCTS_IN_BATCH]
         res = (
-            sb.table("products").select("product_id,sku").eq("seller_id", seller_id)
+            sb.table("products").select("product_id,sku")
+            .eq("seller_id", seller_id)
+            .eq("connection_id", connection_id)
             .in_("sku", batch).execute()
         )
         for r in (res.data or []):
@@ -161,13 +189,22 @@ def _ensure_products(sb, seller_id: str, snapshots: list[SnapshotInput]) -> dict
 def _persist_snapshots(seller_id, connection_id, source, snapshots):
     if not snapshots:
         return 0
+    if not connection_id:
+        # CSV upload (legacy) больше не поддерживает product upsert — нужен connection.
+        # На текущем этапе CSV-ingest deprecated: пользователь должен создать csv-склад
+        # через UI и грузить файл в него. См. план Александра.
+        logger.warning("persist_snapshots called without connection_id — skipping product upsert",
+                       extra={"seller_id": seller_id, "skus": len(snapshots)})
+        return 0
+
     sb = get_supabase()
-    sku_to_pid = _ensure_products(sb, seller_id, snapshots)
+    sku_to_pid = _ensure_products(sb, seller_id, connection_id, snapshots)
 
     unmapped_count = sum(1 for s in snapshots if s.sku not in sku_to_pid)
     if unmapped_count > 0:
         logger.warning("snapshots with unmapped SKUs", extra={
-            "seller_id": seller_id, "unmapped": unmapped_count, "total": len(snapshots),
+            "seller_id": seller_id, "connection_id": connection_id,
+            "unmapped": unmapped_count, "total": len(snapshots),
         })
 
     pids = list(sku_to_pid.values())
@@ -296,25 +333,13 @@ def _run_feed_sync_bg(connection_id: str, seller_id: str, feed_url: str) -> None
 
 @app.post("/ingest/csv", dependencies=[Depends(require_worker_secret)])
 async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
-    if not _UUID_RE.match(seller_id or ""):
-        raise HTTPException(400, "seller_id должен быть UUID")
-
-    declared_size = getattr(file, "size", None)
-    if declared_size is not None and declared_size > _CSV_MAX_SIZE_BYTES:
-        raise HTTPException(413, f"Файл слишком большой: {declared_size} байт (максимум {_CSV_MAX_SIZE_BYTES})")
-
-    content = await file.read()
-    if len(content) > _CSV_MAX_SIZE_BYTES:
-        raise HTTPException(413, f"Файл слишком большой: {len(content)} байт (максимум {_CSV_MAX_SIZE_BYTES})")
-
-    try:
-        snapshots = csv_upload.parse_csv(content)
-    except Exception as e:
-        logger.warning("csv parse failed", extra={"seller_id": seller_id, "error": str(e)})
-        raise HTTPException(400, f"CSV parse error: {e}")
-    inserted = _persist_snapshots(seller_id, None, SourceType.CSV_UPLOAD, snapshots)
-    logger.info("csv ingested", extra={"seller_id": seller_id, "skus": len(snapshots), "inserted": inserted})
-    return {"inserted": inserted, "skus": len(snapshots)}
+    """DEPRECATED: CSV upload без привязки к connection устарел после миграции
+    products → (seller_id, connection_id, sku). Создавайте csv-склад через UI."""
+    raise HTTPException(
+        410,
+        "CSV upload через этот endpoint устарел. "
+        "Создайте склад типа 'CSV' через /connections/new и загружайте файлы туда.",
+    )
 
 
 @app.post("/ingest/google-sheet/{connection_id}", dependencies=[Depends(require_worker_secret)])
