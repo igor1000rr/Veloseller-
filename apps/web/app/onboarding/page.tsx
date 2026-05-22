@@ -43,7 +43,7 @@ export default async function OnboardingPage() {
         <ol className="mt-8 space-y-3">
           <Step
             n={1}
-            title="Подключи источник данных"
+            title="Подключите источник данных"
             done={step1Done}
             description="Google Sheet, Ozon или Wildberries API"
             cta={!step1Done ? { href: "/connections/new", label: "Подключить" } : null}
@@ -57,9 +57,9 @@ export default async function OnboardingPage() {
           />
           <Step
             n={3}
-            title="Дождись пересчёта"
+            title="Дождитесь пересчёта"
             done={step3Done}
-            description="Синхронизация запускается каждые 6 часов или нажми «Пересчитать сейчас» на dashboard"
+            description="Синхронизация запускается каждые 6 часов или нажмите «Пересчитать сейчас» на dashboard"
             cta={step2Done && !step3Done ? { href: "/dashboard", label: "Открыть dashboard" } : null}
           />
         </ol>
