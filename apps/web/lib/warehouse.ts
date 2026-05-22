@@ -40,6 +40,7 @@ export async function listWarehouses(
 
 /**
  * Текущий выбранный склад пользователя — cookie vs-warehouse или fallback на первый из списка.
+ * Включает created_at для использования в календарных фильтрах.
  */
 export async function getSelectedWarehouse(
   supabase: any,
@@ -48,7 +49,15 @@ export async function getSelectedWarehouse(
   const cookieStore = await cookies();
   const cookieValue = cookieStore.get(WAREHOUSE_COOKIE_NAME)?.value;
 
-  const warehouses = await listWarehouses(supabase, userId);
+  // Тут отдельный запрос с created_at — listWarehouses возвращает упрощённый тип
+  // без даты создания (для UI селектора она не нужна).
+  const { data } = await supabase
+    .from("data_connections")
+    .select("id, name, warehouse_kind, status, created_at")
+    .eq("seller_id", userId)
+    .order("created_at", { ascending: false });
+
+  const warehouses = (data ?? []) as SelectedWarehouse[];
   if (warehouses.length === 0) return null;
 
   if (cookieValue) {
