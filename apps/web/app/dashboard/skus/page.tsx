@@ -6,6 +6,8 @@ import { InfoTooltip } from "../../_components/InfoTooltip";
 import { getSelectedWarehouse, warehouseKindLabel } from "@/lib/warehouse";
 import { SkusFilters } from "./SkusFilters";
 import { NotesCell } from "./NotesCell";
+import { DashFilterChip } from "./DashFilterChip";
+import { ColumnsPicker } from "./ColumnsPicker";
 
 const PAGE_SIZE = 50;
 
@@ -19,14 +21,6 @@ const SEGMENTS = [
 
 type DashboardFilter = "low_stock" | "lost_revenue" | "dead_inventory" | "oos" | "inactive";
 
-const DASHBOARD_FILTER_LABELS: Record<DashboardFilter, string> = {
-  low_stock:      "Низкий остаток · покрытие ≤ 7 дней",
-  lost_revenue:   "Потерянная выручка · была недополучка из-за OOS",
-  dead_inventory: "Неликвид · покрытие > 180 дней",
-  oos:            "Нет в наличии · активные SKU (с движением за 30 дней)",
-  inactive:       "SKU без активности · 0 остаток + нет движений",
-};
-
 function isDashboardFilter(s: string | undefined): s is DashboardFilter {
   return s === "low_stock" || s === "lost_revenue" || s === "dead_inventory"
       || s === "oos" || s === "inactive";
@@ -38,12 +32,17 @@ function parseIntOrNull(s: string | undefined): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Парсинг даты в формате YYYY-MM-DD из query
 function parseDateOrNull(s: string | undefined): string | null {
   if (s == null || s === "") return null;
-  // Простая валидация YYYY-MM-DD
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
   return s;
+}
+
+// Дефолтный порог для dashFilter — используется когда threshold не в URL
+function defaultThresholdFor(filter: DashboardFilter): number | null {
+  if (filter === "low_stock") return 7;
+  if (filter === "dead_inventory") return 180;
+  return null; // у остальных нет порога
 }
 
 export default async function SkusPage({ searchParams }: {
@@ -54,6 +53,7 @@ export default async function SkusPage({ searchParams }: {
     period?: string;
     filter?: string;
     include_inactive?: string;
+    threshold?: string;
     q?: string;
     stock_min?: string;
     stock_max?: string;
@@ -73,6 +73,12 @@ export default async function SkusPage({ searchParams }: {
   const dashFilter: DashboardFilter | null = isDashboardFilter(sp.filter) ? sp.filter : null;
   const includeInactive = sp.include_inactive === "1" || dashFilter === "inactive";
 
+  // Inline-редактируемый порог для dashFilter (правка 8)
+  const customThreshold = parseIntOrNull(sp.threshold);
+  const effectiveThreshold = dashFilter
+    ? (customThreshold ?? defaultThresholdFor(dashFilter))
+    : null;
+
   const search = (sp.q ?? "").trim();
   const stockMin = parseIntOrNull(sp.stock_min);
   const stockMax = parseIntOrNull(sp.stock_max);
@@ -91,7 +97,6 @@ export default async function SkusPage({ searchParams }: {
   if (!user) return null;
 
   const selected = await getSelectedWarehouse(supabase, user.id);
-  // warehouseCreatedAt используется для min даты в календаре
   const warehouseCreatedAt = selected?.created_at ?? null;
 
   let productsQuery = supabase
@@ -111,17 +116,17 @@ export default async function SkusPage({ searchParams }: {
     productsQuery = productsQuery.eq("connection_id", selected.id);
   }
 
-  // dashFilter из обзора
+  // dashFilter — теперь с параметризованным порогом
   if (dashFilter === "low_stock") {
     productsQuery = productsQuery
-      .lte("tvelo_metrics.coverage_days", 7)
+      .lte("tvelo_metrics.coverage_days", effectiveThreshold!)
       .gt("tvelo_metrics.current_stock", 0);
   } else if (dashFilter === "lost_revenue") {
     productsQuery = productsQuery
       .gt("tvelo_metrics.stockout_days", 0)
       .gt("tvelo_metrics.adjusted_velocity", 0);
   } else if (dashFilter === "dead_inventory") {
-    productsQuery = productsQuery.gt("tvelo_metrics.coverage_days", 180);
+    productsQuery = productsQuery.gt("tvelo_metrics.coverage_days", effectiveThreshold!);
   } else if (dashFilter === "oos") {
     productsQuery = productsQuery
       .eq("tvelo_metrics.current_stock", 0)
@@ -138,32 +143,17 @@ export default async function SkusPage({ searchParams }: {
     productsQuery = productsQuery.eq("tvelo_metrics.inventory_segment", segmentFilter);
   }
 
-  // Фильтры панели
   if (search) {
     const escaped = search.replace(/[%_]/g, "\\$&");
     productsQuery = productsQuery.or(`sku.ilike.%${escaped}%,product_name.ilike.%${escaped}%`);
   }
-  if (stockMin !== null) {
-    productsQuery = productsQuery.gte("tvelo_metrics.current_stock", stockMin);
-  }
-  if (stockMax !== null) {
-    productsQuery = productsQuery.lte("tvelo_metrics.current_stock", stockMax);
-  }
-  if (oosMin !== null) {
-    productsQuery = productsQuery.gte("tvelo_metrics.stockout_days", oosMin);
-  }
-  if (oosMax !== null) {
-    productsQuery = productsQuery.lte("tvelo_metrics.stockout_days", oosMax);
-  }
-  // Календарь date_from / date_to — фильтрует по period_end (дата последнего пересчёта)
-  if (dateFrom) {
-    productsQuery = productsQuery.gte("tvelo_metrics.period_end", dateFrom);
-  }
-  if (dateTo) {
-    productsQuery = productsQuery.lte("tvelo_metrics.period_end", dateTo);
-  }
-  // lost_min / lost_max — формула не выразима через Supabase API, применяется
-  // пост-фильтром в памяти после получения данных.
+  if (stockMin !== null) productsQuery = productsQuery.gte("tvelo_metrics.current_stock", stockMin);
+  if (stockMax !== null) productsQuery = productsQuery.lte("tvelo_metrics.current_stock", stockMax);
+  if (oosMin !== null)   productsQuery = productsQuery.gte("tvelo_metrics.stockout_days", oosMin);
+  if (oosMax !== null)   productsQuery = productsQuery.lte("tvelo_metrics.stockout_days", oosMax);
+  if (dateFrom)          productsQuery = productsQuery.gte("tvelo_metrics.period_end", dateFrom);
+  if (dateTo)            productsQuery = productsQuery.lte("tvelo_metrics.period_end", dateTo);
+
   const lostFilterActiveButPostProcess =
     (lostMin !== null && lostMin > 0) || lostMax !== null;
 
@@ -225,6 +215,7 @@ export default async function SkusPage({ searchParams }: {
     if (reorderDays !== 30) params.set("reorder_days", String(reorderDays));
     if (periodDays !== 30) params.set("period", String(periodDays));
     if (dashFilter && overrides.filter !== null) params.set("filter", overrides.filter ?? dashFilter);
+    if (customThreshold !== null) params.set("threshold", String(customThreshold));
     if (includeInactive && !dashFilter) params.set("include_inactive", "1");
     if (search) params.set("q", search);
     if (stockMin !== null) params.set("stock_min", String(stockMin));
@@ -262,12 +253,14 @@ export default async function SkusPage({ searchParams }: {
           )}
         </div>
         <div className="flex items-center gap-3 flex-wrap">
+          {/* Регулировка столбцов (правка 8 Александра) */}
+          <ColumnsPicker />
           <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1">
             <a
               href={`/api/export/metrics?${exportQS}&format=excel`}
               download
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition"
-              title="Скачать метрики в Excel (CSV с BOM, разделитель ;)"
+              title="Скачать метрики в Excel"
             >
               <Icons.ArrowRight size={11} /> Excel
             </a>
@@ -289,6 +282,7 @@ export default async function SkusPage({ searchParams }: {
             <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">дней</span>
             {segmentFilter && <input type="hidden" name="segment" value={segmentFilter} />}
             {dashFilter && <input type="hidden" name="filter" value={dashFilter} />}
+            {customThreshold !== null && <input type="hidden" name="threshold" value={customThreshold} />}
             {periodDays !== 30 && <input type="hidden" name="period" value={periodDays} />}
             {search && <input type="hidden" name="q" value={search} />}
             <button type="submit" className="px-2.5 py-1.5 text-xs bg-ink text-paper rounded-lg hover:bg-ink-soft transition">→</button>
@@ -300,6 +294,7 @@ export default async function SkusPage({ searchParams }: {
               if (reorderDays !== 30) params.set("reorder_days", String(reorderDays));
               if (periodDays !== 30) params.set("period", String(periodDays));
               if (dashFilter) params.set("filter", dashFilter);
+              if (customThreshold !== null) params.set("threshold", String(customThreshold));
               if (includeInactive && !dashFilter) params.set("include_inactive", "1");
               if (search) params.set("q", search);
               const qs = params.toString();
@@ -320,26 +315,14 @@ export default async function SkusPage({ searchParams }: {
         </div>
       </header>
 
+      {/* Активный фильтр с обзора с inline-редактированием порога */}
       {dashFilter && (
-        <div className="flex items-center gap-3 rounded-xl border border-lime-deep/30 bg-lime-soft p-3 flex-wrap">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold shrink-0">
-            фильтр с обзора
-          </span>
-          <span className="text-sm text-ink font-medium">
-            {DASHBOARD_FILTER_LABELS[dashFilter]}
-          </span>
-          <span className="ml-auto inline-flex items-center gap-2 flex-wrap">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
-              период {periodDays} дней
-            </span>
-            <Link
-              href={`/dashboard/skus${segmentFilter ? `?segment=${segmentFilter}` : ""}` as any}
-              className="text-xs font-medium text-ink-muted hover:text-ink underline underline-offset-2 transition"
-            >
-              сбросить
-            </Link>
-          </span>
-        </div>
+        <DashFilterChip
+          filter={dashFilter}
+          periodDays={periodDays}
+          threshold={customThreshold}
+          segmentFilter={segmentFilter}
+        />
       )}
 
       {!dashFilter && (
@@ -360,7 +343,6 @@ export default async function SkusPage({ searchParams }: {
         </div>
       )}
 
-      {/* Панель фильтров (client) — передаём warehouseCreatedAt для min календаря */}
       <SkusFilters warehouseCreatedAt={warehouseCreatedAt} />
 
       {!selected && (
@@ -382,26 +364,26 @@ export default async function SkusPage({ searchParams }: {
         <table className="min-w-full text-sm">
           <thead className="bg-bg-soft border-b border-line">
             <tr>
-              <Th>SKU</Th>
-              <Th>Название</Th>
-              <Th align="right">Остаток</Th>
-              <Th align="right">Цена</Th>
-              <Th align="right">TVelo</Th>
-              <Th align="right">Медиана</Th>
-              <Th align="center">Тренд</Th>
-              <Th align="right">Покрытие</Th>
-              <Th align="right">OOS ({periodDays}д)</Th>
-              <Th align="right">Продажи</Th>
-              <Th align="right">Закупка ({reorderDays}д)</Th>
-              <Th align="right" accent>
+              <Th col="sku">SKU</Th>
+              <Th col="name">Название</Th>
+              <Th col="stock" align="right">Остаток</Th>
+              <Th col="price" align="right">Цена</Th>
+              <Th col="tvelo" align="right">TVelo</Th>
+              <Th col="median" align="right">Медиана</Th>
+              <Th col="trend" align="center">Тренд</Th>
+              <Th col="coverage" align="right">Покрытие</Th>
+              <Th col="oos" align="right">OOS ({periodDays}д)</Th>
+              <Th col="sales" align="right">Продажи</Th>
+              <Th col="reorder" align="right">Закупка ({reorderDays}д)</Th>
+              <Th col="confidence" align="right" accent>
                 <span className="inline-flex items-center">
                   ДСТ
                   <InfoTooltip text="Достоверность данных за указанный период. Чем больше дней для расчёта, тем выше качество предоставляемой информации. Учитывайте этот показатель при принятии решений." />
                 </span>
               </Th>
-              <Th align="right">Health</Th>
-              <Th align="right">Потерянная&nbsp;выручка</Th>
-              <Th>Заметки</Th>
+              <Th col="health" align="right">Health</Th>
+              <Th col="lost_revenue" align="right">Потерянная&nbsp;выручка</Th>
+              <Th col="notes">Заметки</Th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -418,51 +400,51 @@ export default async function SkusPage({ searchParams }: {
 
               return (
                 <tr key={p.product_id} className="hover:bg-bg-soft/50 transition">
-                  <td className="px-4 py-3 font-mono text-xs">
+                  <td className="col-skucol-sku px-4 py-3 font-mono text-xs">
                     <Link href={`/dashboard/skus/${p.product_id}` as any} className="text-lime-deep hover:text-ink font-medium transition">
                       {p.sku}
                     </Link>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="col-skucol-name px-4 py-3">
                     <div className="text-ink-soft">{p.product_name}</div>
                     {isUnderestimated && (
                       <span className="font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">недооценён</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular text-ink-soft">{m?.current_stock ?? "—"}</td>
-                  <td className="px-4 py-3 text-right tabular text-ink-soft">{m?.current_price ?? "—"}</td>
-                  <td className="px-4 py-3 text-right font-semibold tabular text-ink">
+                  <td className="col-skucol-stock px-4 py-3 text-right tabular text-ink-soft">{m?.current_stock ?? "—"}</td>
+                  <td className="col-skucol-price px-4 py-3 text-right tabular text-ink-soft">{m?.current_price ?? "—"}</td>
+                  <td className="col-skucol-tvelo px-4 py-3 text-right font-semibold tabular text-ink">
                     {adjVel > 0 ? adjVel.toFixed(2) : "—"}
                   </td>
-                  <td className="px-4 py-3 text-right tabular text-ink-hush" title="Медиана из 30-day pre-period — используется для continuity correction">
+                  <td className="col-skucol-median px-4 py-3 text-right tabular text-ink-hush" title="Медиана из 30-day pre-period — используется для continuity correction">
                     {medVel > 0 ? medVel.toFixed(2) : "—"}
                   </td>
-                  <td className="px-4 py-3"><VelocitySparkline points={sparkData[p.product_id] ?? []} /></td>
-                  <td className="px-4 py-3 text-right tabular text-ink-soft">
+                  <td className="col-skucol-trend px-4 py-3"><VelocitySparkline points={sparkData[p.product_id] ?? []} /></td>
+                  <td className="col-skucol-coverage px-4 py-3 text-right tabular text-ink-soft">
                     {m?.coverage_days != null ? `${Number(m.coverage_days).toFixed(0)} д.` : "—"}
                   </td>
-                  <td className="px-4 py-3 text-right tabular" title="Дни out-of-stock за выбранный период">
+                  <td className="col-skucol-oos px-4 py-3 text-right tabular" title="Дни out-of-stock за выбранный период">
                     {stockoutDays > 0 ? (
                       <span className="text-orange font-semibold">{stockoutDays}</span>
                     ) : (
                       <span className="text-ink-soft">0</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-right tabular text-ink-soft" title="Число единиц, которые мы записали в продажи за период">
+                  <td className="col-skucol-sales px-4 py-3 text-right tabular text-ink-soft" title="Число единиц, которые мы записали в продажи за период">
                     {salesUnits > 0 ? salesUnits : "—"}
                   </td>
-                  <td className="px-4 py-3 text-right font-semibold tabular text-lime-deep">
+                  <td className="col-skucol-reorder px-4 py-3 text-right font-semibold tabular text-lime-deep">
                     {adjVel > 0 ? reorderQty : "—"}
                   </td>
-                  <td className="px-4 py-3 text-right tabular bg-lime-soft/30">
+                  <td className="col-skucol-confidence px-4 py-3 text-right tabular bg-lime-soft/30">
                     {m?.confidence_score != null ? (
                       <span className="font-semibold text-ink">{Number(m.confidence_score).toFixed(0)}%</span>
                     ) : <span className="text-ink-hush">—</span>}
                   </td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="col-skucol-health px-4 py-3 text-right">
                     <HealthBadge score={m?.sku_health_score} />
                   </td>
-                  <td className="px-4 py-3 text-right tabular">
+                  <td className="col-skucol-lost_revenue px-4 py-3 text-right tabular">
                     {lostRev > 0 ? (
                       <span className="text-rose font-semibold">
                         {Math.round(lostRev).toLocaleString("ru-RU")}
@@ -471,7 +453,7 @@ export default async function SkusPage({ searchParams }: {
                       <span className="text-ink-hush">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="col-skucol-notes px-4 py-3">
                     <NotesCell productId={p.product_id} initial={p.user_notes ?? null} />
                   </td>
                 </tr>
@@ -515,15 +497,16 @@ export default async function SkusPage({ searchParams }: {
   );
 }
 
-function Th({ children, align = "left", accent = false }: {
+function Th({ children, align = "left", accent = false, col }: {
   children: React.ReactNode;
   align?: "left" | "right" | "center";
   accent?: boolean;
+  col: string;
 }) {
   const alignCls = align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
   const accentCls = accent ? "bg-lime-soft/30" : "";
   return (
-    <th className={`px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold ${alignCls} ${accentCls}`}>
+    <th className={`col-skucol-${col} px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold ${alignCls} ${accentCls}`}>
       {children}
     </th>
   );
