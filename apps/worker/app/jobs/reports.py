@@ -7,11 +7,10 @@
   где params.day_of_week = isoweekday(today)
 - Группируем подписки по (seller_id, channel) — если несколько kinds на один день
   → один XLSX с разными листами
-- Для каждого kind свой fetcher (SKU + значение характеристики из фильтра)
-  и свой sheet-builder (колонки)
 - Отправка: email (Resend attachment) или telegram (Bot API sendDocument)
+- XLSX также заливается в Supabase Storage bucket 'report-files' для возможности
+  повторного скачивания из истории на сайте
 - Запись в report_history с проверкой idempotency (не шлём дважды за день)
-
 Дефолтный набор подписок создаётся триггером trg_create_default_subscriptions
 при INSERT нового seller'а. У существующих доолотся миграцией.
 """
@@ -27,8 +26,11 @@ from app.db import fetch_all, get_supabase
 
 logger = logging.getLogger("veloseller.reports")
 
+STORAGE_BUCKET = "report-files"
+XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
-# ─── Forматирование ───────────────────────────────────────────────────────────
+
+# ─── Форматирование ─────────────────────────────────────────────────────────────
 
 def _format_money(value: Any, currency: str = "RUB") -> str:
     if value is None:
@@ -51,10 +53,8 @@ def _column_widths(ws, widths: dict[str, int]) -> None:
         ws.column_dimensions[col_letter].width = width
 
 
-# ─── Метаданные kinds (label + sheet builder) ────────────────────────────────
+# ─── Метаданные kinds (label + sheet builder) ──────────────────────────────────────
 
-# Лимит SKU на лист. Чтобы у Resend письма не выходили за 25 МБ,
-# и не было гигантских Excel который никто не откроет.
 SHEET_ROW_LIMIT = 500
 
 
@@ -69,19 +69,14 @@ KIND_LABELS = {
 }
 
 
-# Имена листов Excel ограничены 31 символом — все наши labels влезают.
 def _sheet_name(kind: str) -> str:
     return KIND_LABELS.get(kind, kind)[:31]
 
 
-# ─── Fetchers: получение SKU по kind ─────────────────────────────────────────
+# ─── Fetchers ───────────────────────────────────────────────────────────────────
 
 def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
-    """Возвращает строки для листа Excel в формате [{sku, name, ...}, ...].
-
-    Каждый kind имеет свой набор колонок и фильтр. См. _build_sheet_for_kind
-    для соответствия kind ↔ колонки.
-    """
+    """Возвращает строки для листа Excel в формате [{sku, name, ...}, ...]."""
     try:
         if kind == "low_stock":
             threshold = int(params.get("coverage_days_threshold", 7))
@@ -152,8 +147,6 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             return res.data or []
 
         if kind == "sync_error":
-            # Тут листингуем data_connections с status='error' — это не SKU,
-            # но тоже строки для отчёта.
             res = (
                 sb.table("data_connections")
                 .select("name,source,marketplace,last_error,last_sync_at,status")
@@ -166,7 +159,6 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             return res.data or []
 
         if kind == "weekly_report":
-            # Сводка: последние 14 store_metrics
             res = (
                 sb.table("store_metrics")
                 .select("*")
@@ -183,10 +175,9 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
     return []
 
 
-# ─── Sheet builders: рисуют лист в Excel под конкретный kind ──────────────────
+# ─── Sheet builders ─────────────────────────────────────────────────────────────────
 
 def _row_product(r: dict) -> tuple[str, str]:
-    """Извлекает sku/product_name из вложенного products. Защита от list/dict."""
     p = r.get("products") or {}
     if isinstance(p, list):
         p = p[0] if p else {}
@@ -194,7 +185,6 @@ def _row_product(r: dict) -> tuple[str, str]:
 
 
 def _build_sheet_for_kind(wb, kind: str, rows: list[dict], currency: str) -> None:
-    """Один лист на один kind. Колонки: SKU / Название / Значение характеристики."""
     ws = wb.create_sheet(_sheet_name(kind))
 
     if kind in ("low_stock", "critical_stock"):
@@ -303,7 +293,6 @@ def _build_sheet_for_kind(wb, kind: str, rows: list[dict], currency: str) -> Non
         })
 
     else:
-        # Fallback для незнакомого kind — на случай добавления нового в БД без обновления кода.
         ws.append(["Данные", "Значение"])
         _bold(ws.cell(row=1, column=1))
         _bold(ws.cell(row=1, column=2))
@@ -314,14 +303,12 @@ def _build_sheet_for_kind(wb, kind: str, rows: list[dict], currency: str) -> Non
 
 
 def _build_xlsx(kind_rows: dict[str, list[dict]], currency: str) -> bytes:
-    """Сборка XLSX из набора (kind → строки). Пустые листы пропускаем."""
     from openpyxl import Workbook
     wb = Workbook()
     if "Sheet" in wb.sheetnames:
         del wb["Sheet"]
 
     has_data = False
-    # Стабильный порядок листов — по приоритету для глаза менеджера.
     priority = [
         "critical_stock", "low_stock", "repeated_stockout",
         "underestimated_sku", "dead_inventory", "sync_error", "weekly_report",
@@ -333,7 +320,6 @@ def _build_xlsx(kind_rows: dict[str, list[dict]], currency: str) -> bytes:
         _build_sheet_for_kind(wb, kind, rows, currency)
         has_data = True
 
-    # Если ВСЕ листы пустые — добавляем placeholder, чтобы файл был валидным XLSX.
     if not has_data:
         ws = wb.create_sheet("Пусто")
         ws.append(["Нет данных для отчётов за этот период."])
@@ -343,14 +329,48 @@ def _build_xlsx(kind_rows: dict[str, list[dict]], currency: str) -> bytes:
     return buf.getvalue()
 
 
-# ─── Dispatcher ───────────────────────────────────────────────────────────────
+# ─── Storage upload ─────────────────────────────────────────────────────────────
+
+def _upload_xlsx_to_storage(
+    sb,
+    seller_id: str,
+    today_str: str,
+    filename: str,
+    xlsx_bytes: bytes,
+) -> Optional[str]:
+    """Заливает XLSX в bucket report-files. Возвращает storage_path или None при ошибке.
+
+    Путь: {seller_id}/{YYYY-MM-DD}/{filename}
+    Первая часть пути (seller_id) используется RLS политикой
+    seller_read_own_report_files для проверки владельца.
+
+    Если заливка падает — возвращаем None и фиксируем ошибку.
+    Основной send всё равно работает (email/telegram).
+    """
+    path = f"{seller_id}/{today_str}/{filename}"
+    try:
+        sb.storage.from_(STORAGE_BUCKET).upload(
+            path=path,
+            file=xlsx_bytes,
+            file_options={
+                "content-type": XLSX_MIME,
+                # upsert чтобы при ретрае не было "object exists"
+                "upsert": "true",
+            },
+        )
+        return path
+    except Exception:
+        logger.exception("storage upload failed seller=%s path=%s", seller_id, path)
+        return None
+
+
+# ─── Dispatcher ─────────────────────────────────────────────────────────────────────
 
 def _today_iso_date() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
 def _already_sent_today(sb, seller_id: str, channel: str) -> bool:
-    """Idempotency: за один день одна отправка на канал."""
     try:
         res = (
             sb.table("report_history")
@@ -377,6 +397,7 @@ def _record_history(
     sku_counts: dict[str, int],
     filename: Optional[str],
     file_size: Optional[int],
+    storage_path: Optional[str],
     error: Optional[str],
 ) -> None:
     try:
@@ -389,6 +410,7 @@ def _record_history(
             "sku_counts": sku_counts,
             "file_name": filename,
             "file_size_bytes": file_size,
+            "storage_path": storage_path,
             "error_message": error,
         }).execute()
     except Exception:
@@ -396,15 +418,9 @@ def _record_history(
 
 
 def dispatch_daily_reports() -> None:
-    """Главный entry-point cron-задачи.
-
-    Каждое утро (09:00 UTC) проходимся по всем enabled подпискам,
-    у которых params.day_of_week == isoweekday(today). Группируем по
-    (seller_id, channel), для каждой группы собираем один XLSX и отправляем.
-    """
     try:
         sb = get_supabase()
-        today_dow = datetime.now(timezone.utc).isoweekday()  # 1=пн … 7=вс
+        today_dow = datetime.now(timezone.utc).isoweekday()
 
         all_subs = fetch_all(
             sb.table("notification_subscriptions")
@@ -412,7 +428,6 @@ def dispatch_daily_reports() -> None:
             .eq("enabled", True)
         )
 
-        # group_key: (seller_id, channel) → list[sub]
         groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
         for sub in all_subs:
             params = sub.get("params") or {}
@@ -434,7 +449,6 @@ def dispatch_daily_reports() -> None:
         failed = 0
 
         for (seller_id, channel), subs_list in groups.items():
-            # Idempotency
             if _already_sent_today(sb, seller_id, channel):
                 logger.info("skip (already sent today) seller=%s channel=%s", seller_id, channel)
                 skipped += 1
@@ -458,7 +472,6 @@ def dispatch_daily_reports() -> None:
                 skipped += 1
                 continue
 
-            # Глобальный opt-out по каналу
             if channel == "email" and not seller.get("notify_email", True):
                 skipped += 1
                 continue
@@ -469,7 +482,6 @@ def dispatch_daily_reports() -> None:
             currency = seller.get("currency") or "RUB"
             kinds = sorted({s["kind"] for s in subs_list})
 
-            # Fetch + count
             kind_rows: dict[str, list[dict]] = {}
             sku_counts: dict[str, int] = {}
             params_by_kind = {s["kind"]: (s.get("params") or {}) for s in subs_list}
@@ -483,24 +495,27 @@ def dispatch_daily_reports() -> None:
                 logger.info("skip (no data) seller=%s channel=%s kinds=%s",
                             seller_id, channel, kinds)
                 _record_history(sb, seller_id, today_dow, kinds, channel,
-                                "skipped", sku_counts, None, None, "no data")
+                                "skipped", sku_counts, None, None, None, "no data")
                 skipped += 1
                 continue
 
-            # Build XLSX
             try:
                 xlsx_bytes = _build_xlsx(kind_rows, currency)
             except Exception:
                 logger.exception("xlsx build failed seller=%s", seller_id)
                 _record_history(sb, seller_id, today_dow, kinds, channel,
-                                "failed", sku_counts, None, None, "xlsx build error")
+                                "failed", sku_counts, None, None, None, "xlsx build error")
                 failed += 1
                 continue
 
-            today = date.today().isoformat()
-            filename = f"veloseller-otchet-{today}.xlsx"
+            today_str = date.today().isoformat()
+            filename = f"veloseller-otchet-{today_str}.xlsx"
 
-            # Send
+            # Заливаем в Storage для возможности повторного скачивания.
+            # Делаем один раз на (seller_id, today, filename), даже если
+            # потом email и telegram отправляются отдельно — upsert=true.
+            storage_path = _upload_xlsx_to_storage(sb, seller_id, today_str, filename, xlsx_bytes)
+
             success = False
             error_msg: Optional[str] = None
             if channel == "email":
@@ -539,7 +554,8 @@ def dispatch_daily_reports() -> None:
 
             if success:
                 _record_history(sb, seller_id, today_dow, kinds, channel,
-                                "sent", sku_counts, filename, len(xlsx_bytes), None)
+                                "sent", sku_counts, filename, len(xlsx_bytes),
+                                storage_path, None)
                 if channel == "email":
                     sent_email += 1
                 else:
@@ -547,7 +563,7 @@ def dispatch_daily_reports() -> None:
             else:
                 _record_history(sb, seller_id, today_dow, kinds, channel,
                                 "failed", sku_counts, filename, len(xlsx_bytes),
-                                error_msg or "send returned False")
+                                storage_path, error_msg or "send returned False")
                 failed += 1
 
         logger.info(
@@ -559,7 +575,6 @@ def dispatch_daily_reports() -> None:
 
 
 def _build_telegram_caption(kinds: list[str], sku_counts: dict[str, int]) -> str:
-    """HTML-caption под Excel-файлом в Telegram. Должно влезать <1024 символов."""
     import html
     lines = ["📊 <b>Veloseller — отчёты</b>", ""]
     for kind in kinds:

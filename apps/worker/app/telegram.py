@@ -1,11 +1,5 @@
 """Telegram bot notifications. Без gRPC/long-polling — только Bot API send_message.
-
-БАГ 21 fix: SKU и message экранируются через html.escape перед вставкой в HTML.
-БАГ 51 fix: домен из env APP_URL (продакшен veloseller.ru, не .app).
-
-Multi-warehouse (май 2026):
-- format_sync_error_message — уведомления о ошибках sync
-- send_document — отправка Excel-отчётов через Bot API sendDocument
+Этап 3: ссылки в дайджесте ведут на /dashboard/reports (URL rename).
 """
 from __future__ import annotations
 import html
@@ -19,13 +13,11 @@ API_BASE = "https://api.telegram.org/bot"
 
 
 def _app_url() -> str:
-    """Первый URL из APP_URL env (whitelist). Дефолт — veloseller.ru."""
     raw = os.getenv("APP_URL") or "https://veloseller.ru"
     return raw.split(",")[0].strip().rstrip("/")
 
 
 def send_message(chat_id: str, text: str, *, parse_mode: str = "HTML") -> bool:
-    """Шлёт сообщение в telegram. Возвращает True если успешно."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token or not chat_id:
         return False
@@ -51,19 +43,7 @@ def send_document(
     caption: str = "",
     parse_mode: str = "HTML",
 ) -> bool:
-    """Шлёт файл в telegram через Bot API sendDocument (multipart/form-data).
-
-    Args:
-        chat_id: ID чата (из sellers.telegram_chat_id)
-        file_bytes: бинарные данные файла (напр. Excel xlsx через openpyxl.save())
-        filename: имя файла для получателя (e.g. veloseller-report-2026-05-21.xlsx)
-        caption: HTML-подпись (обязательно для UX, под файлом)
-        parse_mode: HTML или MarkdownV2 для caption
-
-    Ограничения Bot API: файл до 50 MB. Для Excel это более чем достаточно.
-
-    Returns: True если Telegram вернул 200.
-    """
+    """Шлёт файл в telegram через Bot API sendDocument."""
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if not token or not chat_id:
         return False
@@ -71,9 +51,7 @@ def send_document(
         files = {
             "document": (filename, file_bytes, "application/octet-stream"),
         }
-        data = {
-            "chat_id": chat_id,
-        }
+        data = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption
             data["parse_mode"] = parse_mode
@@ -81,7 +59,7 @@ def send_document(
             f"{API_BASE}{token}/sendDocument",
             data=data,
             files=files,
-            timeout=60.0,  # больше таймаут чем для текста — upload файла может быть медленным
+            timeout=60.0,
         )
         if r.status_code != 200:
             logger.warning("Telegram sendDocument %s: %s", r.status_code, r.text[:200])
@@ -93,11 +71,6 @@ def send_document(
 
 
 def format_alerts_digest(alerts: list[dict]) -> str:
-    """HTML-форматированный digest для Telegram.
-
-    БАГ 21: sku и message экранируются.
-    БАГ 51: ссылка ведёт на актуальный домен из APP_URL.
-    """
     if not alerts:
         return ""
     kind_emoji = {
@@ -120,7 +93,7 @@ def format_alerts_digest(alerts: list[dict]) -> str:
     if len(alerts) > 20:
         lines.append(f"\n…ещё {len(alerts) - 20}")
     app_url = _app_url()
-    lines.append(f'\n<a href="{app_url}/dashboard/alerts">Открыть в Veloseller</a>')
+    lines.append(f'\n<a href="{app_url}/dashboard/reports">Открыть в Veloseller</a>')
     return "\n".join(lines)
 
 
@@ -131,7 +104,6 @@ def format_sync_error_message(
     failure_count: int,
     auto_paused: bool,
 ) -> str:
-    """HTML-сообщение для Telegram об ошибке sync склада."""
     name_safe = html.escape(warehouse_name)
     error_safe = html.escape(error_message[:300])
     kind_label = {

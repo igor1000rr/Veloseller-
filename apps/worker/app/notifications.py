@@ -1,16 +1,7 @@
 """Отправка email-уведомлений через Resend.
 
 Если RESEND_API_KEY не задан — функции no-op (логируют и возвращают False).
-
-БАГ 20 fix: все user-provided строки (sku, message, seller_name) экранируются
-через html.escape перед вставкой в HTML.
-
-БАГ 51 fix: домен из env APP_URL вместо hardcoded veloseller.app (продакшен
-на veloseller.ru, ссылки вели на несуществующий домен).
-
-Multi-warehouse (май 2026): send_sync_error_notification + send_weekly_report_email.
-Этап 2 «алерты → отчёты»: send_report_email — универсальная отправка
-Excel с динамическим описанием листов по kinds.
+Этап 3: ссылки в email ведут на /dashboard/reports (URL rename).
 """
 from __future__ import annotations
 
@@ -40,11 +31,7 @@ def _app_url() -> str:
 
 
 def send_alert_digest(to_email: str, seller_name: Optional[str], alerts: list[dict]) -> bool:
-    """Шлёт daily digest по непрочитанным критичным alerts.
-
-    Старый формат (real-time alerts). Оставлен на время перехода,
-    но в новой схеме не используется — всё идёт через send_report_email по расписанию.
-    """
+    """Старый digest по real-time alerts. Сохранён для бэкворд-совместимости."""
     api_key = os.getenv("RESEND_API_KEY")
     from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
     if not api_key:
@@ -86,7 +73,7 @@ def send_alert_digest(to_email: str, seller_name: Optional[str], alerts: list[di
 <table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:14px">
 <thead><tr style="background:#f8fafc"><th style="text-align:left;padding:8px 12px">Тип</th><th style="text-align:left;padding:8px 12px">SKU</th><th style="text-align:left;padding:8px 12px">Сообщение</th></tr></thead>
 <tbody>{''.join(rows)}</tbody></table>
-<p style="margin-top:24px"><a href="{app_url}/dashboard/alerts" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">Открыть в Veloseller</a></p>
+<p style="margin-top:24px"><a href="{app_url}/dashboard/reports" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">Открыть в Veloseller</a></p>
 <p style="color:#64748b;font-size:12px;margin-top:32px">Если не хотите получать эти письма — отпишитесь в настройках профиля.</p>
 </body></html>"""
 
@@ -185,11 +172,7 @@ def send_weekly_report_email(
     xlsx_bytes: bytes,
     filename: str,
 ) -> bool:
-    """Шлёт еженедельный Excel-отчёт как attachment через Resend.
-
-    Старая функция — фикс схема с 3 листами. Оставлена для бекворд-совместимости
-    со старым apps/worker/app/jobs/weekly_report.py.
-    """
+    """Старая функция weekly_report. Backward-compat."""
     api_key = os.getenv("RESEND_API_KEY")
     from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
     if not api_key:
@@ -246,15 +229,7 @@ def send_report_email(
     xlsx_bytes: bytes,
     filename: str,
 ) -> bool:
-    """Универсальная отправка Excel-отчёта (этап 2 «отчёты»).
-
-    В отличие от send_weekly_report_email — динамическое описание листов:
-    список kinds + количество SKU в каждом.
-
-    Args:
-        kinds: список notification_kind в файле (по одному листу на каждый)
-        sku_counts: {kind: число_строк}
-    """
+    """Универсальная отправка Excel-отчёта. CTA на /dashboard/reports."""
     api_key = os.getenv("RESEND_API_KEY")
     from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
     if not api_key:
@@ -272,7 +247,6 @@ def send_report_email(
     greeting = f"Привет{', ' + safe_name if safe_name else ''}!"
     app_url = _app_url()
 
-    # Динамический список листов в HTML теле письма
     list_items = []
     for kind in kinds:
         label = html.escape(_KIND_LABELS.get(kind, kind))
@@ -281,7 +255,6 @@ def send_report_email(
             list_items.append(f"<li><b>{label}</b> — {n} SKU</li>")
     items_html = "\n".join(list_items) or "<li>Данных нет</li>"
 
-    # Субжект вид "Veloseller — Отчёт от 26.05.2026". Длиный список kinds не влезет в subject.
     from datetime import datetime as _dt
     today_str = _dt.utcnow().strftime("%d.%m.%Y")
     subject = f"Veloseller — Отчёт от {today_str}"
@@ -293,8 +266,8 @@ def send_report_email(
 <ul>
 {items_html}
 </ul>
-<p style="margin-top:24px"><a href="{app_url}/dashboard/alerts" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">История отчётов</a></p>
-<p style="color:#64748b;font-size:12px;margin-top:32px">Настроить периодичность и состав отчётов можно в <a href="{app_url}/dashboard/alerts/subscriptions" style="color:#0f766e">настройках</a>.</p>
+<p style="margin-top:24px"><a href="{app_url}/dashboard/reports" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">История отчётов</a></p>
+<p style="color:#64748b;font-size:12px;margin-top:32px">Настроить периодичность и состав отчётов можно в <a href="{app_url}/dashboard/reports/subscriptions" style="color:#0f766e">настройках</a>.</p>
 </body></html>"""
 
     try:
