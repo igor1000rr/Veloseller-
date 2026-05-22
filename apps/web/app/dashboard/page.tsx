@@ -93,35 +93,32 @@ export default async function DashboardOverview({ searchParams }: {
     .limit(14);
 
   // tvelo_metrics — фильтруем по products.connection_id выбранного склада.
-  // Достаём adjusted_velocity, confidence_score, stockout_days для расчёта
-  // "SKU без активности" и "Часто отсутствуют на складе" + средней достоверности.
+  // Используется для расчёта скоростей продаж и средней достоверности данных.
+  // inactive_sku_count и frequently_oos_sku_count теперь читаются прямо из
+  // store_metrics (считаются в воркере).
   const tveloRows = await fetchAll<{
     adjusted_velocity: number;
     confidence_score: number | null;
-    stockout_days: number | null;
     product_id: string;
     period_end: string;
   }>(
     async (from, to) => await supabase
       .from("tvelo_metrics")
-      .select("adjusted_velocity,confidence_score,stockout_days,product_id,period_end,products!inner(seller_id,connection_id)")
+      .select("adjusted_velocity,confidence_score,product_id,period_end,products!inner(seller_id,connection_id)")
       .eq("products.seller_id", user.id)
       .eq("products.connection_id", currentWarehouseId)
       .order("period_end", { ascending: false })
       .range(from, to),
   );
-  // Берём свежие метрики по каждому product_id
   const latestByProduct = new Map<string, {
     velocity: number;
     confidence: number | null;
-    stockoutDays: number | null;
   }>();
   for (const m of tveloRows) {
     if (!latestByProduct.has(m.product_id)) {
       latestByProduct.set(m.product_id, {
         velocity: Number(m.adjusted_velocity),
         confidence: m.confidence_score == null ? null : Number(m.confidence_score),
-        stockoutDays: m.stockout_days == null ? null : Number(m.stockout_days),
       });
     }
   }
@@ -138,15 +135,6 @@ export default async function DashboardOverview({ searchParams }: {
     ? confidenceValues.reduce((a, b) => a + b, 0) / confidenceValues.length
     : null;
 
-  // "Часто отсутствуют" — SKU где stockout_days > 15 за период
-  const frequentOosCount = Array.from(latestByProduct.values())
-    .filter(v => (v.stockoutDays ?? 0) > 15).length;
-
-  // "SKU без активности" — пока считаем как прокси: velocity == 0.
-  // Точная логика (stock == 0 + 0 продаж за 30д) уедет в worker в следующей итерации.
-  const inactiveSkuCount = Array.from(latestByProduct.values())
-    .filter(v => v.velocity === 0).length;
-
   const { data: alerts } = await supabase
     .from("alerts")
     .select("*")
@@ -157,7 +145,7 @@ export default async function DashboardOverview({ searchParams }: {
 
   const showMultiWarehouseBanner = allWarehouses.length > 1;
 
-  // Линки на SKU-страницу с фильтрами (страница ещё не парсит — это итерация 3)
+  // Линки на SKU-страницу с фильтрами (страница пока их не парсит — это итерация 3)
   const skusLink = (filter: string) => `/dashboard/skus?period=${period}&filter=${filter}` as any;
 
   return (
@@ -186,7 +174,7 @@ export default async function DashboardOverview({ searchParams }: {
             <div className="font-medium text-ink">У вас несколько складов</div>
             <p className="mt-1 text-ink-muted">
               TVelo и список SKU показаны для выбранного склада <b>{currentWarehouseName}</b>.
-              Агрегаты «Денег в остатках», «Здоровье склада», «Концентрация» и «Неликвид» пока считаются
+              Агрегаты «Денег на остатках», «Здоровье склада», «Концентрация» и «Неликвид» пока считаются
               суммарно по всем складам (per-склад агрегаты в разработке). Переключитесь на другой склад
               через селектор в правом верхнем углу.
             </p>
@@ -267,7 +255,7 @@ export default async function DashboardOverview({ searchParams }: {
           href={skusLink("inactive")}
           label="SKU без активности"
           tooltip="Товары с нулевым остатком и без движений за последние 30 дней. Не участвуют в расчётах."
-          value={inactiveSkuCount}
+          value={storeMetrics?.inactive_sku_count ?? "—"}
           tone="muted"
         />
         <Kpi
@@ -306,7 +294,7 @@ export default async function DashboardOverview({ searchParams }: {
             <InfoTooltip text="Товары, которые более 15 дней за последний месяц отсутствовали на складе. Регулярный дефицит — повод проверить логистику или закупку." />
           </div>
           <div className="mt-2 font-display text-2xl tabular text-orange font-medium">
-            {frequentOosCount} <span className="text-base text-orange/70">SKU</span>
+            {storeMetrics?.frequently_oos_sku_count ?? "—"} <span className="text-base text-orange/70">SKU</span>
           </div>
           <div className="mt-1 text-xs text-orange/80">отсутствовали на складе более 15 дней за месяц</div>
         </div>
