@@ -2,7 +2,6 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import AckButton from "./AckButton";
 import BulkAckButton from "./BulkAckButton";
 import Link from "next/link";
-import { Icons } from "../../_components/Icons";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -51,12 +50,12 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   return (
     <div className="space-y-6">
       <header className="flex items-end justify-between flex-wrap gap-3">
-        <div>
+        <div className="min-w-0">
           <div className="inline-flex items-center gap-2 mb-2">
             <span className="size-1 rounded-full bg-lime-deep" />
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Alerts</span>
           </div>
-          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">Уведомления</h1>
+          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink">Уведомления</h1>
           <p className="text-ink-muted text-sm mt-1">
             {totalActive > 0
               ? <>Активных: <strong className="text-ink">{totalActive}</strong>. Отмечайте выполненные — проблемы уходят из inbox‘а.</>
@@ -65,12 +64,14 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* Ссылка на страницу настройки подписок (правка 11 Александра) */}
+          {/* На мобиле сокращенная надпись */}
           <Link
             href={"/dashboard/alerts/subscriptions" as any}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-line bg-paper text-sm text-ink-muted hover:text-ink hover:bg-bg-soft hover:border-lime-deep/40 transition"
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-line bg-paper text-sm text-ink-muted hover:text-ink hover:bg-bg-soft hover:border-lime-deep/40 transition min-h-[36px]"
           >
-            ⚙ Настроить уведомления
+            <span aria-hidden="true">⚙</span>
+            <span className="hidden sm:inline">Настроить уведомления</span>
+            <span className="sm:hidden">Настроить</span>
           </Link>
           {totalActive > 0 && <BulkAckButton count={totalActive} />}
         </div>
@@ -80,12 +81,12 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           <Link
             href={"/dashboard/alerts" as any}
-            className={`rounded-xl border p-4 hover:shadow-sm transition ${
+            className={`rounded-xl border p-3 sm:p-4 hover:shadow-sm transition ${
               !filterKind ? "border-ink bg-bg-soft" : "border-line bg-paper"
             }`}
           >
             <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Все</div>
-            <div className="font-display text-2xl tabular text-ink font-medium mt-1">{totalActive}</div>
+            <div className="font-display text-xl sm:text-2xl tabular text-ink font-medium mt-1">{totalActive}</div>
           </Link>
           {groupedKinds.map(([kind, count]) => {
             const meta = KIND_META[kind] ?? { label: kind, cls: "text-ink-soft border-line bg-bg-soft", tone: "ink" as const };
@@ -93,13 +94,13 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
             return (
               <div
                 key={kind}
-                className={`rounded-xl border p-4 transition ${
+                className={`rounded-xl border p-3 sm:p-4 transition ${
                   active ? "border-ink shadow-sm" : "border-line bg-paper hover:shadow-sm"
                 }`}
               >
                 <Link href={`/dashboard/alerts?kind=${kind}` as any} className="block">
                   <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{meta.label}</div>
-                  <div className="font-display text-2xl tabular text-ink font-medium mt-1">{count}</div>
+                  <div className="font-display text-xl sm:text-2xl tabular text-ink font-medium mt-1">{count}</div>
                 </Link>
                 <div className="mt-2">
                   <BulkAckButton kind={kind} count={count} kindLabel={meta.label} />
@@ -111,56 +112,66 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       )}
 
       {list.length === 0 ? (
-        <div className="rounded-2xl border border-line bg-paper p-10 md:p-14 text-center">
+        <div className="rounded-2xl border border-line bg-paper p-8 md:p-14 text-center">
           <p className="text-ink-muted text-sm">
             {filterKind ? "Нет алертов этого типа." : "Алертов пока нет — пересчёт ещё не запускался или у SKU нет проблем."}
           </p>
         </div>
       ) : (
         <div className="rounded-2xl border border-line bg-paper overflow-hidden">
-          <div className="px-4 py-3 bg-bg-soft border-b border-line flex items-center justify-between">
+          {/* Шапка таблицы — два текста сделал stack-friendly */}
+          <div className="px-3 sm:px-4 py-3 bg-bg-soft border-b border-line flex items-center justify-between gap-3 flex-wrap">
             <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
               {filterKind ? `Показываем первые ${list.length} «${KIND_META[filterKind]?.label ?? filterKind}»` : `Последние ${list.length} алертов`}
             </span>
-            <span className="font-mono text-[10px] text-ink-hush">кликните «Принять» рядом с группой чтобы массово</span>
+            <span className="font-mono text-[10px] text-ink-hush hidden md:inline">кликните «Принять» рядом с группой чтобы массово</span>
           </div>
-          <table className="w-full text-sm">
-            <thead className="bg-bg-soft border-b border-line">
-              <tr>
-                <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Тип</th>
-                <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">SKU</th>
-                <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Сообщение</th>
-                <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Дата</th>
-                <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold"></th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {list.map((a: any) => {
-                const meta = KIND_META[a.kind] ?? { label: a.kind, cls: "text-ink-soft border-line bg-bg-soft" };
-                const product = Array.isArray(a.products) ? a.products[0] : a.products;
-                return (
-                  <tr key={a.id} className={`hover:bg-bg-soft/50 transition ${a.acknowledged_at ? "opacity-50" : ""}`}>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold ${meta.cls}`}>
-                        {meta.label}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-mono text-xs text-ink">{product?.sku ?? "—"}</div>
-                      <div className="text-xs text-ink-hush">{product?.product_name ?? ""}</div>
-                    </td>
-                    <td className="px-4 py-3 text-ink-soft">{a.message}</td>
-                    <td className="px-4 py-3 text-ink-hush text-xs whitespace-nowrap font-mono">
-                      {new Date(a.created_at).toLocaleString("ru-RU")}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {!a.acknowledged_at && <AckButton id={a.id} />}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          {/* overflow-x-auto добавлен — 5 колонок с длинными сообщениями ломают вёрстку без скрола */}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] text-sm">
+              <thead className="bg-bg-soft border-b border-line">
+                <tr>
+                  <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Тип</th>
+                  <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">SKU</th>
+                  <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Сообщение</th>
+                  <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold hidden md:table-cell">Дата</th>
+                  <th className="text-right px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold"></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {list.map((a: any) => {
+                  const meta = KIND_META[a.kind] ?? { label: a.kind, cls: "text-ink-soft border-line bg-bg-soft" };
+                  const product = Array.isArray(a.products) ? a.products[0] : a.products;
+                  return (
+                    <tr key={a.id} className={`hover:bg-bg-soft/50 transition ${a.acknowledged_at ? "opacity-50" : ""}`}>
+                      <td className="px-3 sm:px-4 py-3">
+                        <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold whitespace-nowrap ${meta.cls}`}>
+                          {meta.label}
+                        </span>
+                      </td>
+                      <td className="px-3 sm:px-4 py-3">
+                        <div className="font-mono text-xs text-ink">{product?.sku ?? "—"}</div>
+                        <div className="text-xs text-ink-hush">{product?.product_name ?? ""}</div>
+                      </td>
+                      <td className="px-3 sm:px-4 py-3 text-ink-soft">
+                        {a.message}
+                        {/* На мобиле дата показывается под сообщением */}
+                        <div className="md:hidden mt-1 text-[11px] text-ink-hush font-mono">
+                          {new Date(a.created_at).toLocaleString("ru-RU")}
+                        </div>
+                      </td>
+                      <td className="px-3 sm:px-4 py-3 text-ink-hush text-xs whitespace-nowrap font-mono hidden md:table-cell">
+                        {new Date(a.created_at).toLocaleString("ru-RU")}
+                      </td>
+                      <td className="px-3 sm:px-4 py-3 text-right">
+                        {!a.acknowledged_at && <AckButton id={a.id} />}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

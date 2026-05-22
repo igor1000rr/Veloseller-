@@ -2,6 +2,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
+/**
+ * Кнопка массового подтверждения алертов.
+ *
+ * Mobile-friendly:
+ * - В режиме подтверждения на мобиле элементы стакают вертикально (вопрос сверху,
+ *   кнопки Да/Отмена под ним), на десктопе остаются в строку.
+ * - Размер шрифта поднял до text-xs (12px) — 10px было сложно прочитать на мобиле.
+ * - Тач-таргеты py-1.5 → py-2 (~32px).
+ */
 export default function BulkAckButton({
   kind,
   count,
@@ -34,7 +43,7 @@ export default function BulkAckButton({
     return (
       <button
         onClick={() => setConfirming(true)}
-        className="inline-flex items-center px-2.5 py-1 rounded border border-line bg-paper text-ink-muted hover:text-ink hover:border-lime-deep/40 text-[10px] font-mono uppercase tracking-wider transition"
+        className="inline-flex items-center px-3 py-1.5 rounded border border-line bg-paper text-ink-muted hover:text-ink hover:border-lime-deep/40 text-xs font-mono uppercase tracking-wider transition min-h-[32px]"
       >
         Принять все
       </button>
@@ -42,23 +51,25 @@ export default function BulkAckButton({
   }
 
   return (
-    <span className="inline-flex items-center gap-1.5">
-      <span className="text-[10px] text-ink-muted font-mono">
+    <span className="inline-flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-1.5">
+      <span className="text-[11px] sm:text-[10px] text-ink-muted font-mono">
         Принять {count} {kindLabel ? `«${kindLabel}»` : "алертов"}?
       </span>
-      <button
-        onClick={doAck}
-        disabled={busy}
-        className="px-2 py-0.5 rounded bg-ink text-paper text-[10px] font-mono uppercase tracking-wider disabled:opacity-50 transition"
-      >
-        {busy ? "..." : "Да"}
-      </button>
-      <button
-        onClick={() => setConfirming(false)}
-        className="px-2 py-0.5 rounded border border-line text-[10px] font-mono uppercase tracking-wider text-ink-muted hover:bg-bg-soft transition"
-      >
-        Отмена
-      </button>
+      <span className="inline-flex gap-1.5">
+        <button
+          onClick={doAck}
+          disabled={busy}
+          className="px-3 py-1.5 rounded bg-ink text-paper text-xs font-mono uppercase tracking-wider disabled:opacity-50 transition min-h-[32px]"
+        >
+          {busy ? "..." : "Да"}
+        </button>
+        <button
+          onClick={() => setConfirming(false)}
+          className="px-3 py-1.5 rounded border border-line text-xs font-mono uppercase tracking-wider text-ink-muted hover:bg-bg-soft transition min-h-[32px]"
+        >
+          Отмена
+        </button>
+      </span>
     </span>
   );
 }

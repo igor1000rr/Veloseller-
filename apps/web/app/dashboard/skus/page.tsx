@@ -38,11 +38,10 @@ function parseDateOrNull(s: string | undefined): string | null {
   return s;
 }
 
-// Дефолтный порог для dashFilter — используется когда threshold не в URL
 function defaultThresholdFor(filter: DashboardFilter): number | null {
   if (filter === "low_stock") return 7;
   if (filter === "dead_inventory") return 180;
-  return null; // у остальных нет порога
+  return null;
 }
 
 export default async function SkusPage({ searchParams }: {
@@ -73,7 +72,6 @@ export default async function SkusPage({ searchParams }: {
   const dashFilter: DashboardFilter | null = isDashboardFilter(sp.filter) ? sp.filter : null;
   const includeInactive = sp.include_inactive === "1" || dashFilter === "inactive";
 
-  // Inline-редактируемый порог для dashFilter (правка 8)
   const customThreshold = parseIntOrNull(sp.threshold);
   const effectiveThreshold = dashFilter
     ? (customThreshold ?? defaultThresholdFor(dashFilter))
@@ -116,7 +114,6 @@ export default async function SkusPage({ searchParams }: {
     productsQuery = productsQuery.eq("connection_id", selected.id);
   }
 
-  // dashFilter — теперь с параметризованным порогом
   if (dashFilter === "low_stock") {
     productsQuery = productsQuery
       .lte("tvelo_metrics.coverage_days", effectiveThreshold!)
@@ -235,31 +232,30 @@ export default async function SkusPage({ searchParams }: {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-end justify-between gap-4 flex-wrap">
-        <div>
+      <header className="flex items-end justify-between gap-3 sm:gap-4 flex-wrap">
+        <div className="min-w-0">
           <div className="inline-flex items-center gap-2 mb-2">
             <span className="size-1 rounded-full bg-lime-deep" />
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Inventory</span>
           </div>
-          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">SKU</h1>
+          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink">SKU</h1>
           {selected && (
             <div className="mt-1.5 flex items-center gap-2 flex-wrap text-sm text-ink-muted">
-              <span className="size-1.5 rounded-full bg-lime-deep" />
-              <span className="font-medium text-ink">{selected.name}</span>
+              <span className="size-1.5 rounded-full bg-lime-deep shrink-0" />
+              <span className="font-medium text-ink truncate max-w-[200px] sm:max-w-none">{selected.name}</span>
               <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
                 {warehouseKindLabel(selected.warehouse_kind)}
               </span>
             </div>
           )}
         </div>
-        <div className="flex items-center gap-3 flex-wrap">
-          {/* Регулировка столбцов (правка 8 Александра) */}
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           <ColumnsPicker />
           <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1">
             <a
               href={`/api/export/metrics?${exportQS}&format=excel`}
               download
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition min-h-[32px]"
               title="Скачать метрики в Excel"
             >
               <Icons.ArrowRight size={11} /> Excel
@@ -267,7 +263,7 @@ export default async function SkusPage({ searchParams }: {
             <a
               href={`/api/export/metrics?${exportQS}&format=csv`}
               download
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition border-l border-line"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition border-l border-line min-h-[32px]"
               title="Скачать метрики в CSV"
             >
               CSV
@@ -277,7 +273,8 @@ export default async function SkusPage({ searchParams }: {
             <label className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Закупка на</label>
             <input
               type="number" name="reorder_days" defaultValue={reorderDays} min={1} max={365}
-              className="w-20 px-2 py-1.5 border border-line rounded-lg text-center bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep"
+              inputMode="numeric"
+              className="w-16 sm:w-20 px-2 py-1.5 border border-line rounded-lg text-center bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
             />
             <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">дней</span>
             {segmentFilter && <input type="hidden" name="segment" value={segmentFilter} />}
@@ -285,9 +282,9 @@ export default async function SkusPage({ searchParams }: {
             {customThreshold !== null && <input type="hidden" name="threshold" value={customThreshold} />}
             {periodDays !== 30 && <input type="hidden" name="period" value={periodDays} />}
             {search && <input type="hidden" name="q" value={search} />}
-            <button type="submit" className="px-2.5 py-1.5 text-xs bg-ink text-paper rounded-lg hover:bg-ink-soft transition">→</button>
+            <button type="submit" className="px-3 py-1.5 text-xs bg-ink text-paper rounded-lg hover:bg-ink-soft transition min-h-[36px]">→</button>
           </form>
-          <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1">
+          <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1 overflow-x-auto max-w-full">
             {SEGMENTS.map(s => {
               const params = new URLSearchParams();
               if (s.value) params.set("segment", s.value);
@@ -303,7 +300,7 @@ export default async function SkusPage({ searchParams }: {
                 <Link
                   key={s.value}
                   href={`/dashboard/skus${qs ? `?${qs}` : ""}` as any}
-                  className={`text-xs px-3 py-1.5 rounded-md font-medium transition ${
+                  className={`text-xs px-3 py-1.5 rounded-md font-medium transition whitespace-nowrap shrink-0 ${
                     isActive ? "bg-ink text-paper" : "text-ink-muted hover:text-ink hover:bg-bg-soft"
                   }`}
                 >
@@ -315,7 +312,6 @@ export default async function SkusPage({ searchParams }: {
         </div>
       </header>
 
-      {/* Активный фильтр с обзора с inline-редактированием порога */}
       {dashFilter && (
         <DashFilterChip
           filter={dashFilter}
@@ -327,17 +323,18 @@ export default async function SkusPage({ searchParams }: {
 
       {!dashFilter && (
         <div className="flex items-center gap-2 text-sm text-ink-muted">
+          {/* Тач-таргет: py-2 + size-5 (вместо size-4) */}
           <Link
             href={`/dashboard/skus${buildQs({
               include_inactive: includeInactive ? null : "1",
               page: null,
             }) ? `?${buildQs({ include_inactive: includeInactive ? null : "1", page: null })}` : ""}` as any}
-            className="inline-flex items-center gap-2 cursor-pointer hover:text-ink transition"
+            className="inline-flex items-center gap-2 cursor-pointer hover:text-ink transition py-2 -my-2 min-h-[36px]"
           >
-            <span className={`size-4 rounded border ${includeInactive ? "bg-ink border-ink" : "bg-paper border-line"} flex items-center justify-center transition`}>
-              {includeInactive && <span className="text-paper text-[10px]">✓</span>}
+            <span className={`size-5 rounded border ${includeInactive ? "bg-ink border-ink" : "bg-paper border-line"} flex items-center justify-center transition shrink-0`}>
+              {includeInactive && <span className="text-paper text-[11px]">✓</span>}
             </span>
-            Включить SKU без активности
+            <span>Включить SKU без активности</span>
           </Link>
           <InfoTooltip text="Товары с нулевым остатком и без движений за последние 30 дней. По умолчанию скрыты — их не нужно учитывать в большинстве сценариев." />
         </div>
@@ -378,7 +375,7 @@ export default async function SkusPage({ searchParams }: {
               <Th col="confidence" align="right" accent>
                 <span className="inline-flex items-center">
                   ДСТ
-                  <InfoTooltip text="Достоверность данных за указанный период. Чем больше дней для расчёта, тем выше качество предоставляемой информации. Учитывайте этот показатель при принятии решений." />
+                  <InfoTooltip text="Достоверность данных за указанный период. Чем больше дней для расчёта, тем выше качество предоставляемой информации." />
                 </span>
               </Th>
               <Th col="health" align="right">Health</Th>
@@ -400,60 +397,60 @@ export default async function SkusPage({ searchParams }: {
 
               return (
                 <tr key={p.product_id} className="hover:bg-bg-soft/50 transition">
-                  <td className="col-skucol-sku px-4 py-3 font-mono text-xs">
+                  <td className="col-skucol-sku px-3 sm:px-4 py-3 font-mono text-xs">
                     <Link href={`/dashboard/skus/${p.product_id}` as any} className="text-lime-deep hover:text-ink font-medium transition">
                       {p.sku}
                     </Link>
                   </td>
-                  <td className="col-skucol-name px-4 py-3">
+                  <td className="col-skucol-name px-3 sm:px-4 py-3">
                     <div className="text-ink-soft">{p.product_name}</div>
                     {isUnderestimated && (
                       <span className="font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">недооценён</span>
                     )}
                   </td>
-                  <td className="col-skucol-stock px-4 py-3 text-right tabular text-ink-soft">{m?.current_stock ?? "—"}</td>
-                  <td className="col-skucol-price px-4 py-3 text-right tabular text-ink-soft">{m?.current_price ?? "—"}</td>
-                  <td className="col-skucol-tvelo px-4 py-3 text-right font-semibold tabular text-ink">
+                  <td className="col-skucol-stock px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{m?.current_stock ?? "—"}</td>
+                  <td className="col-skucol-price px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{m?.current_price ?? "—"}</td>
+                  <td className="col-skucol-tvelo px-3 sm:px-4 py-3 text-right font-semibold tabular text-ink">
                     {adjVel > 0 ? adjVel.toFixed(2) : "—"}
                   </td>
-                  <td className="col-skucol-median px-4 py-3 text-right tabular text-ink-hush" title="Медиана из 30-day pre-period — используется для continuity correction">
+                  <td className="col-skucol-median px-3 sm:px-4 py-3 text-right tabular text-ink-hush" title="Медиана из 30-day pre-period — используется для continuity correction">
                     {medVel > 0 ? medVel.toFixed(2) : "—"}
                   </td>
-                  <td className="col-skucol-trend px-4 py-3"><VelocitySparkline points={sparkData[p.product_id] ?? []} /></td>
-                  <td className="col-skucol-coverage px-4 py-3 text-right tabular text-ink-soft">
+                  <td className="col-skucol-trend px-3 sm:px-4 py-3"><VelocitySparkline points={sparkData[p.product_id] ?? []} /></td>
+                  <td className="col-skucol-coverage px-3 sm:px-4 py-3 text-right tabular text-ink-soft">
                     {m?.coverage_days != null ? `${Number(m.coverage_days).toFixed(0)} д.` : "—"}
                   </td>
-                  <td className="col-skucol-oos px-4 py-3 text-right tabular" title="Дни out-of-stock за выбранный период">
+                  <td className="col-skucol-oos px-3 sm:px-4 py-3 text-right tabular" title="Дни out-of-stock за выбранный период">
                     {stockoutDays > 0 ? (
                       <span className="text-orange font-semibold">{stockoutDays}</span>
                     ) : (
                       <span className="text-ink-soft">0</span>
                     )}
                   </td>
-                  <td className="col-skucol-sales px-4 py-3 text-right tabular text-ink-soft" title="Число единиц, которые мы записали в продажи за период">
+                  <td className="col-skucol-sales px-3 sm:px-4 py-3 text-right tabular text-ink-soft" title="Число единиц, которые мы записали в продажи за период">
                     {salesUnits > 0 ? salesUnits : "—"}
                   </td>
-                  <td className="col-skucol-reorder px-4 py-3 text-right font-semibold tabular text-lime-deep">
+                  <td className="col-skucol-reorder px-3 sm:px-4 py-3 text-right font-semibold tabular text-lime-deep">
                     {adjVel > 0 ? reorderQty : "—"}
                   </td>
-                  <td className="col-skucol-confidence px-4 py-3 text-right tabular bg-lime-soft/30">
+                  <td className="col-skucol-confidence px-3 sm:px-4 py-3 text-right tabular bg-lime-soft/30">
                     {m?.confidence_score != null ? (
                       <span className="font-semibold text-ink">{Number(m.confidence_score).toFixed(0)}%</span>
                     ) : <span className="text-ink-hush">—</span>}
                   </td>
-                  <td className="col-skucol-health px-4 py-3 text-right">
+                  <td className="col-skucol-health px-3 sm:px-4 py-3 text-right">
                     <HealthBadge score={m?.sku_health_score} />
                   </td>
-                  <td className="col-skucol-lost_revenue px-4 py-3 text-right tabular">
+                  <td className="col-skucol-lost_revenue px-3 sm:px-4 py-3 text-right tabular">
                     {lostRev > 0 ? (
-                      <span className="text-rose font-semibold">
+                      <span className="text-rose font-semibold whitespace-nowrap">
                         {Math.round(lostRev).toLocaleString("ru-RU")}
                       </span>
                     ) : (
                       <span className="text-ink-hush">—</span>
                     )}
                   </td>
-                  <td className="col-skucol-notes px-4 py-3">
+                  <td className="col-skucol-notes px-3 sm:px-4 py-3">
                     <NotesCell productId={p.product_id} initial={p.user_notes ?? null} />
                   </td>
                 </tr>
@@ -461,7 +458,7 @@ export default async function SkusPage({ searchParams }: {
             })}
             {!filtered.length && (
               <tr>
-                <td colSpan={15} className="px-4 py-12 text-center text-ink-muted text-sm">
+                <td colSpan={15} className="px-3 sm:px-4 py-12 text-center text-ink-muted text-sm">
                   {selected
                     ? `Пока нет данных по складу «${selected.name}». Дождитесь первой синхронизации или проверьте фильтры.`
                     : "Пока нет данных или ничего не подходит под фильтр."}
@@ -480,13 +477,13 @@ export default async function SkusPage({ searchParams }: {
           <div className="flex gap-2">
             {page > 1 && (
               <Link href={`?${buildQs({ page: page - 1 })}` as any}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 border border-line rounded-lg text-ink-muted hover:text-ink hover:bg-bg-soft transition text-xs">
+                    className="inline-flex items-center gap-1 px-3 py-2 border border-line rounded-lg text-ink-muted hover:text-ink hover:bg-bg-soft transition text-xs min-h-[36px]">
                 <span className="rotate-180"><Icons.ArrowRight size={11} /></span> Назад
               </Link>
             )}
             {page < totalPages && (
               <Link href={`?${buildQs({ page: page + 1 })}` as any}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 border border-line rounded-lg text-ink-muted hover:text-ink hover:bg-bg-soft transition text-xs">
+                    className="inline-flex items-center gap-1 px-3 py-2 border border-line rounded-lg text-ink-muted hover:text-ink hover:bg-bg-soft transition text-xs min-h-[36px]">
                 Вперёд <Icons.ArrowRight size={11} />
               </Link>
             )}
@@ -506,7 +503,7 @@ function Th({ children, align = "left", accent = false, col }: {
   const alignCls = align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
   const accentCls = accent ? "bg-lime-soft/30" : "";
   return (
-    <th className={`col-skucol-${col} px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold ${alignCls} ${accentCls}`}>
+    <th className={`col-skucol-${col} px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold whitespace-nowrap ${alignCls} ${accentCls}`}>
       {children}
     </th>
   );
