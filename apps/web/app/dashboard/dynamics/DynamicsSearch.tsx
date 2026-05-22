@@ -1,19 +1,25 @@
 "use client";
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams, usePathname } from "next/navigation";
 
+/**
+ * Поиск по SKU/названию для вкладки Динамика.
+ * Сохраняет остальные query-параметры (например ?period=week) при апдейте.
+ */
 export default function DynamicsSearch({ initial }: { initial: string }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
   const [val, setVal] = useState(initial);
   const [pending, startTransition] = useTransition();
 
   function submit(v: string) {
+    const params = new URLSearchParams(sp.toString());
+    if (v.trim()) params.set("q", v.trim());
+    else params.delete("q");
+    const qs = params.toString();
     startTransition(() => {
-      if (v.trim()) {
-        router.push(`/dashboard/dynamics?q=${encodeURIComponent(v.trim())}` as any);
-      } else {
-        router.push("/dashboard/dynamics" as any);
-      }
+      router.push(`${pathname}${qs ? `?${qs}` : ""}` as any);
     });
   }
 
@@ -24,7 +30,7 @@ export default function DynamicsSearch({ initial }: { initial: string }) {
         value={val}
         onChange={(e) => setVal(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") submit(val); }}
-        placeholder="Найти по SKU или названию..."
+        placeholder="Например, название бренда"
         className="px-3 py-1.5 rounded-md border border-line bg-paper text-sm focus:outline-none focus:border-lime-deep/40 transition w-64"
       />
       {val && (
