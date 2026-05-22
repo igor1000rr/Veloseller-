@@ -6,14 +6,15 @@ import { CATEGORY_LABELS, CATEGORY_COLORS } from '@/lib/news/types';
 
 const SITE_URL = 'https://veloseller.ru';
 
+// Title уйдёт через title.template из layout: "Новости и гайды — Veloseller"
 export const metadata: Metadata = {
-  title: 'Новости и гайды — Veloseller',
+  title: 'Новости и гайды',
   description:
-    'Гайды по управлению остатками на Wildberries и Ozon: оборачиваемость, out-of-stock, лимиты приёмки FBO, индекс популярности WB, safety stock. Без воды.',
-  alternates: { canonical: `${SITE_URL}/news` },
+    'Гайды по управлению остатками на Wildberries и Ozon: оборачиваемость, out-of-stock, лимиты приёмки FBO, индекс популярности WB, safety stock, юнит-экономика, комиссии 2026, ABC/XYZ анализ.',
+  alternates: { canonical: '/news' },
   openGraph: {
     title: 'Новости и гайды — Veloseller',
-    description: 'Гайды по управлению остатками на Wildberries и Ozon',
+    description: 'Гайды по управлению остатками на Wildberries и Ozon для селлеров маркетплейсов.',
     url: `${SITE_URL}/news`,
     type: 'website',
   },
@@ -27,8 +28,44 @@ function formatDate(iso: string): string {
 export default function NewsListPage() {
   const sorted = [...posts].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
 
+  // JSON-LD CollectionPage для индекса гайдов — даёт Google понять,
+  // что эта страница есть лента публикаций, а не одиночная статья
+  const collectionLd = {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: 'Новости и гайды Veloseller',
+    description:
+      'Гайды по управлению остатками на Wildberries и Ozon для маркетплейс-селлеров.',
+    url: `${SITE_URL}/news`,
+    inLanguage: 'ru-RU',
+    isPartOf: {
+      '@type': 'WebSite',
+      name: 'Veloseller',
+      url: SITE_URL,
+    },
+    hasPart: sorted.map((post) => ({
+      '@type': 'Article',
+      headline: post.title,
+      description: post.description,
+      url: `${SITE_URL}/news/${post.slug}`,
+      datePublished: post.publishedAt,
+      inLanguage: 'ru-RU',
+    })),
+  };
+
+  const breadcrumbLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Главная', item: SITE_URL },
+      { '@type': 'ListItem', position: 2, name: 'Новости', item: `${SITE_URL}/news` },
+    ],
+  };
+
   return (
     <main className="relative bg-paper-warm text-ink min-h-screen">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(collectionLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbLd) }} />
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-noise opacity-100 mix-blend-multiply" />
       <div
         aria-hidden

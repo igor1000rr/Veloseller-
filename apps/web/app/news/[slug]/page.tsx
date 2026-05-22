@@ -17,21 +17,25 @@ export async function generateStaticParams() {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const post = posts.find((p) => p.slug === slug);
-  if (!post) return { title: 'Не найдено — Veloseller' };
+  if (!post) return { title: 'Не найдено' };
 
+  // title.template из layout добавит " — Veloseller" автоматически
   return {
-    title: `${post.title} — Veloseller`,
+    title: post.title,
     description: post.description,
     keywords: post.keywords,
-    alternates: { canonical: `${SITE_URL}/news/${post.slug}` },
+    alternates: { canonical: `/news/${post.slug}` },
     openGraph: {
       title: post.title,
       description: post.description,
       url: `${SITE_URL}/news/${post.slug}`,
       type: 'article',
       publishedTime: post.publishedAt,
+      modifiedTime: post.publishedAt,
       locale: 'ru_RU',
       siteName: 'Veloseller',
+      authors: ['Veloseller'],
+      tags: post.keywords,
     },
     twitter: {
       card: 'summary_large_image',
@@ -54,12 +58,14 @@ export default async function NewsPostPage({ params }: Props) {
   const related = posts
     .filter((p) => p.slug !== post.slug)
     .sort((a, b) => {
-      // та же категория идёт первой
       const aMatch = a.category === post.category ? 0 : 1;
       const bMatch = b.category === post.category ? 0 : 1;
       return aMatch - bMatch;
     })
     .slice(0, 3);
+
+  // Считаем wordCount чтобы Article schema была полнее (полезно для Google News)
+  const wordCount = post.content.split(/\s+/).filter(Boolean).length;
 
   const jsonLd = {
     '@context': 'https://schema.org',
@@ -69,6 +75,8 @@ export default async function NewsPostPage({ params }: Props) {
     datePublished: post.publishedAt,
     dateModified: post.publishedAt,
     keywords: post.keywords.join(', '),
+    wordCount,
+    articleSection: CATEGORY_LABELS[post.category],
     author: { '@type': 'Organization', name: 'Veloseller', url: SITE_URL },
     publisher: {
       '@type': 'Organization',
