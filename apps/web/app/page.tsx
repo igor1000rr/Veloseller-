@@ -33,9 +33,6 @@ export default async function LandingPage() {
   const { data: { user } } = await supabase.auth.getUser();
   const isAuthed = !!user;
 
-  // JSON-LD: один блок с @graph объединяет Organization + WebSite +
-  // SoftwareApplication + FAQPage. Это рекомендуемый Google способ —
-  // меньше шума в HTML, все сущности связаны через @id.
   const jsonLd = {
     "@context": "https://schema.org",
     "@graph": [
@@ -82,27 +79,9 @@ export default async function LandingPage() {
           highPrice: "14900",
           offerCount: 3,
           offers: [
-            {
-              "@type": "Offer",
-              name: "Старт",
-              price: "2500",
-              priceCurrency: "RUB",
-              description: "2 склада",
-            },
-            {
-              "@type": "Offer",
-              name: "Рост",
-              price: "6900",
-              priceCurrency: "RUB",
-              description: "6 складов",
-            },
-            {
-              "@type": "Offer",
-              name: "Про",
-              price: "14900",
-              priceCurrency: "RUB",
-              description: "15 складов",
-            },
+            { "@type": "Offer", name: "Старт", price: "2500",  priceCurrency: "RUB", description: "2 склада" },
+            { "@type": "Offer", name: "Рост",  price: "6900",  priceCurrency: "RUB", description: "6 складов" },
+            { "@type": "Offer", name: "Про",   price: "14900", priceCurrency: "RUB", description: "15 складов" },
           ],
         },
         featureList: [
@@ -122,10 +101,7 @@ export default async function LandingPage() {
         mainEntity: faqItems.map((item) => ({
           "@type": "Question",
           name: item.q,
-          acceptedAnswer: {
-            "@type": "Answer",
-            text: item.a,
-          },
+          acceptedAnswer: { "@type": "Answer", text: item.a },
         })),
       },
     ],
@@ -149,8 +125,14 @@ export default async function LandingPage() {
         style={{ background: "radial-gradient(closest-side, rgba(2,132,199,0.15), transparent 70%)" }}
       />
 
-      {/* ===== HEADER ===== */}
-      <header className="sticky top-0 z-30 backdrop-blur-md bg-bg/85 border-b border-line">
+      {/* ===== HEADER =====
+          КРИТИКА из скрина: bg-bg/85 + backdrop-blur-md — на Telegram WebView blur
+          может не работать, и полупрозрачный bg-bg/85 даёт эффект просвечивания.
+          Теперь bg-paper/95 (белый 95%) + inline-style fallback для надёжности. */}
+      <header
+        className="sticky top-0 z-30 backdrop-blur-md bg-paper/95 border-b border-line"
+        style={{ backgroundColor: "rgba(255,255,255,0.95)" }}
+      >
         <div className="w-full px-4 md:px-8 lg:px-12 py-3 md:py-4 flex items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-2.5 shrink-0">
             <Icons.Logo />
@@ -203,8 +185,9 @@ export default async function LandingPage() {
               </span>
             </div>
 
-            {/* Правка Александра: H1 одной строкой "Скорость продаж без искажений" */}
-            <h1 className="mt-6 font-display text-[44px] sm:text-5xl md:text-6xl xl:text-7xl leading-[0.95] tracking-tight font-medium">
+            {/* Mobile: text-4xl (36px) вместо text-[44px] — на 320px экране 44px впритык
+                и могло перенестись неловко. break-words на случай очень узких экранов. */}
+            <h1 className="mt-6 font-display text-4xl sm:text-5xl md:text-6xl xl:text-7xl leading-[0.95] tracking-tight font-medium break-words">
               Скорость продаж{" "}
               <span className="text-lime-deep italic font-display">без искажений</span>
             </h1>
@@ -249,9 +232,9 @@ export default async function LandingPage() {
           {stats.map((s, i) => (
             <div key={i} className="relative">
               <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush">{s.label}</div>
-              <div className="mt-1.5 font-display text-3xl md:text-5xl tabular tracking-tight font-medium">
+              <div className="mt-1.5 font-display text-2xl sm:text-3xl md:text-5xl tabular tracking-tight font-medium break-words">
                 {s.value}
-                {s.unit && <span className="text-xl md:text-2xl text-ink-muted ml-0.5">{s.unit}</span>}
+                {s.unit && <span className="text-lg sm:text-xl md:text-2xl text-ink-muted ml-0.5">{s.unit}</span>}
               </div>
               <div className="mt-0.5 text-xs text-ink-muted">{s.sub}</div>
             </div>
@@ -312,7 +295,7 @@ export default async function LandingPage() {
           <div className="flex items-end justify-between mb-8 md:mb-10 flex-wrap gap-4">
             <div>
               <Eyebrow>Панель управления</Eyebrow>
-              <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight max-w-2xl font-medium">
+              <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight max-w-2xl font-medium">
                 Не таблица. <span className="text-ink-hush">Командный центр.</span>
               </h2>
             </div>
@@ -330,7 +313,7 @@ export default async function LandingPage() {
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-14">
             <Eyebrow center>Возможности</Eyebrow>
-            <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
               Шесть вещей, которые экономят деньги
             </h2>
             <p className="mt-4 text-ink-muted max-w-2xl mx-auto text-sm md:text-base">
@@ -339,28 +322,28 @@ export default async function LandingPage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-5 auto-rows-[minmax(180px,_auto)]">
-            <div className="md:col-span-2 md:row-span-2 rounded-2xl border border-line bg-paper p-6 md:p-8 hover:border-lime-deep/40 transition shadow-sm relative overflow-hidden">
+            <div className="md:col-span-2 md:row-span-2 rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-8 hover:border-lime-deep/40 transition shadow-sm relative overflow-hidden">
               <div className="absolute -top-10 -right-10 size-48 rounded-full bg-lime-soft blur-2xl" />
               <div className="relative">
                 <div className="flex items-center gap-3">
                   <div className="flex size-11 items-center justify-center rounded-lg bg-lime text-ink"><Icons.Speed /></div>
                   <span className="font-mono text-[10px] text-ink-hush">01 / ОСНОВНОЙ</span>
                 </div>
-                <h3 className="mt-5 md:mt-6 font-display text-2xl md:text-4xl tracking-tight font-medium">TVelo — реальная скорость продаж</h3>
+                <h3 className="mt-5 md:mt-6 font-display text-xl sm:text-2xl md:text-4xl tracking-tight font-medium">TVelo — реальная скорость продаж</h3>
                 <p className="mt-3 text-ink-muted max-w-lg text-sm md:text-base leading-relaxed">
                   Считает скорость продаж, вычитая дни отсутствия товара на складе. Реальная
                   картина: какой товар продаётся быстро, какой становится неликвидом. Разница
                   с обычным расчётом может достигать 50%.
                 </p>
-                <div className="mt-5 md:mt-6 rounded-xl border border-line bg-bg-soft p-4 inline-flex items-center gap-3 md:gap-4 flex-wrap">
+                <div className="mt-5 md:mt-6 rounded-xl border border-line bg-bg-soft p-3 sm:p-4 inline-flex items-center gap-3 md:gap-4 flex-wrap">
                   <div>
                     <div className="font-mono text-[10px] text-ink-hush">продажи / период</div>
-                    <div className="font-mono text-lg md:text-xl text-ink-hush tabular line-through decoration-orange decoration-2">2.00</div>
+                    <div className="font-mono text-base sm:text-lg md:text-xl text-ink-hush tabular line-through decoration-orange decoration-2">2.00</div>
                   </div>
                   <Icons.ArrowRight />
                   <div>
                     <div className="font-mono text-[10px] text-lime-deep font-semibold">TVelo</div>
-                    <div className="font-mono text-lg md:text-xl text-ink tabular font-semibold">3.00 <span className="text-sm text-lime-deep">+50%</span></div>
+                    <div className="font-mono text-base sm:text-lg md:text-xl text-ink tabular font-semibold">3.00 <span className="text-sm text-lime-deep">+50%</span></div>
                   </div>
                 </div>
               </div>
@@ -380,7 +363,7 @@ export default async function LandingPage() {
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-14">
             <Eyebrow center>Сравнение</Eyebrow>
-            <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
               Excel vs Veloseller
             </h2>
             <p className="mt-3 text-ink-muted text-sm md:text-base">
@@ -389,11 +372,11 @@ export default async function LandingPage() {
           </div>
 
           <div className="grid md:grid-cols-2 gap-4 md:gap-6">
-            <div className="rounded-2xl border-2 border-line bg-bg-soft p-6 md:p-8 relative">
+            <div className="rounded-2xl border-2 border-line bg-bg-soft p-5 sm:p-6 md:p-8 relative">
               <div className="absolute -top-3 left-7 px-2.5 py-0.5 rounded bg-paper border border-line-2">
                 <span className="font-mono text-[10px] text-ink-hush uppercase tracking-widest">ДО</span>
               </div>
-              <h3 className="font-display text-xl md:text-2xl mt-3 text-ink-muted font-medium">Excel-табличка</h3>
+              <h3 className="font-display text-lg sm:text-xl md:text-2xl mt-3 text-ink-muted font-medium">Excel-табличка</h3>
               <ul className="mt-5 space-y-3">
                 {compareLeft.map((it) => (
                   <li key={it} className="flex items-start gap-3 text-ink-muted text-sm md:text-base">
@@ -403,11 +386,11 @@ export default async function LandingPage() {
                 ))}
               </ul>
             </div>
-            <div className="rounded-2xl border-2 border-lime-deep/40 bg-lime-soft p-6 md:p-8 relative shadow-[0_20px_60px_-20px_rgba(132,204,22,0.3)]">
+            <div className="rounded-2xl border-2 border-lime-deep/40 bg-lime-soft p-5 sm:p-6 md:p-8 relative shadow-[0_20px_60px_-20px_rgba(132,204,22,0.3)]">
               <div className="absolute -top-3 left-7 px-2.5 py-0.5 rounded bg-ink text-paper">
                 <span className="font-mono text-[10px] uppercase tracking-widest">ПОСЛЕ</span>
               </div>
-              <h3 className="font-display text-xl md:text-2xl mt-3 text-ink font-medium">Veloseller</h3>
+              <h3 className="font-display text-lg sm:text-xl md:text-2xl mt-3 text-ink font-medium">Veloseller</h3>
               <ul className="mt-5 space-y-3">
                 {compareRight.map((it) => (
                   <li key={it} className="flex items-start gap-3 text-ink-soft font-medium text-sm md:text-base">
@@ -426,18 +409,18 @@ export default async function LandingPage() {
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-12 md:mb-16">
             <Eyebrow center>Как это работает</Eyebrow>
-            <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
               От Excel до решения — <span className="text-lime-deep italic">в три шага</span>
             </h2>
           </div>
           <div className="grid md:grid-cols-3 gap-4 md:gap-6">
             {steps.map((s, i) => (
-              <div key={i} className="relative rounded-2xl border border-line bg-paper p-6 md:p-7 hover:border-lime-deep/40 hover:shadow-lg transition">
+              <div key={i} className="relative rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 hover:border-lime-deep/40 hover:shadow-lg transition">
                 <div className="flex items-center justify-between">
-                  <div className="font-display text-4xl md:text-5xl text-lime-deep/80 tabular font-medium">0{i + 1}</div>
+                  <div className="font-display text-3xl sm:text-4xl md:text-5xl text-lime-deep/80 tabular font-medium">0{i + 1}</div>
                   <span className="font-mono text-[10px] text-ink-hush uppercase tracking-widest">Шаг 0{i + 1}</span>
                 </div>
-                <h3 className="mt-4 md:mt-5 font-display text-lg md:text-xl font-medium">{s.title}</h3>
+                <h3 className="mt-4 md:mt-5 font-display text-base sm:text-lg md:text-xl font-medium">{s.title}</h3>
                 <p className="mt-3 text-sm text-ink-muted leading-relaxed">{s.text}</p>
               </div>
             ))}
@@ -450,24 +433,24 @@ export default async function LandingPage() {
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-14">
             <Eyebrow center>Отзывы</Eyebrow>
-            <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
               Селлеры о цифрах, которые увидели впервые
             </h2>
           </div>
           <div className="grid md:grid-cols-3 gap-4 md:gap-5">
             {testimonials.map((t, i) => (
-              <div key={i} className="rounded-2xl border border-line bg-paper p-6 md:p-7 hover:shadow-lg transition">
+              <div key={i} className="rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 hover:shadow-lg transition">
                 <div className="flex items-center gap-1 text-lime-deep">
                   {[...Array(5)].map((_, j) => <Icons.Star key={j} />)}
                 </div>
                 <p className="mt-4 text-sm md:text-[15px] text-ink-soft leading-relaxed">{t.quote}</p>
                 <div className="mt-5 md:mt-6 flex items-center gap-3">
-                  <div className="size-10 rounded-full flex items-center justify-center font-display text-base font-medium" style={{ background: t.avatarBg, color: t.avatarColor }}>
+                  <div className="size-10 rounded-full flex items-center justify-center font-display text-base font-medium shrink-0" style={{ background: t.avatarBg, color: t.avatarColor }}>
                     {t.initials}
                   </div>
-                  <div>
-                    <div className="font-medium text-sm text-ink">{t.name}</div>
-                    <div className="font-mono text-[10px] text-ink-hush uppercase tracking-wider">{t.role}</div>
+                  <div className="min-w-0">
+                    <div className="font-medium text-sm text-ink truncate">{t.name}</div>
+                    <div className="font-mono text-[10px] text-ink-hush uppercase tracking-wider truncate">{t.role}</div>
                   </div>
                 </div>
               </div>
@@ -481,7 +464,7 @@ export default async function LandingPage() {
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-12">
             <Eyebrow center>Цены</Eyebrow>
-            <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
               Простые тарифы. Никаких звёздочек.
             </h2>
             <p className="mt-3 text-ink-muted text-sm md:text-base">Триал 30 дней — 15 складов бесплатно. Без карты.</p>
@@ -504,7 +487,7 @@ export default async function LandingPage() {
         <div className="max-w-[1100px] mx-auto">
           <div className="text-center mb-10 md:mb-14">
             <Eyebrow center>FAQ</Eyebrow>
-            <h2 className="mt-2 font-display text-3xl md:text-5xl tracking-tight font-medium">
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
               Частые вопросы
             </h2>
           </div>
@@ -515,11 +498,11 @@ export default async function LandingPage() {
       {/* ===== CTA ===== */}
       <section className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24">
         <div className="max-w-[1600px] mx-auto">
-          <div className="relative overflow-hidden rounded-3xl border-2 border-lime-deep/30 bg-gradient-to-br from-lime-soft via-paper to-paper p-8 md:p-16 lg:p-20">
+          <div className="relative overflow-hidden rounded-3xl border-2 border-lime-deep/30 bg-gradient-to-br from-lime-soft via-paper to-paper p-6 sm:p-8 md:p-16 lg:p-20">
             <div className="absolute -right-20 -top-20 size-80 rounded-full bg-lime/30 blur-3xl" />
             <div className="absolute -left-20 -bottom-20 size-60 rounded-full bg-azure/20 blur-3xl" />
             <div className="relative z-10 max-w-3xl">
-              <h2 className="font-display text-3xl md:text-5xl lg:text-6xl tracking-tight leading-[1.05] font-medium">
+              <h2 className="font-display text-2xl sm:text-3xl md:text-5xl lg:text-6xl tracking-tight leading-[1.05] font-medium break-words">
                 Перестань считать <span className="text-lime-deep italic">скорость продаж вручную.</span>
               </h2>
               <p className="mt-4 md:mt-5 text-ink-muted text-base md:text-lg max-w-2xl leading-relaxed">
@@ -622,14 +605,14 @@ function BentoCard({ idx, icon, title, text, accent }: {
     accent === "emerald" ? "text-emerald bg-emerald/10" :
                            "text-orange bg-orange/10";
   return (
-    <div className="rounded-2xl border border-line bg-paper p-6 md:p-7 hover:border-lime-deep/40 hover:shadow-lg transition group">
+    <div className="rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 hover:border-lime-deep/40 hover:shadow-lg transition group">
       <div className="flex items-center justify-between">
         <div className={`flex size-11 items-center justify-center rounded-lg ${accentColor} group-hover:scale-110 transition`}>
           {icon}
         </div>
         <span className="font-mono text-[10px] text-ink-hush tabular">{idx}</span>
       </div>
-      <h3 className="mt-5 font-display text-lg md:text-xl leading-tight font-medium">{title}</h3>
+      <h3 className="mt-5 font-display text-base sm:text-lg md:text-xl leading-tight font-medium">{title}</h3>
       <p className="mt-2 text-sm text-ink-muted leading-relaxed">{text}</p>
     </div>
   );
@@ -637,7 +620,7 @@ function BentoCard({ idx, icon, title, text, accent }: {
 
 function PricingCard({ name, price, highlight, perks, isAuthed }: typeof plans[number] & { isAuthed: boolean }) {
   return (
-    <div className={`relative rounded-2xl p-6 md:p-8 transition ${
+    <div className={`relative rounded-2xl p-5 sm:p-6 md:p-8 transition ${
       highlight
         ? "border-2 border-lime-deep bg-paper shadow-[0_20px_60px_-20px_rgba(132,204,22,0.3)]"
         : "border border-line bg-paper hover:shadow-lg"
@@ -648,8 +631,8 @@ function PricingCard({ name, price, highlight, perks, isAuthed }: typeof plans[n
         </span>
       )}
       <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">{name}</div>
-      <div className="mt-4 flex items-baseline gap-1">
-        <span className="font-display text-5xl md:text-6xl tracking-tight text-ink tabular font-medium">{price.toLocaleString("ru-RU")}</span>
+      <div className="mt-4 flex items-baseline gap-1 flex-wrap">
+        <span className="font-display text-4xl sm:text-5xl md:text-6xl tracking-tight text-ink tabular font-medium">{price.toLocaleString("ru-RU")}</span>
         <span className="text-ink-muted text-2xl ml-1">₽</span>
         <span className="text-ink-muted">/мес</span>
       </div>
@@ -697,8 +680,6 @@ const stats = [
   { label: "Типов складов", value: "5", sub: "Ozon FBO/FBS, WB FBO/FBS, Sheets" },
   { label: "Метрик по каждому SKU", value: "23", sub: "включая достоверность данных" },
 ];
-// Правка Александра: порядок Ozon FBS, Ozon FBO, WB FBS, WB FBO, Google Sheet
-// Resend убран — это внутренний инфраструктурный сервис, не для глаз пользователя
 const integrations = [
   { name: "Ozon FBS",        tag: "API",       dot: "#005bff" },
   { name: "Ozon FBO",        tag: "API",       dot: "#005bff" },
