@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Icons } from "./_components/Icons";
 import HeroVeloDemo from "./HeroVeloDemo";
@@ -6,6 +7,9 @@ import FaqAccordion from "./FaqAccordion";
 import MobileMenu from "./_components/MobileMenu";
 import ScrollToTopButton from "./_components/ScrollToTopButton";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { faqItems } from "@/lib/faq";
+
+const SITE_URL = "https://veloseller.ru";
 
 // Лендинг — server component с проверкой сессии. Авто-обновление на каждый
 // запрос гарантирует, что зашедший в свой аккаунт юзер увидит "В кабинет"
@@ -13,13 +17,126 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// Главная имеет свой title без template — он самый важный для SEO,
+// title.absolute убирает суффикс " — Veloseller" из layout
+export const metadata: Metadata = {
+  title: {
+    absolute: "Veloseller — управление остатками для Wildberries, Ozon FBO и FBS",
+  },
+  description:
+    "Сервис для маркетплейс-селлеров: TVelo (реальная скорость продаж с учётом out-of-stock дней), дни покрытия, прогноз нехватки, расчёт минимального остатка (safety stock), потерянная выручка. Подключение через API Wildberries, Ozon или Google Sheets за 5 минут.",
+  alternates: { canonical: "/" },
+};
+
 export default async function LandingPage() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   const isAuthed = !!user;
 
+  // JSON-LD: один блок с @graph объединяет Organization + WebSite +
+  // SoftwareApplication + FAQPage. Это рекомендуемый Google способ —
+  // меньше шума в HTML, все сущности связаны через @id.
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": `${SITE_URL}#organization`,
+        name: "Veloseller",
+        url: SITE_URL,
+        description:
+          "Сервис управления остатками для селлеров Wildberries и Ozon. Расчёт TVelo, прогноз out-of-stock, safety stock, дни покрытия.",
+        email: "info@proaim.ru",
+        contactPoint: {
+          "@type": "ContactPoint",
+          email: "info@proaim.ru",
+          contactType: "customer support",
+          availableLanguage: ["Russian"],
+        },
+      },
+      {
+        "@type": "WebSite",
+        "@id": `${SITE_URL}#website`,
+        name: "Veloseller",
+        url: SITE_URL,
+        description:
+          "Управление остатками на Wildberries и Ozon. TVelo, дни покрытия, прогноз out-of-stock, safety stock.",
+        inLanguage: "ru-RU",
+        publisher: { "@id": `${SITE_URL}#organization` },
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": `${SITE_URL}#software`,
+        name: "Veloseller",
+        applicationCategory: "BusinessApplication",
+        applicationSubCategory: "Inventory Management",
+        operatingSystem: "Web",
+        url: SITE_URL,
+        description:
+          "Сервис управления складскими остатками для маркетплейс-селлеров. Считает реальную скорость продаж (TVelo) с учётом out-of-stock дней, прогнозирует нехватку товара, рассчитывает минимальный остаток (safety stock) и дни покрытия по каждому SKU на Ozon FBO/FBS, Wildberries и Google Sheets.",
+        inLanguage: "ru-RU",
+        offers: {
+          "@type": "AggregateOffer",
+          priceCurrency: "RUB",
+          lowPrice: "2500",
+          highPrice: "14900",
+          offerCount: 3,
+          offers: [
+            {
+              "@type": "Offer",
+              name: "Старт",
+              price: "2500",
+              priceCurrency: "RUB",
+              description: "2 склада",
+            },
+            {
+              "@type": "Offer",
+              name: "Рост",
+              price: "6900",
+              priceCurrency: "RUB",
+              description: "6 складов",
+            },
+            {
+              "@type": "Offer",
+              name: "Про",
+              price: "14900",
+              priceCurrency: "RUB",
+              description: "15 складов",
+            },
+          ],
+        },
+        featureList: [
+          "TVelo — реальная скорость продаж с учётом out-of-stock",
+          "Дни покрытия по каждому SKU",
+          "Прогноз out-of-stock на 7-14 дней вперёд",
+          "Расчёт минимального остатка (safety stock)",
+          "Расчёт потерянной выручки из-за нехватки товара",
+          "Алерты в Telegram и email",
+          "Read-only интеграция с Wildberries, Ozon FBO/FBS, Google Sheets",
+        ],
+        publisher: { "@id": `${SITE_URL}#organization` },
+      },
+      {
+        "@type": "FAQPage",
+        "@id": `${SITE_URL}#faq`,
+        mainEntity: faqItems.map((item) => ({
+          "@type": "Question",
+          name: item.q,
+          acceptedAnswer: {
+            "@type": "Answer",
+            text: item.a,
+          },
+        })),
+      },
+    ],
+  };
+
   return (
     <main className="relative bg-paper-warm text-ink overflow-x-hidden">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-noise opacity-100 mix-blend-multiply" />
       <div
         aria-hidden
