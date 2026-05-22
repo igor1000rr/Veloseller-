@@ -6,9 +6,10 @@ import AckButton from "@/app/dashboard/alerts/AckButton";
 beforeEach(() => { global.fetch = vi.fn(); });
 
 describe("AckButton", () => {
-  it("показывает 'Прочитано' по умолчанию", () => {
+  // Надпись изменена с "Прочитано" на "Принять" (мобильная полировка).
+  it("показывает 'Принять' по умолчанию", () => {
     render(<AckButton id="alert-1" />);
-    expect(screen.getByRole("button")).toHaveTextContent("Прочитано");
+    expect(screen.getByRole("button")).toHaveTextContent("Принять");
   });
 
   it("вызывает API с правильным URL", async () => {

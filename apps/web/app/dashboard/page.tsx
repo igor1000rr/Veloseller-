@@ -123,6 +123,8 @@ export default async function DashboardOverview({ searchParams }: {
   const confidenceValues = Array.from(latestByProduct.values())
     .map(v => v.confidence)
     .filter((c): c is number => c != null);
+  // confidence_score в БД хранится в процентах (0-100), НЕ в долях.
+  // Раньше было * 100 → выходило 4000% на экране.
   const avgConfidence = confidenceValues.length > 0
     ? confidenceValues.reduce((a, b) => a + b, 0) / confidenceValues.length
     : null;
@@ -145,8 +147,8 @@ export default async function DashboardOverview({ searchParams }: {
         <div className="min-w-0">
           <h1 className="font-display text-2xl sm:text-3xl md:text-4xl font-medium tracking-tight text-ink">Обзор склада</h1>
           <div className="mt-1.5 flex items-center gap-2 flex-wrap text-sm text-ink-muted">
-            <span className="size-1.5 rounded-full bg-lime-deep" />
-            <span className="font-medium text-ink truncate">{currentWarehouseName}</span>
+            <span className="size-1.5 rounded-full bg-lime-deep shrink-0" />
+            <span className="font-medium text-ink truncate max-w-[180px] sm:max-w-none">{currentWarehouseName}</span>
             <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
               {warehouseKindLabel(currentWarehouseKind)}
             </span>
@@ -212,7 +214,6 @@ export default async function DashboardOverview({ searchParams }: {
             Денег на остатках
             <InfoTooltip text={`Σ stock_quantity × current_price по всем SKU. Сколько ${currency === "RUB" ? "рублей" : "денег"} лежит на складе в виде товара — это твой замороженный оборотный капитал.`} />
           </div>
-          {/* Mobile: text-2xl чтобы длинные суммы не вылазили за пределы. Desktop: text-5xl. break-words на случай совсем гигантских значений. */}
           <div className="mt-3 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium text-ink tabular break-words">
             {fmt(storeMetrics?.total_inventory_value)}
           </div>
@@ -253,7 +254,8 @@ export default async function DashboardOverview({ searchParams }: {
         <Kpi
           label="Достоверность данных"
           tooltip="Средняя достоверность данных по магазину. Чем больше дней снимаем snapshots — тем выше показатель."
-          value={avgConfidence != null ? `${(avgConfidence * 100).toFixed(0)}%` : "—"}
+          /* БАГФИКС: confidence_score в БД уже в процентах (0-100). Было * 100 → выходило 4000%. */
+          value={avgConfidence != null ? `${avgConfidence.toFixed(0)}%` : "—"}
           tone="accent"
         />
       </div>
@@ -298,7 +300,6 @@ export default async function DashboardOverview({ searchParams }: {
           <span>Скорости продаж по SKU склада «{currentWarehouseName}»</span>
           <InfoTooltip text="Распределение adjusted_velocity (штук в день) по всем SKU выбранного склада. Быстрая = 90-й перцентиль, Средняя = mean, Медленная = 10-й перцентиль. Помогает понять структуру ассортимента." />
         </h3>
-        {/* Mobile: text меньше + меньший gap чтобы 3 карты влезли. Desktop без изменений. */}
         <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <VelocityCard label="Быстрая" value={fastVelocity} sub="топ 10% SKU" tone="fast" tooltip="P90: 90% SKU продаются медленнее, 10% — быстрее. Это твои бестселлеры." />
           <VelocityCard label="Средняя" value={avgVelocity}  sub="по всем SKU"  tone="mid"  tooltip="Арифметическое среднее скорости продаж по всем активным SKU. Хороший baseline для сравнения." />
@@ -372,7 +373,6 @@ function ActionCard({ href, label, value, sub, tone, tooltip }: {
         {label}
         {tooltip && <InfoTooltip text={tooltip} />}
       </div>
-      {/* Mobile text-2xl чтобы длинные суммы (Потерянная выручка) не выпрыгивали */}
       <div className={`mt-2 font-display text-2xl sm:text-3xl md:text-4xl tabular font-medium tracking-tight break-words ${valueColor}`}>
         {value}
       </div>
@@ -427,7 +427,6 @@ function VelocityCard({ label, value, sub, tone, tooltip }: { label: string; val
         {label}
         {tooltip && <InfoTooltip text={tooltip} />}
       </div>
-      {/* Mobile text-lg чтобы число с двумя знаками после точки помещалось на 110px карточке */}
       <div className={`mt-1 font-display text-lg sm:text-xl md:text-2xl tabular font-medium ${cls.split(" ")[1]}`}>{value.toFixed(2)}</div>
       <div className="text-[9px] sm:text-[10px] text-ink-hush mt-0.5 font-mono uppercase tracking-wider">{sub}</div>
     </div>

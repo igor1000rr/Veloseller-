@@ -10,12 +10,13 @@ describe("PeriodSelector", () => {
     expect(screen.getByText("3 месяца")).toBeInTheDocument();
   });
 
-  it("текущий период подсвечивается чёрным фоном", () => {
+  // Палитра обновлена: bg-slate-900 → bg-ink (ремские токены).
+  it("текущий период подсвечивается черным фоном", () => {
     render(<PeriodSelector current="7" />);
     const link7 = screen.getByText("7 дней").closest("a")!;
     const link30 = screen.getByText("30 дней").closest("a")!;
-    expect(link7.className).toMatch(/bg-slate-900/);
-    expect(link30.className).not.toMatch(/bg-slate-900/);
+    expect(link7.className).toMatch(/bg-ink/);
+    expect(link30.className).not.toMatch(/bg-ink(?!\-)/);
   });
 
   it("ссылки содержат basePath + query", () => {
