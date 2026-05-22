@@ -2,6 +2,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import AckButton from "./AckButton";
 import BulkAckButton from "./BulkAckButton";
 import Link from "next/link";
+import { Icons } from "../../_components/Icons";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -22,7 +23,6 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // Сводка по типам для группировки
   const { data: allAlerts } = await supabase
     .from("alerts")
     .select("kind,acknowledged_at")
@@ -36,7 +36,6 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
   const groupedKinds = Object.entries(byKind).sort((a, b) => b[1] - a[1]);
   const totalActive = (allAlerts ?? []).length;
 
-  // Последние 50 (или фильтр по типу)
   let listQuery = supabase
     .from("alerts")
     .select("id,kind,message,created_at,acknowledged_at,product_id,payload,products(sku,product_name)")
@@ -65,12 +64,18 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
             }
           </p>
         </div>
-        {totalActive > 0 && (
-          <BulkAckButton count={totalActive} />
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Ссылка на страницу настройки подписок (правка 11 Александра) */}
+          <Link
+            href={"/dashboard/alerts/subscriptions" as any}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-line bg-paper text-sm text-ink-muted hover:text-ink hover:bg-bg-soft hover:border-lime-deep/40 transition"
+          >
+            ⚙ Настроить уведомления
+          </Link>
+          {totalActive > 0 && <BulkAckButton count={totalActive} />}
+        </div>
       </header>
 
-      {/* Группы по типам — кликабельные фильтры */}
       {groupedKinds.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
           <Link
@@ -105,7 +110,6 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
         </div>
       )}
 
-      {/* Список */}
       {list.length === 0 ? (
         <div className="rounded-2xl border border-line bg-paper p-10 md:p-14 text-center">
           <p className="text-ink-muted text-sm">
