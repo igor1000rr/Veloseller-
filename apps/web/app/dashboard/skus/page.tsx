@@ -4,7 +4,7 @@ import { VelocitySparkline } from "./VelocitySparkline";
 import { Icons } from "../../_components/Icons";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 import { getSelectedWarehouse, warehouseKindLabel } from "@/lib/warehouse";
-import { SkusFilters } from "./SkusFilters";
+import { SkusFilters, type FilterRanges } from "./SkusFilters";
 import { NotesCell } from "./NotesCell";
 import { DashFilterChip } from "./DashFilterChip";
 import { ColumnsPicker } from "./ColumnsPicker";
@@ -96,6 +96,23 @@ export default async function SkusPage({ searchParams }: {
 
   const selected = await getSelectedWarehouse(supabase, user.id);
   const warehouseCreatedAt = selected?.created_at ?? null;
+
+  // RPC для min/max в placeholder'ах фильтров.
+  // Отдельный запрос — агрегация на PG вместо тяжёлого SELECT всех SKU в JS.
+  const { data: rangesRows } = await supabase.rpc("get_skus_filter_ranges", {
+    p_seller_id: user.id,
+    p_connection_id: selected?.id ?? null,
+    p_period_days: periodDays,
+  });
+  const rangesRaw = (rangesRows as any[] | null)?.[0];
+  const filterRanges: FilterRanges = {
+    stockMin: Number(rangesRaw?.stock_min ?? 0),
+    stockMax: Number(rangesRaw?.stock_max ?? 0),
+    oosMin: Number(rangesRaw?.oos_min ?? 0),
+    oosMax: Number(rangesRaw?.oos_max ?? 0),
+    lostMin: Number(rangesRaw?.lost_min ?? 0),
+    lostMax: Number(rangesRaw?.lost_max ?? 0),
+  };
 
   let productsQuery = supabase
     .from("products")
@@ -321,26 +338,14 @@ export default async function SkusPage({ searchParams }: {
         />
       )}
 
-      {!dashFilter && (
-        <div className="flex items-center gap-2 text-sm text-ink-muted">
-          {/* Тач-таргет: py-2 + size-5 (вместо size-4) */}
-          <Link
-            href={`/dashboard/skus${buildQs({
-              include_inactive: includeInactive ? null : "1",
-              page: null,
-            }) ? `?${buildQs({ include_inactive: includeInactive ? null : "1", page: null })}` : ""}` as any}
-            className="inline-flex items-center gap-2 cursor-pointer hover:text-ink transition py-2 -my-2 min-h-[36px]"
-          >
-            <span className={`size-5 rounded border ${includeInactive ? "bg-ink border-ink" : "bg-paper border-line"} flex items-center justify-center transition shrink-0`}>
-              {includeInactive && <span className="text-paper text-[11px]">✓</span>}
-            </span>
-            <span>Включить SKU без активности</span>
-          </Link>
-          <InfoTooltip text="Товары с нулевым остатком и без движений за последние 30 дней. По умолчанию скрыты — их не нужно учитывать в большинстве сценариев." />
-        </div>
-      )}
-
-      <SkusFilters warehouseCreatedAt={warehouseCreatedAt} />
+      {/* Чекбокс «Включить SKU без активности» переехал внутрь SkusFilters
+          (как на paint-скрине Александра — рядом с полем «Период»). */}
+      <SkusFilters
+        warehouseCreatedAt={warehouseCreatedAt}
+        ranges={filterRanges}
+        includeInactive={includeInactive}
+        showInactiveToggle={!dashFilter}
+      />
 
       {!selected && (
         <div className="rounded-xl border border-orange/30 bg-orange/5 p-4 flex items-start gap-3">
@@ -379,7 +384,13 @@ export default async function SkusPage({ searchParams }: {
                 </span>
               </Th>
               <Th col="health" align="right">Health</Th>
-              <Th col="lost_revenue" align="right">Потерянная&nbsp;выручка</Th>
+              {/* ПОТЕРЯННАЯ ВЫРУЧКА → ПВ (правка Александра): освобождает место под заметки. */}
+              <Th col="lost_revenue" align="right">
+                <span className="inline-flex items-center">
+                  ПВ
+                  <InfoTooltip text="Потерянная выручка из-за отсутствия товара на складе." />
+                </span>
+              </Th>
               <Th col="notes">Заметки</Th>
             </tr>
           </thead>
