@@ -4,19 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 /**
- * Панель фильтров для страницы /dashboard/skus.
- *
- * Хранит state в URL — это даёт shareable-ссылку, нормальный back-button
- * и автоматическую серверную перерисовку с фильтрацией.
- *
- * Поля:
- * - search: по sku и product_name (ILIKE %q%)
- * - stock_min / stock_max: диапазон по current_stock
- * - oos_min / oos_max: диапазон по stockout_days
- * - lost_min / lost_max: диапазон по потерянной выручке (velocity × stockout × price)
- * - date_from / date_to: календарь периода (активный с warehouseCreatedAt)
- *
- * Все апдейты идут через debounce 350мс. При смене любого фильтра — page=1.
+ * Панель фильтров SKU. State в URL.
+ * Mobile-friendly: поиск занимает всю ширину на мобиле, диапазоны stack.
  */
 export function SkusFilters({ warehouseCreatedAt }: { warehouseCreatedAt: string | null }) {
   const router = useRouter();
@@ -80,15 +69,14 @@ export function SkusFilters({ warehouseCreatedAt }: { warehouseCreatedAt: string
     lostMin || lostMax || dateFrom || dateTo
   );
 
-  // Min для календаря — дата подключения склада. До этой даты данных нет,
-  // фильтр в эту зону смысла не имеет.
   const minDate = warehouseCreatedAt ? warehouseCreatedAt.slice(0, 10) : undefined;
   const today = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex-1 min-w-[260px] max-w-md relative">
+      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+        {/* Поиск: на мобиле full-width, на sm+ flex-1 max-w-md */}
+        <div className="w-full sm:flex-1 sm:min-w-[260px] sm:max-w-md relative">
           <input
             type="text"
             value={search}
@@ -97,14 +85,14 @@ export function SkusFilters({ warehouseCreatedAt }: { warehouseCreatedAt: string
               scheduleUpdate({ q: e.target.value });
             }}
             placeholder="Например, название бренда"
-            className="w-full px-3 py-2 pl-9 border border-line rounded-lg text-sm bg-paper focus:outline-none focus:border-lime-deep transition"
+            className="w-full px-3 py-2 pl-9 border border-line rounded-lg text-sm bg-paper focus:outline-none focus:border-lime-deep transition min-h-[40px]"
           />
           <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-hush text-sm">⌕</span>
         </div>
         <button
           type="button"
           onClick={() => setExpanded(e => !e)}
-          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-line bg-paper text-ink-muted hover:text-ink hover:border-lime-deep/40 transition"
+          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-line bg-paper text-ink-muted hover:text-ink hover:border-lime-deep/40 transition min-h-[36px]"
         >
           <span>Диапазоны</span>
           <span className={`transition-transform ${expanded ? "rotate-180" : ""}`}>▾</span>
@@ -119,7 +107,7 @@ export function SkusFilters({ warehouseCreatedAt }: { warehouseCreatedAt: string
                "lost_min", "lost_max", "date_from", "date_to", "page"].forEach(k => params.delete(k));
               router.replace(`${pathname}?${params.toString()}` as any);
             }}
-            className="text-xs text-ink-muted hover:text-ink underline underline-offset-2 transition"
+            className="text-xs text-ink-muted hover:text-ink underline underline-offset-2 transition py-2"
           >
             сбросить
           </button>
@@ -127,8 +115,8 @@ export function SkusFilters({ warehouseCreatedAt }: { warehouseCreatedAt: string
       </div>
 
       {expanded && (
-        <div className="space-y-3 p-4 rounded-xl border border-line bg-bg-soft">
-          {/* Календарь периода — отдельной строкой, чтобы было заметно */}
+        <div className="space-y-3 p-3 sm:p-4 rounded-xl border border-line bg-bg-soft">
+          {/* Календарь — на мобиле inputs стакаются */}
           <div>
             <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
               Период
@@ -140,7 +128,7 @@ export function SkusFilters({ warehouseCreatedAt }: { warehouseCreatedAt: string
                 min={minDate}
                 max={dateTo || today}
                 onChange={e => { setDateFrom(e.target.value); scheduleUpdate({ date_from: e.target.value }); }}
-                className="px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep"
+                className="flex-1 sm:flex-initial min-w-[140px] px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
               />
               <span className="text-ink-hush">—</span>
               <input
@@ -149,20 +137,19 @@ export function SkusFilters({ warehouseCreatedAt }: { warehouseCreatedAt: string
                 min={dateFrom || minDate}
                 max={today}
                 onChange={e => { setDateTo(e.target.value); scheduleUpdate({ date_to: e.target.value }); }}
-                className="px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep"
+                className="flex-1 sm:flex-initial min-w-[140px] px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
               />
-              {minDate && (
-                <span className="text-[11px] text-ink-hush font-mono">
-                  данные с {new Date(minDate).toLocaleDateString("ru-RU")}
-                </span>
-              )}
             </div>
+            {minDate && (
+              <p className="mt-1 text-[11px] text-ink-hush font-mono">
+                данные с {new Date(minDate).toLocaleDateString("ru-RU")}
+              </p>
+            )}
             <p className="mt-1 text-[11px] text-ink-hush">
               Произвольный диапазон поверх периода 7/30/90 дней — фильтрует SKU по дате последнего пересчёта.
             </p>
           </div>
 
-          {/* Числовые диапазоны в три колонки */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <RangeField
               label="Наличие"
@@ -211,20 +198,22 @@ function RangeField({ label, hint, minVal, maxVal, onMinChange, onMaxChange }: {
       <div className="flex items-center gap-2">
         <input
           type="number"
+          inputMode="numeric"
           min={0}
           value={minVal}
           onChange={e => onMinChange(e.target.value)}
           placeholder="от"
-          className="w-full px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep"
+          className="w-full px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
         />
         <span className="text-ink-hush">—</span>
         <input
           type="number"
+          inputMode="numeric"
           min={0}
           value={maxVal}
           onChange={e => onMaxChange(e.target.value)}
           placeholder="до"
-          className="w-full px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep"
+          className="w-full px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
         />
       </div>
       <p className="mt-1 text-[11px] text-ink-hush">{hint}</p>

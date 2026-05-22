@@ -8,14 +8,13 @@ import { useEffect, useState } from "react";
  *
  * Сохраняет выбор в localStorage под ключом VELOSELLER_SKU_COLUMNS.
  *
- * Подход: компонент возвращает Set видимых ключей через render-props pattern —
- * сама таблица в page.tsx server component, но обертка-выбор колонок и
- * обертка-таблица client. Так как page.tsx server, мы используем CSS-trick:
- * этот компонент тоже client-only, выставляет CSS-переменные через <style>
- * тег с правилами `.col-hide-<key> { display: none }`, а ячейки таблицы
- * имеют классы `col-cell-<key>` / `col-head-<key>`.
+ * Mobile-friendly: при первой загрузке (localStorage пуст) определяем
+ * ширину окна и показываем только важные колонки на мобиле, чтобы не
+ * было полотна-скрола из 15 столбцов.
  *
- * Это позволяет управлять видимостью без перестройки SSR-рендеринга.
+ * Подход без перекомпиляции SSR: page.tsx навешивает классы col-skucol-<key>
+ * на каждую ячейку <th>/<td>, а здесь генерим CSS-правила display:none
+ * для скрытых ключей через inline <style> тег.
  */
 
 export type ColumnKey =
@@ -43,7 +42,13 @@ export const ALL_COLUMNS: { key: ColumnKey; label: string; required?: boolean }[
 
 const STORAGE_KEY = "veloseller-sku-columns";
 
-const DEFAULT_VISIBLE: ColumnKey[] = ALL_COLUMNS.map(c => c.key);
+const DESKTOP_DEFAULT: ColumnKey[] = ALL_COLUMNS.map(c => c.key);
+
+// На мобиле по умолчанию — только самое важное. Юзер может включить остальные
+// через ColumnsPicker, и его выбор уйдёт в localStorage с учётом этого.
+const MOBILE_DEFAULT: ColumnKey[] = [
+  "sku", "name", "stock", "tvelo", "coverage", "lost_revenue", "notes",
+];
 
 function readStoredColumns(): Set<ColumnKey> | null {
   if (typeof window === "undefined") return null;
@@ -62,10 +67,9 @@ function readStoredColumns(): Set<ColumnKey> | null {
 
 export function ColumnsPicker() {
   const [open, setOpen] = useState(false);
-  const [visible, setVisible] = useState<Set<ColumnKey>>(() => new Set(DEFAULT_VISIBLE));
+  const [visible, setVisible] = useState<Set<ColumnKey>>(() => new Set(DESKTOP_DEFAULT));
   const [hydrated, setHydrated] = useState(false);
 
-  // Загружаем из localStorage только после mount — иначе SSR/CSR mismatch
   useEffect(() => {
     const stored = readStoredColumns();
     if (stored && stored.size > 0) {
@@ -74,21 +78,23 @@ export function ColumnsPicker() {
         if (col.required) stored.add(col.key);
       }
       setVisible(stored);
+    } else {
+      // Первый заход — мобильный или десктопный дефолт
+      const isMobile = window.matchMedia("(max-width: 767px)").matches;
+      setVisible(new Set(isMobile ? MOBILE_DEFAULT : DESKTOP_DEFAULT));
     }
     setHydrated(true);
   }, []);
 
-  // Запись в localStorage при изменениях
   useEffect(() => {
     if (!hydrated) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(visible)));
     } catch {
-      // localStorage quota / disabled — игнорируем
+      // localStorage недоступен — игнорируем
     }
   }, [visible, hydrated]);
 
-  // Закрытие dropdown по клику вне
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
@@ -98,7 +104,11 @@ export function ColumnsPicker() {
       }
     };
     document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
+    document.addEventListener("touchstart", onClick);
+    return () => {
+      document.removeEventListener("mousedown", onClick);
+      document.removeEventListener("touchstart", onClick);
+    };
   }, [open]);
 
   function toggle(key: ColumnKey) {
@@ -112,26 +122,25 @@ export function ColumnsPicker() {
     });
   }
 
-  function reset() {
-    setVisible(new Set(DEFAULT_VISIBLE));
+  function showAll() {
+    setVisible(new Set(DESKTOP_DEFAULT));
+  }
+
+  function showMobileOnly() {
+    setVisible(new Set(MOBILE_DEFAULT));
   }
 
   function clearAll() {
     setVisible(new Set(ALL_COLUMNS.filter(c => c.required).map(c => c.key)));
   }
 
-  // Считаем сколько скрыто (для индикатора)
   const hiddenCount = ALL_COLUMNS.length - visible.size;
 
-  // CSS-правила для скрытых столбцов. Применяются глобально для таблицы SKU.
-  // Эти классы добавлены в page.tsx на <th> и <td> для каждой колонки.
   const hiddenKeys = ALL_COLUMNS.filter(c => !visible.has(c.key)).map(c => c.key);
   const css = hidden_css_rules(hiddenKeys);
 
   return (
     <>
-      {/* Стили для скрытия — рендерим только после hydration, чтобы не было FOUC
-          при первой загрузке с default настройками. */}
       {hydrated && hiddenKeys.length > 0 && (
         <style dangerouslySetInnerHTML={{ __html: css }} />
       )}
@@ -140,7 +149,7 @@ export function ColumnsPicker() {
         <button
           type="button"
           onClick={() => setOpen(o => !o)}
-          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-line bg-paper text-ink-muted hover:text-ink hover:border-lime-deep/40 transition"
+          className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-line bg-paper text-ink-muted hover:text-ink hover:border-lime-deep/40 transition min-h-[36px]"
           title="Регулировка столбцов"
         >
           <span>☰ Столбцы</span>
@@ -152,15 +161,15 @@ export function ColumnsPicker() {
         </button>
 
         {open && (
-          <div className="absolute right-0 mt-2 z-20 w-64 rounded-xl border border-line bg-paper shadow-lg p-3">
-            <div className="flex items-center justify-between mb-2">
+          <div className="absolute right-0 mt-2 z-20 w-[calc(100vw-2rem)] max-w-xs sm:w-64 rounded-xl border border-line bg-paper shadow-lg p-3">
+            <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
               <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
                 Видимые столбцы
               </span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={reset}
+                  onClick={showAll}
                   className="text-[10px] font-mono uppercase tracking-wider text-lime-deep hover:text-ink transition"
                   title="Показать все"
                 >
@@ -168,26 +177,34 @@ export function ColumnsPicker() {
                 </button>
                 <button
                   type="button"
+                  onClick={showMobileOnly}
+                  className="text-[10px] font-mono uppercase tracking-wider text-ink-muted hover:text-ink transition"
+                  title="Преcет для мобильного — только важные"
+                >
+                  мобильно
+                </button>
+                <button
+                  type="button"
                   onClick={clearAll}
                   className="text-[10px] font-mono uppercase tracking-wider text-ink-muted hover:text-ink transition"
-                  title="Скрыть необязательные"
+                  title="Скрыть всё необязательное"
                 >
                   свернуть
                 </button>
               </div>
             </div>
-            <ul className="space-y-1 max-h-80 overflow-y-auto">
+            <ul className="space-y-0.5 max-h-[60vh] overflow-y-auto">
               {ALL_COLUMNS.map(col => {
                 const checked = visible.has(col.key);
                 return (
                   <li key={col.key}>
-                    <label className={`flex items-center gap-2 px-2 py-1.5 rounded text-sm cursor-pointer hover:bg-bg-soft transition ${
+                    <label className={`flex items-center gap-2 px-2 py-2 rounded text-sm cursor-pointer hover:bg-bg-soft transition ${
                       col.required ? "opacity-60 cursor-not-allowed" : ""
                     }`}>
-                      <span className={`size-4 rounded border flex items-center justify-center transition ${
+                      <span className={`size-5 shrink-0 rounded border flex items-center justify-center transition ${
                         checked ? "bg-ink border-ink" : "bg-paper border-line"
                       }`}>
-                        {checked && <span className="text-paper text-[10px]">✓</span>}
+                        {checked && <span className="text-paper text-[11px]">✓</span>}
                       </span>
                       <input
                         type="checkbox"
@@ -215,10 +232,6 @@ export function ColumnsPicker() {
   );
 }
 
-/**
- * Генерация CSS для скрытия колонок. Использует классы col-skucol-<key>
- * которые навешаны в page.tsx на <th> и <td>.
- */
 function hidden_css_rules(hiddenKeys: ColumnKey[]): string {
   return hiddenKeys
     .map(k => `.col-skucol-${k} { display: none !important; }`)

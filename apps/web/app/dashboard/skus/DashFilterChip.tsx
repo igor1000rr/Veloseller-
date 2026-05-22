@@ -4,21 +4,6 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 
-/**
- * Активный чип фильтра с обзора (правка 8 Александра):
- * "Он тут же может поменять фильтр низкого остатка с менее 3 до менее 10".
- *
- * Показывается когда есть ?filter=<dashFilter>&period=<period>. Юзер видит
- * описание фильтра + редактируемый порог. При смене порога — апдейт URL
- * через router.replace с debounce 500мс, страница перерисуется на сервере.
- *
- * Поддерживаемые фильтры с регулируемым порогом:
- * - low_stock: порог coverage_days (default 7)
- * - dead_inventory: порог coverage_days (default 180)
- *
- * Для lost_revenue, oos, inactive порог не нужен — фильтр булевый.
- */
-
 type DashFilter = "low_stock" | "lost_revenue" | "dead_inventory" | "oos" | "inactive";
 
 const FILTER_LABELS: Record<DashFilter, string> = {
@@ -37,7 +22,6 @@ const FILTER_DESCRIPTIONS: Record<DashFilter, (threshold: number) => string> = {
   inactive:       () => "0 остаток + нет движений",
 };
 
-// Поддерживает ли фильтр редактируемый порог
 function hasThreshold(filter: DashFilter): boolean {
   return filter === "low_stock" || filter === "dead_inventory";
 }
@@ -48,6 +32,13 @@ function defaultThreshold(filter: DashFilter): number {
   return 0;
 }
 
+/**
+ * Активный чип фильтра с обзора (правка 8 Александра).
+ *
+ * Mobile-friendly layout: на узких экранах элементы разносим по строкам
+ * через grid, на десктопе — горизонтальная полоса. Inputs увеличены для
+ * удобного попадания пальцем.
+ */
 export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }: {
   filter: DashFilter;
   periodDays: number;
@@ -58,11 +49,9 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
   const pathname = usePathname();
   const sp = useSearchParams();
 
-  // Локальное состояние порога — для удобной типизации в input
   const initialThreshold = threshold ?? defaultThreshold(filter);
   const [localThreshold, setLocalThreshold] = useState(String(initialThreshold));
 
-  // Синхронизация при изменении URL извне (back-button и т.п.)
   useEffect(() => {
     setLocalThreshold(String(threshold ?? defaultThreshold(filter)));
   }, [threshold, filter]);
@@ -84,40 +73,49 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
   const description = FILTER_DESCRIPTIONS[filter](currentThreshold);
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-lime-deep/30 bg-lime-soft p-3 flex-wrap">
-      <span className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold shrink-0">
-        фильтр с обзора
-      </span>
-      <span className="text-sm text-ink font-medium">
-        {FILTER_LABELS[filter]}
-      </span>
-      <span className="text-sm text-ink-soft">·</span>
-      {hasThreshold(filter) ? (
-        <span className="inline-flex items-center gap-2 text-sm text-ink-soft">
-          {filter === "low_stock" ? "покрытие ≤" : "покрытие >"}
-          <input
-            type="number"
-            value={localThreshold}
-            min={1}
-            max={365}
-            onChange={(e) => setLocalThreshold(e.target.value)}
-            onBlur={() => applyThreshold(localThreshold)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
-                applyThreshold(localThreshold);
-                (e.target as HTMLInputElement).blur();
-              }
-            }}
-            className="w-16 px-2 py-1 border border-line rounded bg-paper text-center font-mono text-sm focus:outline-none focus:border-lime-deep"
-          />
-          дней
-          <InfoTooltip text="Измените порог чтобы пересчитать список. Нажмите Enter или кликните вне поля для применения." />
+    <div className="rounded-xl border border-lime-deep/30 bg-lime-soft p-3">
+      {/* Верхняя строка: метка фильтра */}
+      <div className="flex items-center gap-2 flex-wrap mb-2">
+        <span className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold shrink-0">
+          фильтр с обзора
         </span>
-      ) : (
-        <span className="text-sm text-ink-soft">{description}</span>
-      )}
-      <span className="ml-auto inline-flex items-center gap-2 flex-wrap">
+        <span className="text-sm text-ink font-medium">
+          {FILTER_LABELS[filter]}
+        </span>
+      </div>
+
+      {/* Средняя: значение/инпут порога. На мобиле stack, на md+ inline */}
+      <div className="flex items-center gap-2 flex-wrap">
+        {hasThreshold(filter) ? (
+          <span className="inline-flex items-center gap-2 text-sm text-ink-soft">
+            {filter === "low_stock" ? "покрытие ≤" : "покрытие >"}
+            <input
+              type="number"
+              inputMode="numeric"
+              value={localThreshold}
+              min={1}
+              max={365}
+              onChange={(e) => setLocalThreshold(e.target.value)}
+              onBlur={() => applyThreshold(localThreshold)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  applyThreshold(localThreshold);
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              className="w-20 px-2 py-1.5 border border-line rounded bg-paper text-center font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
+            />
+            дней
+            <InfoTooltip text="Измените порог чтобы пересчитать список. Нажмите Enter или кликните вне поля для применения." />
+          </span>
+        ) : (
+          <span className="text-sm text-ink-soft">{description}</span>
+        )}
+      </div>
+
+      {/* Нижняя строка: период + сбросить, separator-line на мобиле */}
+      <div className="mt-3 pt-3 border-t border-lime-deep/20 flex items-center justify-between gap-3 flex-wrap">
         <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
           период {periodDays} дней
         </span>
@@ -128,11 +126,11 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
             if (segmentFilter) params.set("segment", segmentFilter);
             router.replace(`${pathname}${params.toString() ? `?${params.toString()}` : ""}` as any);
           }}
-          className="text-xs font-medium text-ink-muted hover:text-ink underline underline-offset-2 transition"
+          className="text-xs font-medium text-ink-muted hover:text-ink underline underline-offset-2 transition py-1"
         >
           сбросить
         </button>
-      </span>
+      </div>
     </div>
   );
 }
