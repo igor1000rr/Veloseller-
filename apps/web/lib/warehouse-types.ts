@@ -13,6 +13,9 @@ export type SelectedWarehouse = {
   name: string;
   warehouse_kind: string;
   status: string;
+  // ISO timestamp когда юзер подключил источник. Используется в SKU-странице
+  // для min даты в календаре "Период с датами" — данных до подключения нет.
+  created_at: string | null;
 };
 
 export type WarehouseListItem = {
