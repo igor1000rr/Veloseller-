@@ -1,38 +1,39 @@
-// Типы и константы для системы блога/новостей.
-// Контент хранится в posts.ts как массив объектов NewsPost.
-// content — markdown-style текст, рендерится через render.tsx (без внешних зависимостей).
+// Типы и константы для раздела /news.
 
-export type NewsCategory = "marketplace" | "analytics" | "inventory" | "finance";
+export type NewsCategory = "analytics" | "inventory" | "marketplace" | "finance";
+
+export type FaqItem = {
+  q: string;
+  a: string;
+};
 
 export type NewsPost = {
   slug: string;
   title: string;
-  /** Короткое описание для meta description + листинга (до 160 символов) */
-  description: string;
-  /** ISO 8601 дата публикации */
-  publishedAt: string;
-  /** ISO 8601 дата обновления (опционально) */
+  description: string; // meta description, 140-160 символов с ключом
+  publishedAt: string; // ISO date
   updatedAt?: string;
   category: NewsCategory;
-  /** Ключевые слова для meta keywords и внутренней перелинковки */
   tags: string[];
-  /** Время чтения в минутах (ручной оценки) */
   readingMinutes: number;
-  /** Markdown-style тело поста */
-  content: string;
+  content: string; // markdown-like text
+  faq?: FaqItem[];
+  related?: string[]; // slugs других постов
 };
 
 export const CATEGORY_LABELS: Record<NewsCategory, string> = {
-  marketplace: "Маркетплейсы",
   analytics: "Аналитика",
   inventory: "Запасы",
+  marketplace: "Маркетплейсы",
   finance: "Финансы",
 };
 
-/** Tailwind классы для бэйджа категории (из системной палитры лендинга) */
-export const CATEGORY_BADGE: Record<NewsCategory, string> = {
-  marketplace: "text-orange bg-orange/10 border-orange/20",
-  analytics: "text-azure bg-azure/10 border-azure/20",
-  inventory: "text-lime-deep bg-lime-soft border-lime-deep/20",
-  finance: "text-emerald bg-emerald/10 border-emerald/20",
+export const CATEGORY_COLORS: Record<NewsCategory, { text: string; bg: string }> = {
+  analytics: { text: "text-azure", bg: "bg-azure/10" },
+  inventory: { text: "text-lime-deep", bg: "bg-lime-soft" },
+  marketplace: { text: "text-orange", bg: "bg-orange/10" },
+  finance: { text: "text-emerald", bg: "bg-emerald/10" },
 };
+
+// Базовый URL для canonical/sitemap/JSON-LD. Берём из env с фоллбеком.
+export const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://veloseller.ru").replace(/\/+$/, "");
