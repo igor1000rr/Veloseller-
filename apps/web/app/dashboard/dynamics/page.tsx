@@ -33,21 +33,52 @@ type SkuTrend = {
   name: string;
   current: number;
   previous: number;
-  deltaPct: number;  // в процентах, +50 или -30
+  deltaPct: number;
   history: number[];
 };
 
+// Период агрегации (правка 12 Александра)
+type Period = "day" | "week" | "month";
+const PERIODS: { value: Period; label: string; pointsLimit: number; hint: string }[] = [
+  { value: "day",   label: "День",   pointsLimit: 14, hint: "последние 14 дней" },
+  { value: "week",  label: "Неделя", pointsLimit: 12, hint: "последние 12 недель" },
+  { value: "month", label: "Месяц",  pointsLimit: 6,  hint: "последние 6 месяцев" },
+];
+
+function isPeriod(s: string | undefined): s is Period {
+  return s === "day" || s === "week" || s === "month";
+}
+
+/**
+ * Бакетинг точки tvelo_metrics.period_end в ключ агрегации:
+ * day → YYYY-MM-DD, week → YYYY-Www, month → YYYY-MM
+ */
+function bucketize(period_end: string, period: Period): string {
+  if (period === "day") return period_end.slice(0, 10);
+  if (period === "week") {
+    const d = new Date(period_end);
+    const tmp = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    const dayNum = tmp.getUTCDay() || 7;
+    tmp.setUTCDate(tmp.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+    const weekNum = Math.ceil(((tmp.getTime() - yearStart.getTime()) / 86400_000 + 1) / 7);
+    return `${tmp.getUTCFullYear()}-W${String(weekNum).padStart(2, "0")}`;
+  }
+  return period_end.slice(0, 7);
+}
+
 export default async function DynamicsPage({ searchParams }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; period?: string }>;
 }) {
   const sp = await searchParams;
   const search = (sp.q ?? "").trim().toLowerCase();
+  const period: Period = isPeriod(sp.period) ? sp.period : "day";
+  const periodMeta = PERIODS.find(p => p.value === period)!;
 
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // Грузим все tvelo_metrics за текущего селлера
   const rows = await fetchAll<TveloRow>(
     async (from, to) => await supabase
       .from("tvelo_metrics")
@@ -57,7 +88,7 @@ export default async function DynamicsPage({ searchParams }: {
       .range(from, to),
   );
 
-  // Группируем по SKU и берём history по period_end
+  // Группируем по SKU и собираем все точки
   const byProduct = new Map<string, { sku: string; name: string; entries: Array<{ period: string; vel: number }> }>();
   for (const r of rows) {
     const product = Array.isArray(r.products) ? r.products[0] : r.products;
@@ -71,78 +102,139 @@ export default async function DynamicsPage({ searchParams }: {
     });
   }
 
-  // Для каждого SKU оставляем только уникальные period_end (латест вхождение по каждой дате)
+  // Бакетинг по выбранному периоду — для каждой пары (SKU × bucket) считаем avg
+  // Списки всех бакетов сортируем и берём только последние pointsLimit
+  const allBuckets = new Set<string>();
+  for (const r of rows) allBuckets.add(bucketize(r.period_end, period));
+  const sortedBuckets = Array.from(allBuckets).sort();
+  const recentBuckets = sortedBuckets.slice(-periodMeta.pointsLimit);
+
   const trends: SkuTrend[] = [];
   for (const [pid, data] of byProduct) {
-    // Сортируем и дедуплицируем period_end
-    const sorted = [...data.entries].sort((a, b) => a.period.localeCompare(b.period));
-    const dedup = new Map<string, number>();
-    for (const e of sorted) {
-      dedup.set(e.period, e.vel);  // последнее вхождение по периоду выигрывает
+    // Для каждого bucket — avg velocity
+    const cells: number[] = [];
+    let activeCells = 0;
+    for (const key of recentBuckets) {
+      const pointsInBucket: number[] = [];
+      for (const e of data.entries) {
+        if (bucketize(e.period, period) === key) pointsInBucket.push(e.vel);
+      }
+      const avg = pointsInBucket.length > 0
+        ? pointsInBucket.reduce((a, b) => a + b, 0) / pointsInBucket.length
+        : 0;
+      cells.push(avg);
+      if (avg > 0) activeCells += 1;
     }
-    const sortedByPeriod = Array.from(dedup.entries()).sort((a, b) => a[0].localeCompare(b[0]));
-    if (sortedByPeriod.length < 2) continue;  // нужно минимум 2 точки для дельты
+    // Скрываем SKU без активности (правка 12 Александра)
+    if (activeCells === 0) continue;
+    if (cells.length < 2) continue;
 
-    const history = sortedByPeriod.map(([, v]) => v);
-    const current = history[history.length - 1];
-    const previous = history[history.length - 2];
-    if (previous === 0) continue;  // избегаем деления на ноль
+    const current = cells[cells.length - 1];
+    const previous = cells[cells.length - 2];
+    if (previous === 0) continue;
 
     const deltaPct = ((current - previous) / previous) * 100;
-    trends.push({ pid, sku: data.sku, name: data.name, current, previous, deltaPct, history });
+    trends.push({ pid, sku: data.sku, name: data.name, current, previous, deltaPct, history: cells });
   }
 
-  // Топ-10 выросших
   const surging = [...trends]
-    .filter(t => t.current >= 0.1 && t.deltaPct > 10)  // отсекаем шум от SKU с почти нулевой скоростью
+    .filter(t => t.current >= 0.1 && t.deltaPct > 10)
     .sort((a, b) => b.deltaPct - a.deltaPct)
     .slice(0, 10);
 
-  // Топ-10 просевших
   const sliding = [...trends]
     .filter(t => t.previous >= 0.1 && t.deltaPct < -10)
     .sort((a, b) => a.deltaPct - b.deltaPct)
     .slice(0, 10);
 
-  // Список всех с сортировкой по |delta| + фильтр поиска
   const all = [...trends]
     .filter(t => !search || t.sku.toLowerCase().includes(search) || t.name.toLowerCase().includes(search))
     .sort((a, b) => Math.abs(b.deltaPct) - Math.abs(a.deltaPct));
   const allLimited = all.slice(0, 50);
 
-  // Тренд магазина: avg velocity за каждый период
-  const periodToVels = new Map<string, number[]>();
-  for (const t of trends) {
-    const data = byProduct.get(t.pid);
-    if (!data) continue;
-    const periodMap = new Map<string, number>();
-    for (const e of data.entries) periodMap.set(e.period, e.vel);
-    for (const [period, vel] of periodMap) {
-      if (!periodToVels.has(period)) periodToVels.set(period, []);
-      periodToVels.get(period)!.push(vel);
+  // Тренд магазина — avg velocity по всем SKU за каждый bucket
+  const storeTrend: { period: string; avg: number }[] = [];
+  for (const key of recentBuckets) {
+    const allVels: number[] = [];
+    for (const [, data] of byProduct) {
+      const pointsInBucket: number[] = [];
+      for (const e of data.entries) {
+        if (bucketize(e.period, period) === key) pointsInBucket.push(e.vel);
+      }
+      if (pointsInBucket.length > 0) {
+        allVels.push(pointsInBucket.reduce((a, b) => a + b, 0) / pointsInBucket.length);
+      }
+    }
+    if (allVels.length > 0) {
+      storeTrend.push({ period: key, avg: allVels.reduce((a, b) => a + b, 0) / allVels.length });
     }
   }
-  const storeTrend = Array.from(periodToVels.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .slice(-14)
-    .map(([period, vels]) => ({
-      period,
-      avg: vels.reduce((a, b) => a + b, 0) / vels.length,
-    }));
 
   const noData = trends.length === 0;
 
+  // Query-helper для смены периода с сохранением остальных параметров
+  const periodLink = (p: Period) => {
+    const params = new URLSearchParams();
+    if (p !== "day") params.set("period", p);
+    if (search) params.set("q", search);
+    return `/dashboard/dynamics${params.toString() ? `?${params.toString()}` : ""}` as any;
+  };
+
+  const exportQs = new URLSearchParams();
+  exportQs.set("period", period);
+
   return (
     <div className="space-y-6">
-      <header>
-        <div className="inline-flex items-center gap-2 mb-2">
-          <span className="size-1 rounded-full bg-lime-deep" />
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Dynamics</span>
+      <header className="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <div className="inline-flex items-center gap-2 mb-2">
+            <span className="size-1 rounded-full bg-lime-deep" />
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Dynamics</span>
+          </div>
+          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">Динамика скоростей</h1>
+          <p className="text-sm text-ink-muted mt-1">
+            Какие SKU ускорились, какие просели — и что делать. Сравнение последних двух периодов агрегации.
+          </p>
         </div>
-        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">Динамика скоростей</h1>
-        <p className="text-sm text-ink-muted mt-1">
-          Какие SKU ускорились, какие просели — и что делать. Сравнение последних двух периодов пересчёта.
-        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Фильтр периода День/Неделя/Месяц (правка 12) */}
+          <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1">
+            {PERIODS.map(p => {
+              const isActive = period === p.value;
+              return (
+                <Link
+                  key={p.value}
+                  href={periodLink(p.value)}
+                  className={`text-xs px-3 py-1.5 rounded-md font-medium transition ${
+                    isActive ? "bg-ink text-paper" : "text-ink-muted hover:text-ink hover:bg-bg-soft"
+                  }`}
+                  title={p.hint}
+                >
+                  {p.label}
+                </Link>
+              );
+            })}
+          </div>
+          {/* Excel / CSV экспорт в углу (правка 12) */}
+          <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1">
+            <a
+              href={`/api/export/dynamics?${exportQs.toString()}&format=excel`}
+              download
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition"
+              title="Скачать в Excel"
+            >
+              <Icons.ArrowRight size={11} /> Excel
+            </a>
+            <a
+              href={`/api/export/dynamics?${exportQs.toString()}&format=csv`}
+              download
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition border-l border-line"
+              title="Скачать в CSV"
+            >
+              CSV
+            </a>
+          </div>
+        </div>
       </header>
 
       {noData ? (
@@ -152,7 +244,7 @@ export default async function DynamicsPage({ searchParams }: {
           </div>
           <p className="font-display text-xl text-ink font-medium">Накапливается история</p>
           <p className="mt-2 text-sm text-ink-muted max-w-md mx-auto">
-            Чтобы видеть динамику, нужно минимум два пересчёта. Дашборд начнёт работать через 1-2 дня регулярных синков.
+            Чтобы видеть динамику, нужно минимум два пересчёта в выбранной агрегации ({periodMeta.hint}). Дашборд начнёт работать через несколько дней регулярных синков.
           </p>
         </div>
       ) : (
@@ -160,8 +252,8 @@ export default async function DynamicsPage({ searchParams }: {
           {/* Тренд магазина */}
           <div className="rounded-2xl border border-line bg-paper p-6">
             <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold flex items-center">
-              Средняя скорость по магазину
-              <InfoTooltip text="Среднее adjusted_velocity по всем SKU за каждый период пересчёта. Подъём = магазин в целом разгоняется, спад = охлаждается." />
+              Средняя скорость по магазину · {periodMeta.hint}
+              <InfoTooltip text="Среднее adjusted_velocity по всем SKU за каждый период агрегации. Подъём = магазин в целом разгоняется, спад = охлаждается." />
             </h2>
             <div className="mt-3 flex items-end gap-3 flex-wrap">
               <div className="font-display text-3xl md:text-4xl tabular font-medium text-ink">
@@ -185,7 +277,6 @@ export default async function DynamicsPage({ searchParams }: {
             </div>
           </div>
 
-          {/* Два блока: выросли влево, просели вправо */}
           <div className="grid gap-6 lg:grid-cols-2">
             <TrendList
               title="Что разогналось"
@@ -205,15 +296,16 @@ export default async function DynamicsPage({ searchParams }: {
             />
           </div>
 
-          {/* Полная таблица с поиском */}
           <div className="rounded-2xl border border-line bg-paper overflow-hidden">
             <div className="px-5 py-4 border-b border-line bg-bg-soft flex items-center justify-between flex-wrap gap-3">
               <div>
                 <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold flex items-center">
                   Все изменения
-                  <InfoTooltip text="Топ-50 SKU отсортированы по абсолютной величине изменения скорости. Серым — минимальные изменения, цветные — сильные." />
+                  <InfoTooltip text="Топ-50 SKU отсортированы по абсолютной величине изменения скорости. SKU без активности скрыты по умолчанию." />
                 </h2>
-                <p className="text-xs text-ink-muted mt-1">Отсортировано по силе изменения · {all.length} SKU всего, показано 50</p>
+                <p className="text-xs text-ink-muted mt-1">
+                  Отсортировано по силе изменения · {all.length} SKU всего, показано 50
+                </p>
               </div>
               <DynamicsSearch initial={search} />
             </div>
@@ -315,7 +407,6 @@ function TrendList({
   );
 }
 
-/** Мини-sparkline SVG — легвес и не требует recharts. */
 function Sparkline({ values, width = 100, height = 28 }: { values: number[]; width?: number; height?: number }) {
   if (values.length < 2) return <div style={{ width, height }} />;
   const min = Math.min(...values);
@@ -329,7 +420,7 @@ function Sparkline({ values, width = 100, height = 28 }: { values: number[]; wid
     })
     .join(" ");
   const isUp = values[values.length - 1] >= values[0];
-  const color = isUp ? "#7da82c" : "#c44545";  // lime-deep / rose
+  const color = isUp ? "#7da82c" : "#c44545";
   return (
     <svg width={width} height={height} className="inline-block">
       <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
