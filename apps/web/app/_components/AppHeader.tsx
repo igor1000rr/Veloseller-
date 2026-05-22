@@ -72,7 +72,7 @@ export default function AppHeader({
   const planClass = plan ? PLAN_COLORS[plan] ?? PLAN_COLORS.trial : "";
 
   return (
-    <header className="sticky top-0 z-30 backdrop-blur-md bg-paper/85 border-b border-line">
+    <header className="sticky top-0 z-30 backdrop-blur-md bg-paper/90 border-b border-line" style={{ backgroundColor: "rgba(255,255,255,0.9)" }}>
       <div className="w-full px-4 md:px-8 lg:px-12 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-6 min-w-0">
           <Link href={variant === "admin" ? "/admin" : "/dashboard"} className="flex items-center gap-2.5 shrink-0">
@@ -112,8 +112,11 @@ export default function AppHeader({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Десктопный WarehouseSelector — спрятан на мобиле, в мобильном меню внизу свой. */}
           {variant === "dashboard" && warehouses && (
-            <WarehouseSelector warehouses={warehouses} selectedId={selectedWarehouseId ?? null} />
+            <div className="hidden sm:block">
+              <WarehouseSelector warehouses={warehouses} selectedId={selectedWarehouseId ?? null} />
+            </div>
           )}
 
           {planLabel && variant === "dashboard" && (
@@ -159,8 +162,12 @@ export default function AppHeader({
       </div>
 
       {open && (
-        <div className="fixed inset-0 z-50 lg:hidden bg-bg flex flex-col slide-down">
-          <div className="flex items-center justify-between px-4 md:px-8 py-3 border-b border-line">
+        /* КРИТИКА: было bg-bg — сливалось с body. Поменял на bg-paper + inline style на случай проблем. */
+        <div
+          className="fixed inset-0 z-50 lg:hidden bg-paper flex flex-col slide-down"
+          style={{ backgroundColor: "#ffffff" }}
+        >
+          <div className="flex items-center justify-between px-4 md:px-8 py-3 border-b border-line bg-paper" style={{ backgroundColor: "#ffffff" }}>
             <Link href={variant === "admin" ? "/admin" : "/dashboard"} onClick={() => setOpen(false)} className="flex items-center gap-2.5">
               <Icons.Logo size={26} />
               <span className="font-display text-base font-medium tracking-tight">Veloseller</span>
@@ -172,13 +179,13 @@ export default function AppHeader({
               <Icons.Close size={20} />
             </button>
           </div>
-          <nav className="flex-1 flex flex-col px-4 md:px-8 py-6 gap-1 overflow-y-auto">
+          <nav className="flex-1 flex flex-col px-4 md:px-8 py-6 gap-1 overflow-y-auto bg-paper" style={{ backgroundColor: "#ffffff" }}>
             {variant === "dashboard" && warehouses && warehouses.length > 0 && (
               <div className="mb-3 px-3 py-2.5 rounded-lg border border-line bg-bg-soft">
-                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush font-semibold mb-1">
+                <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush font-semibold mb-2">
                   Выбранный склад
                 </div>
-                <WarehouseSelector warehouses={warehouses} selectedId={selectedWarehouseId ?? null} />
+                <WarehouseSelector warehouses={warehouses} selectedId={selectedWarehouseId ?? null} forceVisible />
               </div>
             )}
             {planLabel && variant === "dashboard" && (
@@ -223,8 +230,8 @@ export default function AppHeader({
               </Link>
             )}
           </nav>
-          <div className="px-4 md:px-8 py-5 border-t border-line space-y-2">
-            <div className="font-mono text-xs text-ink-hush">{email}</div>
+          <div className="px-4 md:px-8 py-5 border-t border-line space-y-2 bg-paper" style={{ backgroundColor: "#ffffff" }}>
+            <div className="font-mono text-xs text-ink-hush break-all">{email}</div>
             {variant === "dashboard" && <LogoutButton />}
           </div>
         </div>

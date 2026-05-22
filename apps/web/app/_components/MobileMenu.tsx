@@ -34,8 +34,14 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
       </button>
 
       {open && (
-        <div className="fixed inset-0 z-50 md:hidden bg-bg flex flex-col slide-down">
-          <div className="flex items-center justify-between px-6 py-4 border-b border-line">
+        /* КРИТИКА из скрина юзера: было bg-bg — это такой же цвет как body,
+           поэтому меню выглядело "прозрачным" и контент за ним просвечивал. Теперь
+           bg-paper (белый) + inline-style fallback на случай проблем с Tailwind. */
+        <div
+          className="fixed inset-0 z-50 md:hidden bg-paper flex flex-col slide-down"
+          style={{ backgroundColor: "#ffffff" }}
+        >
+          <div className="flex items-center justify-between px-6 py-4 border-b border-line bg-paper" style={{ backgroundColor: "#ffffff" }}>
             <Link href="/" onClick={() => setOpen(false)} className="flex items-center gap-2.5">
               <Icons.Logo />
               <span className="font-display text-lg font-medium tracking-tight">Veloseller</span>
@@ -49,7 +55,7 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
             </button>
           </div>
 
-          <nav className="flex-1 flex flex-col px-6 py-8 gap-2">
+          <nav className="flex-1 flex flex-col px-6 py-8 gap-2 overflow-y-auto bg-paper" style={{ backgroundColor: "#ffffff" }}>
             {nav.map((item) => (
               <a
                 key={item.href}
@@ -63,7 +69,7 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
             ))}
           </nav>
 
-          <div className="px-6 py-6 border-t border-line space-y-3">
+          <div className="px-6 py-6 border-t border-line space-y-3 bg-paper" style={{ backgroundColor: "#ffffff" }}>
             {isAuthed ? (
               <Link
                 href={"/dashboard" as any}
