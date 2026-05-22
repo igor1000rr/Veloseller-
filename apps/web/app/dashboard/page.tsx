@@ -37,13 +37,11 @@ export default async function DashboardOverview({ searchParams }: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // Multi-warehouse: данные показываем только по выбранному складу
   const [selected, allWarehouses] = await Promise.all([
     getSelectedWarehouse(supabase, user.id),
     listWarehouses(supabase, user.id),
   ]);
 
-  // 0 складов → empty state
   if (allWarehouses.length === 0) {
     return (
       <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center">
@@ -60,7 +58,6 @@ export default async function DashboardOverview({ searchParams }: {
     );
   }
 
-  // Если selected null — берём первый (защита от edge case)
   const currentWarehouseId = selected?.id ?? allWarehouses[0].id;
   const currentWarehouseName = selected?.name ?? allWarehouses[0].name;
   const currentWarehouseKind = selected?.warehouse_kind ?? allWarehouses[0].warehouse_kind;
@@ -74,8 +71,6 @@ export default async function DashboardOverview({ searchParams }: {
   const currency = (seller as any)?.currency ?? "RUB";
   const fmt = (n: number | null | undefined) => formatMoney(n, currency);
 
-  // store_metrics пока агрегирует по seller_id (без разбивки по connection_id).
-  // TODO: после рефакторинга recalc per-warehouse заменить на per-склад данные.
   const periodStartDate = new Date(Date.now() - periodDays * 86400_000);
   const periodStartIso = periodStartDate.toISOString().slice(0, 10);
   const { data: storeMetricsRows } = await supabase
@@ -97,24 +92,60 @@ export default async function DashboardOverview({ searchParams }: {
     .order("period_end", { ascending: false })
     .limit(14);
 
-  // tvelo_metrics — фильтруем по products.connection_id выбранного склада
-  const tveloRows = await fetchAll<{ adjusted_velocity: number; product_id: string; period_end: string }>(
+  // tvelo_metrics — фильтруем по products.connection_id выбранного склада.
+  // Достаём adjusted_velocity, confidence_score, stockout_days для расчёта
+  // "SKU без активности" и "Часто отсутствуют на складе" + средней достоверности.
+  const tveloRows = await fetchAll<{
+    adjusted_velocity: number;
+    confidence_score: number | null;
+    stockout_days: number | null;
+    product_id: string;
+    period_end: string;
+  }>(
     async (from, to) => await supabase
       .from("tvelo_metrics")
-      .select("adjusted_velocity,product_id,period_end,products!inner(seller_id,connection_id)")
+      .select("adjusted_velocity,confidence_score,stockout_days,product_id,period_end,products!inner(seller_id,connection_id)")
       .eq("products.seller_id", user.id)
       .eq("products.connection_id", currentWarehouseId)
       .order("period_end", { ascending: false })
       .range(from, to),
   );
-  const latestByProduct = new Map<string, number>();
+  // Берём свежие метрики по каждому product_id
+  const latestByProduct = new Map<string, {
+    velocity: number;
+    confidence: number | null;
+    stockoutDays: number | null;
+  }>();
   for (const m of tveloRows) {
-    if (!latestByProduct.has(m.product_id)) latestByProduct.set(m.product_id, Number(m.adjusted_velocity));
+    if (!latestByProduct.has(m.product_id)) {
+      latestByProduct.set(m.product_id, {
+        velocity: Number(m.adjusted_velocity),
+        confidence: m.confidence_score == null ? null : Number(m.confidence_score),
+        stockoutDays: m.stockout_days == null ? null : Number(m.stockout_days),
+      });
+    }
   }
-  const velocities = Array.from(latestByProduct.values()).filter(v => v > 0).sort((a, b) => a - b);
+  const velocities = Array.from(latestByProduct.values()).map(v => v.velocity).filter(v => v > 0).sort((a, b) => a - b);
   const fastVelocity = velocities.length > 0 ? velocities[Math.floor(velocities.length * 0.9)] : 0;
   const avgVelocity = velocities.length > 0 ? velocities.reduce((a, b) => a + b, 0) / velocities.length : 0;
   const slowVelocity = velocities.length > 0 ? velocities[Math.floor(velocities.length * 0.1)] : 0;
+
+  // Достоверность данных — среднее confidence_score по выбранному складу
+  const confidenceValues = Array.from(latestByProduct.values())
+    .map(v => v.confidence)
+    .filter((c): c is number => c != null);
+  const avgConfidence = confidenceValues.length > 0
+    ? confidenceValues.reduce((a, b) => a + b, 0) / confidenceValues.length
+    : null;
+
+  // "Часто отсутствуют" — SKU где stockout_days > 15 за период
+  const frequentOosCount = Array.from(latestByProduct.values())
+    .filter(v => (v.stockoutDays ?? 0) > 15).length;
+
+  // "SKU без активности" — пока считаем как прокси: velocity == 0.
+  // Точная логика (stock == 0 + 0 продаж за 30д) уедет в worker в следующей итерации.
+  const inactiveSkuCount = Array.from(latestByProduct.values())
+    .filter(v => v.velocity === 0).length;
 
   const { data: alerts } = await supabase
     .from("alerts")
@@ -125,6 +156,9 @@ export default async function DashboardOverview({ searchParams }: {
     .limit(5);
 
   const showMultiWarehouseBanner = allWarehouses.length > 1;
+
+  // Линки на SKU-страницу с фильтрами (страница ещё не парсит — это итерация 3)
+  const skusLink = (filter: string) => `/dashboard/skus?period=${period}&filter=${filter}` as any;
 
   return (
     <div className="space-y-6">
@@ -162,40 +196,41 @@ export default async function DashboardOverview({ searchParams }: {
 
       <DayProgress daysSinceSetup={daysSinceSetup} />
 
-      {/* KPI */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Kpi
-          label="Всего SKU"
-          tooltip="Количество товарных позиций засинкованных из подключённых источников. Считается по таблице products."
-          value={storeMetrics?.total_sku_count ?? "—"}
-        />
-        <Kpi
-          label="Нет в наличии"
-          tooltip="SKU с нулевым остатком на момент последнего синка. Прямые потери продаж — товара нет, заявки уходят к конкурентам."
-          value={storeMetrics?.oos_sku_count ?? "—"}
-          tone="warn"
-        />
-        <Kpi
+      {/* ===== ПОЛОСА 1: 3 средних блока (action-блоки) ===== */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <ActionCard
+          href={skusLink("low_stock")}
           label="Низкий остаток"
-          tooltip="SKU где coverage_days ≤ 7 — закончится за неделю при текущей скорости продаж. Сюда срочно пополнение."
+          tooltip="SKU где coverage_days ≤ 7 — закончится за неделю при текущей скорости продаж."
           value={storeMetrics?.low_stock_sku_count ?? "—"}
+          sub="закончатся через неделю, нужна поставка"
           tone="warn"
         />
-        <Kpi
+        <ActionCard
+          href={skusLink("lost_revenue")}
+          label="Потерянная выручка"
+          tooltip="Σ (adjusted_velocity × stockout_days × avg_price) по всем SKU. Сколько денег не получено из-за того что товар был out-of-stock."
+          value={fmt(storeMetrics?.lost_revenue)}
+          sub="недополучено за период из-за отсутствия товара"
+          tone="danger"
+        />
+        <ActionCard
+          href={skusLink("dead_inventory")}
           label="Неликвид"
-          tooltip="SKU где coverage_days > 180 — продаваться будет дольше 6 месяцев. Деньги заморожены в товаре. Распродавать или возвращать поставщику."
+          tooltip="SKU где coverage_days > 180 — продаваться будет дольше 6 месяцев. Деньги заморожены в товаре."
           value={storeMetrics?.dead_inventory_sku_count ?? "—"}
+          sub="низкая скорость продаж"
           tone="warn"
         />
       </div>
 
-      {/* Health + Inventory value */}
+      {/* ===== ПОЛОСА 2: 2 больших блока ===== */}
       <div className="grid gap-6 md:grid-cols-2">
         <HealthScoreBlock score={storeMetrics?.warehouse_health_score} />
 
         <div className="rounded-2xl border border-line bg-paper p-6">
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold flex items-center">
-            Денег в остатках
+            Денег на остатках
             <InfoTooltip text={`Σ stock_quantity × current_price по всем SKU. Сколько ${currency === "RUB" ? "рублей" : "денег"} лежит на складе в виде товара — это твой замороженный оборотный капитал.`} />
           </div>
           <div className="mt-3 font-display text-4xl md:text-5xl tracking-tight font-medium text-ink tabular">
@@ -213,7 +248,37 @@ export default async function DashboardOverview({ searchParams }: {
         </div>
       </div>
 
-      {/* Concentrations */}
+      {/* ===== ПОЛОСА 3: 4 маленьких KPI ===== */}
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <Kpi
+          href={"/dashboard/skus" as any}
+          label="Всего SKU"
+          tooltip="Количество товарных позиций, засинкованных из подключённого источника."
+          value={storeMetrics?.total_sku_count ?? "—"}
+        />
+        <Kpi
+          href={skusLink("oos")}
+          label="Нет в наличии"
+          tooltip="Товары с нулевым остатком, по которым было движение за последние 30 дней."
+          value={storeMetrics?.oos_sku_count ?? "—"}
+          tone="warn"
+        />
+        <Kpi
+          href={skusLink("inactive")}
+          label="SKU без активности"
+          tooltip="Товары с нулевым остатком и без движений за последние 30 дней. Не участвуют в расчётах."
+          value={inactiveSkuCount}
+          tone="muted"
+        />
+        <Kpi
+          label="Достоверность данных"
+          tooltip="Средняя достоверность данных по магазину. Чем больше дней снимаем snapshots — тем выше показатель."
+          value={avgConfidence != null ? `${(avgConfidence * 100).toFixed(0)}%` : "—"}
+          tone="accent"
+        />
+      </div>
+
+      {/* ===== ПОЛОСА 4: 3 средних блока (концентрации + частые OOS) ===== */}
       <div className="grid gap-4 md:grid-cols-3">
         <div className="rounded-2xl border border-line bg-paper p-5">
           <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
@@ -235,19 +300,19 @@ export default async function DashboardOverview({ searchParams }: {
           </div>
           <div className="mt-1 text-xs text-ink-muted">дают 50% спроса</div>
         </div>
-        <div className="rounded-2xl border border-rose/30 bg-rose/5 p-5">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-rose font-semibold flex items-center">
-            Потерянная выручка
-            <InfoTooltip text="Σ (adjusted_velocity × stockout_days × avg_price) по всем SKU. Сколько денег не получено за период из-за того что товар был out-of-stock — clients ушли к конкуренту." />
+        <div className="rounded-2xl border border-orange/30 bg-orange/5 p-5">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold flex items-center">
+            Часто отсутствуют на складе
+            <InfoTooltip text="Товары, которые более 15 дней за последний месяц отсутствовали на складе. Регулярный дефицит — повод проверить логистику или закупку." />
           </div>
-          <div className="mt-2 font-display text-2xl tabular text-rose font-medium">
-            {fmt(storeMetrics?.lost_revenue)}
+          <div className="mt-2 font-display text-2xl tabular text-orange font-medium">
+            {frequentOosCount} <span className="text-base text-orange/70">SKU</span>
           </div>
-          <div className="mt-1 text-xs text-rose/80">недополучено за период из-за отсутствия товара</div>
+          <div className="mt-1 text-xs text-orange/80">отсутствовали на складе более 15 дней за месяц</div>
         </div>
       </div>
 
-      {/* 3 скорости продаж — на основе выбранного склада */}
+      {/* ===== ПОЛОСА 5: 3 скорости продаж ===== */}
       <div>
         <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3 flex items-center">
           Скорости продаж по SKU склада «{currentWarehouseName}»
@@ -260,7 +325,7 @@ export default async function DashboardOverview({ searchParams }: {
         </div>
       </div>
 
-      {/* Графики */}
+      {/* ===== ПОЛОСА 6: Графики ===== */}
       <div className="grid gap-4 lg:grid-cols-3">
         <ChartCard title="Здоровье склада за 14 дней" tooltip="Изменение warehouse_health_score за последние 14 пересчётов. Тренд вверх = склад здоровеет, вниз = ухудшение.">
           <HealthTrend history={storeHistory ?? []} />
@@ -273,7 +338,7 @@ export default async function DashboardOverview({ searchParams }: {
         </ChartCard>
       </div>
 
-      {/* Dead inventory */}
+      {/* ===== ПОЛОСА 7: Dead inventory ===== */}
       <div className="rounded-2xl border border-line bg-paper p-6">
         <h3 className="font-display text-lg font-medium text-ink flex items-center">
           Неликвид (товары &gt; 6 месяцев)
@@ -306,18 +371,77 @@ export default async function DashboardOverview({ searchParams }: {
   );
 }
 
-function Kpi({ label, value, tone, tooltip }: { label: string; value: React.ReactNode; tone?: "warn"; tooltip?: string }) {
-  return (
-    <div className="rounded-2xl border border-line bg-paper p-4">
+/**
+ * ActionCard — средний блок-кнопка для полосы 1. Кликабельный, ведёт на SKU
+ * с фильтром. Тон: danger (красный, для потерянной выручки), warn (оранжевый,
+ * для низкого остатка/неликвида).
+ */
+function ActionCard({ href, label, value, sub, tone, tooltip }: {
+  href?: string;
+  label: string;
+  value: React.ReactNode;
+  sub: string;
+  tone: "warn" | "danger";
+  tooltip?: string;
+}) {
+  const toneClasses = tone === "danger"
+    ? "border-rose/30 bg-rose/5 hover:border-rose/50"
+    : "border-orange/30 bg-orange/5 hover:border-orange/50";
+  const labelColor = tone === "danger" ? "text-rose" : "text-orange";
+  const valueColor = tone === "danger" ? "text-rose" : "text-orange";
+  const subColor = tone === "danger" ? "text-rose/80" : "text-orange/80";
+
+  const inner = (
+    <div className={`group rounded-2xl border-2 p-5 transition ${toneClasses} ${href ? "cursor-pointer hover:shadow-md" : ""}`}>
+      <div className={`font-mono text-[10px] uppercase tracking-widest font-semibold flex items-center ${labelColor}`}>
+        {label}
+        {tooltip && <InfoTooltip text={tooltip} />}
+      </div>
+      <div className={`mt-2 font-display text-3xl md:text-4xl tabular font-medium tracking-tight ${valueColor}`}>
+        {value}
+      </div>
+      <div className={`mt-1.5 text-xs leading-relaxed ${subColor}`}>{sub}</div>
+      {href && (
+        <div className={`mt-3 font-mono text-[10px] uppercase tracking-widest ${labelColor} opacity-0 group-hover:opacity-100 transition`}>
+          посмотреть →
+        </div>
+      )}
+    </div>
+  );
+
+  return href ? <Link href={href as any}>{inner}</Link> : inner;
+}
+
+/**
+ * Kpi — маленький KPI для полосы 3. Опционально кликабельный.
+ * Тона: warn (оранжевый), muted (серый — для неактивных), accent (lime — для достоверности).
+ */
+function Kpi({ href, label, value, tone, tooltip }: {
+  href?: string;
+  label: string;
+  value: React.ReactNode;
+  tone?: "warn" | "muted" | "accent";
+  tooltip?: string;
+}) {
+  const valueColor =
+    tone === "warn"   ? "text-orange" :
+    tone === "muted"  ? "text-ink-hush" :
+    tone === "accent" ? "text-lime-deep" :
+                        "text-ink";
+
+  const inner = (
+    <div className={`rounded-2xl border border-line bg-paper p-4 transition ${href ? "hover:border-lime-deep/40 hover:shadow-sm cursor-pointer" : ""}`}>
       <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
         {label}
         {tooltip && <InfoTooltip text={tooltip} />}
       </div>
-      <div className={`mt-1.5 font-display text-2xl md:text-3xl tabular font-medium tracking-tight ${tone === "warn" ? "text-orange" : "text-ink"}`}>
+      <div className={`mt-1.5 font-display text-2xl md:text-3xl tabular font-medium tracking-tight ${valueColor}`}>
         {value}
       </div>
     </div>
   );
+
+  return href ? <Link href={href as any}>{inner}</Link> : inner;
 }
 
 function VelocityCard({ label, value, sub, tone, tooltip }: { label: string; value: number; sub: string; tone: "fast" | "mid" | "slow"; tooltip?: string }) {
