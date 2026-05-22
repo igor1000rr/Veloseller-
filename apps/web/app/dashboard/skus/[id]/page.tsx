@@ -82,7 +82,6 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     changelogByDate[day].push(e);
   }
 
-  // Сравнение adjusted vs median: насколько коррекция «вытянула» velocity
   let adjVsMedian = "";
   if (latest && latest.median_30d_velocity != null) {
     const adj = Number(latest.adjusted_velocity);
@@ -97,17 +96,17 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
   return (
     <div className="space-y-6">
       <header>
-        <Link href="/dashboard/skus" className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition">
+        <Link href="/dashboard/skus" className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition py-1">
           <span className="rotate-180"><Icons.ArrowRight size={12} /></span> Все SKU
         </Link>
-        <div className="mt-3 flex items-baseline gap-3 flex-wrap">
-          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink font-mono">{product.sku}</h1>
-          <span className="text-ink-muted text-lg">{product.product_name}</span>
+        <div className="mt-3 flex items-baseline gap-2 sm:gap-3 flex-wrap">
+          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink font-mono break-all">{product.sku}</h1>
+          <span className="text-ink-muted text-sm sm:text-base md:text-lg break-words">{product.product_name}</span>
         </div>
       </header>
 
       {latest && (
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
           <Kpi label="TVelo" value={Number(latest.adjusted_velocity).toFixed(2)} sub={adjVsMedian || "ед./день"} />
           <Kpi label="Медиана 30д" value={
             latest.median_30d_velocity != null
@@ -123,7 +122,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         </div>
       )}
 
-      <div className="rounded-2xl border border-line bg-paper p-6">
+      <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
         <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-4">Анализ SKU</h2>
         {chartData.length < 2 ? (
           <p className="text-sm text-ink-muted">Недостаточно данных для графика (нужно 2+ дня)</p>
@@ -143,16 +142,16 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
       )}
 
       {(elasticity ?? []).length > 0 && (
-        <div className="rounded-2xl border border-line bg-paper p-6">
+        <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
           <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">Price elasticity</h2>
-          <h3 className="font-display text-lg font-medium text-ink mt-1">Влияние цены на скорость</h3>
+          <h3 className="font-display text-base sm:text-lg font-medium text-ink mt-1">Влияние цены на скорость</h3>
           <p className="text-sm text-ink-muted mb-4">Velocity до и после смены цены (минимум 7 in-stock дней с каждой стороны)</p>
           <div className="grid gap-3">
             {(elasticity ?? []).map((e: any, i: number) => {
               const impact = Number(e.price_impact_percent);
               const positiveImpact = impact > 0;
               return (
-                <div key={i} className="flex items-center gap-4 md:gap-6 p-4 rounded-xl border border-line bg-bg-soft flex-wrap">
+                <div key={i} className="flex items-center gap-3 sm:gap-4 md:gap-6 p-3 sm:p-4 rounded-xl border border-line bg-bg-soft flex-wrap">
                   <div className="font-mono text-xs text-ink-hush whitespace-nowrap">
                     {new Date(e.change_date).toLocaleDateString("ru-RU")}
                   </div>
@@ -165,13 +164,13 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
                       ({Number(e.price_delta_pct) > 0 ? "+" : ""}{Number(e.price_delta_pct).toFixed(1)}%)
                     </span>
                   </div>
-                  <div className="text-sm flex-1">
+                  <div className="text-sm flex-1 min-w-[180px]">
                     <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Velocity:</span>{" "}
                     <span className="font-mono text-ink-soft">{Number(e.velocity_before).toFixed(2)}</span>
                     {" → "}
                     <span className="font-mono font-semibold text-ink">{Number(e.velocity_after).toFixed(2)}</span>
                   </div>
-                  <div className={`px-3 py-1.5 rounded-lg font-mono text-sm font-semibold ${
+                  <div className={`px-3 py-1.5 rounded-lg font-mono text-sm font-semibold whitespace-nowrap ${
                     positiveImpact ? "bg-lime-soft text-lime-deep border border-lime-deep/30" : "bg-rose/10 text-rose border border-rose/30"
                   }`}>
                     {positiveImpact ? "+" : ""}{impact.toFixed(1)}%
@@ -183,24 +182,27 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         </div>
       )}
 
-      <div className="rounded-2xl border border-line bg-paper p-6">
+      <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
         <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">Changelog</h2>
-        <h3 className="font-display text-lg font-medium text-ink mt-1 mb-4">События за последние 30 дней</h3>
+        <h3 className="font-display text-base sm:text-lg font-medium text-ink mt-1 mb-4">События за последние 30 дней</h3>
         {(changelog ?? []).length === 0 ? (
           <p className="text-sm text-ink-muted">Событий нет</p>
         ) : (
           <ul className="divide-y divide-line">
             {(changelog ?? []).map((e: any, i: number) => (
-              <li key={i} className="py-2.5 flex items-start gap-4 text-sm flex-wrap">
-                <span className="text-ink-hush text-xs whitespace-nowrap w-24 mt-0.5 font-mono">
-                  {new Date(e.event_date).toLocaleDateString("ru-RU")}
-                </span>
-                <span className={`inline-flex items-center justify-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold w-32 ${TYPE_STYLES[e.event_type] ?? "text-ink-soft bg-bg-soft border-line"}`}>
-                  {TYPE_LABELS[e.event_type] ?? e.event_type}
-                </span>
-                <span className="text-ink-soft flex-1">{e.message}</span>
+              /* На мобиле stack: дата+тип сверху, сообщение ниже. Были жёсткие w-24/w-32 которые ломали layout на 360px. */
+              <li key={i} className="py-2.5 flex flex-col sm:flex-row sm:items-start gap-1.5 sm:gap-4 text-sm">
+                <div className="flex items-center gap-2 sm:gap-4 shrink-0">
+                  <span className="text-ink-hush text-xs whitespace-nowrap sm:w-24 font-mono">
+                    {new Date(e.event_date).toLocaleDateString("ru-RU")}
+                  </span>
+                  <span className={`inline-flex items-center justify-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold sm:w-32 whitespace-nowrap ${TYPE_STYLES[e.event_type] ?? "text-ink-soft bg-bg-soft border-line"}`}>
+                    {TYPE_LABELS[e.event_type] ?? e.event_type}
+                  </span>
+                </div>
+                <span className="text-ink-soft flex-1 break-words">{e.message}</span>
                 {e.confidence_impact != null && Number(e.confidence_impact) !== 0 && (
-                  <span className="font-mono text-xs text-orange whitespace-nowrap">−{Math.abs(Number(e.confidence_impact)).toFixed(1)}%</span>
+                  <span className="font-mono text-xs text-orange whitespace-nowrap shrink-0">−{Math.abs(Number(e.confidence_impact)).toFixed(1)}%</span>
                 )}
               </li>
             ))}
@@ -231,10 +233,10 @@ const TYPE_STYLES: Record<string, string> = {
 
 function Kpi({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className="rounded-xl border border-line bg-paper p-4">
+    <div className="rounded-xl border border-line bg-paper p-3 sm:p-4">
       <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush">{label}</div>
-      <div className="mt-1 font-display text-2xl tabular font-medium text-ink">{value}</div>
-      {sub && <div className="text-xs text-ink-hush mt-0.5 font-mono">{sub}</div>}
+      <div className="mt-1 font-display text-lg sm:text-xl md:text-2xl tabular font-medium text-ink break-words">{value}</div>
+      {sub && <div className="text-xs text-ink-hush mt-0.5 font-mono truncate">{sub}</div>}
     </div>
   );
 }

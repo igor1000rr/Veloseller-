@@ -34,7 +34,7 @@ export function HealthScale({
 
   return (
     <span
-      className={`inline-flex items-center font-mono uppercase tracking-widest rounded border font-semibold ${sizeMap[size]} ${tier.cls}`}
+      className={`inline-flex items-center font-mono uppercase tracking-widest rounded border font-semibold whitespace-nowrap ${sizeMap[size]} ${tier.cls}`}
     >
       {tier.label}
     </span>
@@ -43,7 +43,9 @@ export function HealthScale({
 
 /**
  * Большой блок здоровья склада: число + бейдж шкалы + визуальная полоска.
- * Используется на dashboard вместо простого числа.
+ *
+ * Mobile-friendly: число адаптивное (2.5rem на мобиле, 3.25rem на десктопе),
+ * padding p-4 на мобиле.
  */
 export function HealthScoreBlock({ score }: { score: number | null | undefined }) {
   const v = score == null ? null : Number(score);
@@ -51,8 +53,8 @@ export function HealthScoreBlock({ score }: { score: number | null | undefined }
   const pct = v == null ? 0 : Math.max(0, Math.min(100, v));
 
   return (
-    <div className="rounded-2xl border border-line bg-paper p-6">
-      <div className="flex items-center justify-between">
+    <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">
           Состояние склада
         </div>
@@ -61,16 +63,15 @@ export function HealthScoreBlock({ score }: { score: number | null | undefined }
 
       <div className="mt-3 flex items-baseline gap-2">
         <span
-          className="font-display tabular tracking-tight font-medium"
+          className="font-display tabular tracking-tight font-medium text-[2.5rem] sm:text-[3.25rem]"
           style={{
-            fontSize: "3.25rem",
             lineHeight: 1,
             color: tier?.numberColor ?? "#1f2017",
           }}
         >
           {v != null ? v.toFixed(0) : "—"}
         </span>
-        <span className="text-ink-hush font-mono text-lg">/100</span>
+        <span className="text-ink-hush font-mono text-base sm:text-lg">/100</span>
       </div>
 
       {/* Шкала-полоска с отметками границ тиров (40/60/75/90) */}

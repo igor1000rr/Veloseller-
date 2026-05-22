@@ -3,14 +3,6 @@ import { Icons } from "../_components/Icons";
 
 type Props = { daysSinceSetup: number };
 
-/**
- * Онбординг-баннер: что у селлера сейчас, что появится дальше.
- *
- *  День 1   (daysSinceSetup === 0)        — рассказываем что данные записали
- *  День 1-7 (daysSinceSetup 1..6)         — ждём семидневного окна для TVelo
- *  День 7-30 (daysSinceSetup 7..29)       — TVelo работает, копим историю
- *  День 30+                               — баннер не показываем (полные данные)
- */
 export function DayProgress({ daysSinceSetup }: Props) {
   if (daysSinceSetup >= 30) return null;
 
@@ -44,8 +36,8 @@ export function DayProgress({ daysSinceSetup }: Props) {
   }[stage];
 
   return (
-    <div className="relative rounded-2xl border border-lime-deep/30 bg-lime-soft p-5 md:p-6">
-      <div className="flex items-start justify-between gap-4">
+    <div className="relative rounded-2xl border border-lime-deep/30 bg-lime-soft p-4 sm:p-5 md:p-6">
+      <div className="flex items-start justify-between gap-3 sm:gap-4">
         <div className="flex items-start gap-3 flex-1 min-w-0">
           <span className="shrink-0 mt-1 size-2 rounded-full bg-lime-deep animate-pulse" />
           <div className="flex-1 min-w-0">
@@ -55,7 +47,7 @@ export function DayProgress({ daysSinceSetup }: Props) {
               </span>
               <span className="font-mono text-[10px] tabular text-ink-hush">{content.progress}%</span>
             </div>
-            <h3 className="mt-1 font-display text-lg md:text-xl text-ink font-medium">{content.title}</h3>
+            <h3 className="mt-1 font-display text-base sm:text-lg md:text-xl text-ink font-medium">{content.title}</h3>
             <p className="mt-1.5 text-sm text-ink-soft leading-relaxed">{content.body}</p>
             <p className="mt-2 text-xs text-ink-muted leading-relaxed">
               <span className="text-lime-deep font-semibold mr-1">Дальше:</span>
@@ -79,7 +71,6 @@ export function DayProgress({ daysSinceSetup }: Props) {
         </div>
       </div>
 
-      {/* Полоска прогресса 30 дней */}
       <div className="mt-4 h-1 rounded-full bg-paper border border-line overflow-hidden">
         <div
           className="h-full bg-lime-deep transition-all duration-500"
@@ -89,7 +80,8 @@ export function DayProgress({ daysSinceSetup }: Props) {
       <div className="mt-1.5 flex justify-between font-mono text-[9px] text-ink-hush uppercase tracking-wider">
         <span>День 1</span>
         <span>День 7</span>
-        <span>День 30 — полные данные</span>
+        <span className="hidden sm:inline">День 30 — полные данные</span>
+        <span className="sm:hidden">День 30</span>
       </div>
     </div>
   );
