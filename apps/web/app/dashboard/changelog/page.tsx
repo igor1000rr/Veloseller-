@@ -8,19 +8,9 @@ export const revalidate = 0;
 
 /**
  * Журнал синхронизаций (правка 13 Александра).
+ * Сжато до уровня sync-job'ов вместо per-SKU событий.
  *
- * Раньше показывал per-SKU события (продажа/пополнение/аномалия) — оказалось
- * слишком "мусорно" для пользователя. Теперь сжато до уровня sync-job'ов:
- * "Дата / Склад / Статус". Юзеру важно знать что синхронизация прошла,
- * а не разбирать каждое движение по каждому SKU.
- *
- * Источник данных:
- *   data_connections — текущий статус каждого склада (last_sync_at, status, last_error)
- *   inventory_snapshots — историческая дата по каждому складу (max snapshot_time
- *   по дню × connection_id)
- *
- * Сначала показываем "live" статус по каждому складу (что прямо сейчас),
- * потом — историю синков за последние 14 дней.
+ * Mobile-friendly: карточки складов в одной колонке на мобиле, таблица в overflow-x-auto.
  */
 type StatusKind = "synced" | "syncing" | "error" | "paused" | "stale";
 
@@ -38,7 +28,7 @@ function classifyStatus(conn: any): StatusKind {
   if (conn.last_error) return "error";
   if (conn.last_sync_at) {
     const hoursAgo = (Date.now() - new Date(conn.last_sync_at).getTime()) / 3_600_000;
-    if (hoursAgo > 12) return "stale";  // последний синк > 12ч назад
+    if (hoursAgo > 12) return "stale";
     return "synced";
   }
   return "paused";
@@ -49,16 +39,12 @@ export default async function ChangelogPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // Live-статус по каждому подключённому складу
   const { data: connections } = await supabase
     .from("data_connections")
     .select("id,name,warehouse_kind,status,last_sync_at,last_error,failure_count")
     .eq("seller_id", user.id)
     .order("created_at", { ascending: true });
 
-  // История синков: считаем кол-во snapshots по дню × connection_id.
-  // Берём за последние 14 дней — на UI вместимо, и за этот период обычно
-  // видна вся картина (что сломалось, когда стало синкаться снова).
   const fortnightAgo = new Date(Date.now() - 14 * 86400_000).toISOString();
   const { data: snapshotRows } = await supabase
     .from("inventory_snapshots")
@@ -68,14 +54,13 @@ export default async function ChangelogPage() {
     .order("snapshot_time", { ascending: false })
     .limit(20_000);
 
-  // Группируем snapshot'ы по (date × connection_id) → одна запись синка в день
   type SyncDayRow = { date: string; connectionId: string; count: number; lastTime: string };
   const syncMap = new Map<string, SyncDayRow>();
   for (const row of snapshotRows ?? []) {
     const r = row as any;
     const product = Array.isArray(r.products) ? r.products[0] : r.products;
     if (!product?.connection_id) continue;
-    const date = r.snapshot_time.slice(0, 10);  // YYYY-MM-DD
+    const date = r.snapshot_time.slice(0, 10);
     const key = `${date}__${product.connection_id}`;
     const existing = syncMap.get(key);
     if (existing) {
@@ -98,13 +83,13 @@ export default async function ChangelogPage() {
             <span className="size-1 rounded-full bg-lime-deep" />
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Sync log</span>
           </div>
-          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">Журнал синхронизаций</h1>
+          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink">Журнал синхронизаций</h1>
           <p className="text-sm text-ink-muted mt-1">Когда и с каких складов мы получали данные за последние 14 дней.</p>
         </div>
       </header>
 
       {(!connections || connections.length === 0) ? (
-        <div className="rounded-2xl border border-line bg-paper p-10 md:p-14 text-center">
+        <div className="rounded-2xl border border-line bg-paper p-8 md:p-14 text-center">
           <p className="font-display text-xl text-ink font-medium">Нет подключённых складов</p>
           <p className="mt-2 text-sm text-ink-muted max-w-md mx-auto">
             После подключения первого склада здесь появится журнал синхронизаций.
@@ -118,7 +103,6 @@ export default async function ChangelogPage() {
         </div>
       ) : (
         <>
-          {/* Live-статус — карточки по каждому складу */}
           <div>
             <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">
               Сейчас по складам
@@ -132,8 +116,8 @@ export default async function ChangelogPage() {
                   : null;
                 return (
                   <div key={c.id} className="rounded-2xl border border-line bg-paper p-4">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
+                    <div className="flex items-start justify-between gap-2 flex-wrap">
+                      <div className="min-w-0 flex-1">
                         <div className="font-medium text-ink truncate">{c.name}</div>
                         <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush mt-0.5">
                           {warehouseKindLabel(c.warehouse_kind)}
@@ -165,25 +149,25 @@ export default async function ChangelogPage() {
             </div>
           </div>
 
-          {/* Историческая таблица: дата × склад → количество snapshot'ов в этот день */}
           <div>
             <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">
               История за 14 дней
             </h2>
             {history.length === 0 ? (
-              <div className="rounded-2xl border border-line bg-paper p-10 text-center text-sm text-ink-muted">
-                За последние 14 дней нет данных по synapshots.
+              <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center text-sm text-ink-muted">
+                За последние 14 дней нет данных по snapshot'ам.
               </div>
             ) : (
-              <div className="rounded-2xl border border-line bg-paper overflow-hidden">
-                <table className="w-full text-sm">
+              /* overflow-x-auto обязателен — 5 колонок на 360px экране не помещаются */
+              <div className="rounded-2xl border border-line bg-paper overflow-x-auto">
+                <table className="w-full min-w-[640px] text-sm">
                   <thead className="bg-bg-soft border-b border-line">
                     <tr>
-                      <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Дата</th>
-                      <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Склад</th>
-                      <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Тип</th>
-                      <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Статус</th>
-                      <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">SKU обработано</th>
+                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Дата</th>
+                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Склад</th>
+                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold hidden sm:table-cell">Тип</th>
+                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Статус</th>
+                      <th className="text-right px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">SKU</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">
@@ -192,21 +176,25 @@ export default async function ChangelogPage() {
                       if (!conn) return null;
                       return (
                         <tr key={`${row.date}_${row.connectionId}`} className="hover:bg-bg-soft/40 transition">
-                          <td className="px-4 py-2.5 font-mono text-xs text-ink-soft whitespace-nowrap">
+                          <td className="px-3 sm:px-4 py-2.5 font-mono text-xs text-ink-soft whitespace-nowrap">
                             {new Date(row.date).toLocaleDateString("ru-RU")}
                           </td>
-                          <td className="px-4 py-2.5">
+                          <td className="px-3 sm:px-4 py-2.5">
                             <div className="text-ink-soft font-medium">{conn.name}</div>
+                            {/* На мобиле тип показываем под названием, потому что отдельный столбец hidden sm:table-cell */}
+                            <div className="sm:hidden font-mono text-[10px] uppercase tracking-widest text-ink-hush mt-0.5">
+                              {warehouseKindLabel(conn.warehouse_kind)}
+                            </div>
                           </td>
-                          <td className="px-4 py-2.5 font-mono text-[10px] uppercase tracking-widest text-ink-hush">
+                          <td className="px-3 sm:px-4 py-2.5 font-mono text-[10px] uppercase tracking-widest text-ink-hush hidden sm:table-cell">
                             {warehouseKindLabel(conn.warehouse_kind)}
                           </td>
-                          <td className="px-4 py-2.5">
+                          <td className="px-3 sm:px-4 py-2.5">
                             <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold ${STATUS_META.synced.cls}`}>
                               {STATUS_META.synced.label}
                             </span>
                           </td>
-                          <td className="px-4 py-2.5 text-right tabular text-xs text-ink-muted">{row.count}</td>
+                          <td className="px-3 sm:px-4 py-2.5 text-right tabular text-xs text-ink-muted">{row.count}</td>
                         </tr>
                       );
                     })}

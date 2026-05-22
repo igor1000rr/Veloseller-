@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Icons } from "../../../_components/Icons";
 import {
@@ -11,10 +11,6 @@ import {
   type NotificationChannel,
 } from "./actions";
 
-/**
- * Метаданные типов уведомлений: лейблы, описания, конфигурация параметров.
- * Источник истины для UI — определяет какие поля показывать в форме редактирования.
- */
 export type KindMeta = {
   label: string;
   description: string;
@@ -113,16 +109,11 @@ export type Subscription = {
   created_at: string;
 };
 
-/**
- * Список существующих подписок + кнопка добавить новую.
- * Каждая подписка раскрывается в форму редактирования (collapse).
- */
 export function SubscriptionsList({ subscriptions }: { subscriptions: Subscription[] }) {
   const [adding, setAdding] = useState(false);
   const router = useRouter();
   const [, startTransition] = useTransition();
 
-  // Какие kinds ещё не подписаны — их можно добавить
   const subscribedPairs = new Set(subscriptions.map(s => `${s.kind}__${s.channel}`));
   const availableToAdd: Array<{ kind: NotificationKind; channel: NotificationChannel }> = [];
   for (const kind of Object.keys(KIND_META) as NotificationKind[]) {
@@ -161,7 +152,7 @@ export function SubscriptionsList({ subscriptions }: { subscriptions: Subscripti
         <button
           type="button"
           onClick={() => setAdding(true)}
-          className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line bg-paper p-4 text-ink-muted hover:text-ink hover:border-lime-deep/40 hover:bg-bg-soft transition font-medium"
+          className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line bg-paper p-4 text-ink-muted hover:text-ink hover:border-lime-deep/40 hover:bg-bg-soft transition font-medium min-h-[56px]"
         >
           <Icons.ArrowRight size={14} /> Добавить уведомление
         </button>
@@ -204,17 +195,16 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
     <div className={`rounded-2xl border bg-paper transition ${
       sub.enabled ? "border-line" : "border-line opacity-60"
     }`}>
-      <div className="p-4 flex items-start gap-3 flex-wrap">
-        {/* Переключатель enabled */}
+      <div className="p-3 sm:p-4 flex items-start gap-3 flex-wrap">
         <button
           type="button"
           onClick={handleToggle}
-          className={`shrink-0 mt-1 size-5 rounded border flex items-center justify-center transition ${
+          className={`shrink-0 mt-1 size-6 rounded border flex items-center justify-center transition ${
             sub.enabled ? "bg-lime-deep border-lime-deep" : "bg-paper border-line hover:border-ink-muted"
           }`}
           title={sub.enabled ? "Включено — нажмите чтобы выключить" : "Выключено — нажмите чтобы включить"}
         >
-          {sub.enabled && <span className="text-paper text-[12px] leading-none">✓</span>}
+          {sub.enabled && <span className="text-paper text-[14px] leading-none">✓</span>}
         </button>
 
         <div className="flex-1 min-w-0">
@@ -249,12 +239,13 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Кнопки — на мобиле занимают всю ширину, на sm+ — в ряд */}
+        <div className="w-full sm:w-auto flex items-center gap-2 sm:shrink-0">
           {meta.paramSchema.length > 0 && (
             <button
               type="button"
               onClick={() => setEditing(e => !e)}
-              className="text-xs px-3 py-1.5 rounded-lg border border-line text-ink-muted hover:text-ink hover:bg-bg-soft transition font-medium"
+              className="flex-1 sm:flex-initial text-xs px-3 py-2 rounded-lg border border-line text-ink-muted hover:text-ink hover:bg-bg-soft transition font-medium min-h-[36px]"
             >
               {editing ? "Закрыть" : "Изменить"}
             </button>
@@ -262,7 +253,7 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
           <button
             type="button"
             onClick={handleDelete}
-            className="text-xs px-3 py-1.5 rounded-lg border border-rose/30 text-rose hover:bg-rose/5 transition font-medium"
+            className="flex-1 sm:flex-initial text-xs px-3 py-2 rounded-lg border border-rose/30 text-rose hover:bg-rose/5 transition font-medium min-h-[36px]"
             title="Удалить подписку"
           >
             Удалить
@@ -306,7 +297,7 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
   }
 
   return (
-    <div className="border-t border-line p-4 bg-bg-soft">
+    <div className="border-t border-line p-3 sm:p-4 bg-bg-soft">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {meta.paramSchema.map(p => (
           <div key={p.key}>
@@ -317,7 +308,7 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
               <select
                 value={params[p.key]}
                 onChange={e => setParams({ ...params, [p.key]: parseInt(e.target.value, 10) })}
-                className="w-full px-2 py-1.5 border border-line rounded-lg bg-paper text-sm focus:outline-none focus:border-lime-deep"
+                className="w-full px-2 py-2 border border-line rounded-lg bg-paper text-sm focus:outline-none focus:border-lime-deep min-h-[40px]"
               >
                 {p.options.map(o => (
                   <option key={o.value} value={o.value}>{o.label}</option>
@@ -327,11 +318,12 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
               <div className="flex items-center gap-2">
                 <input
                   type="number"
+                  inputMode="numeric"
                   value={params[p.key]}
                   min={p.min}
                   max={p.max}
                   onChange={e => setParams({ ...params, [p.key]: parseInt(e.target.value, 10) || 0 })}
-                  className="w-full px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep"
+                  className="w-full px-2 py-2 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[40px]"
                 />
                 {p.suffix && <span className="text-xs text-ink-muted">{p.suffix}</span>}
               </div>
@@ -341,19 +333,19 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
         ))}
       </div>
       {error && <p className="mt-3 text-xs text-rose font-mono">{error}</p>}
-      <div className="mt-3 flex gap-2">
+      <div className="mt-3 flex gap-2 flex-wrap">
         <button
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="px-3 py-1.5 text-sm bg-ink text-paper rounded-lg hover:bg-ink-soft disabled:opacity-50 transition font-medium"
+          className="flex-1 sm:flex-initial px-4 py-2 text-sm bg-ink text-paper rounded-lg hover:bg-ink-soft disabled:opacity-50 transition font-medium min-h-[40px]"
         >
           {saving ? "Сохраняется…" : "Сохранить"}
         </button>
         <button
           type="button"
           onClick={onClose}
-          className="px-3 py-1.5 text-sm border border-line text-ink-muted hover:text-ink hover:bg-paper rounded-lg transition"
+          className="flex-1 sm:flex-initial px-4 py-2 text-sm border border-line text-ink-muted hover:text-ink hover:bg-paper rounded-lg transition min-h-[40px]"
         >
           Отмена
         </button>
@@ -375,16 +367,19 @@ function AddSubscriptionForm({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Доступные комбинации kind+channel
   const availableKinds = Array.from(new Set(availableToAdd.map(a => a.kind))) as NotificationKind[];
   const availableChannelsForKind = availableToAdd
     .filter(a => a.kind === kind)
     .map(a => a.channel);
 
-  // Если выбранный channel не доступен для kind — переключаем на первый доступный
-  if (!availableChannelsForKind.includes(channel) && availableChannelsForKind.length > 0) {
-    setChannel(availableChannelsForKind[0]);
-  }
+  // Фикс anti-pattern: setState в useEffect, а не в render.
+  // Раньше был: if (!includes) setChannel(...) прямо в теле функции —
+  // это могло вызвать бесконечный re-render в определённых условиях.
+  useEffect(() => {
+    if (!availableChannelsForKind.includes(channel) && availableChannelsForKind.length > 0) {
+      setChannel(availableChannelsForKind[0]);
+    }
+  }, [kind, channel, availableChannelsForKind]);
 
   const meta = KIND_META[kind];
 
@@ -406,13 +401,14 @@ function AddSubscriptionForm({
   }
 
   return (
-    <div className="rounded-2xl border-2 border-lime-deep/40 bg-lime-soft p-4">
+    <div className="rounded-2xl border-2 border-lime-deep/40 bg-lime-soft p-3 sm:p-4">
       <div className="flex items-center justify-between mb-3">
         <h3 className="font-display text-base font-medium text-ink">Новое уведомление</h3>
         <button
           type="button"
           onClick={onClose}
-          className="text-ink-hush hover:text-ink text-sm"
+          className="text-ink-hush hover:text-ink text-base px-2 py-1"
+          aria-label="Закрыть"
         >
           ✕
         </button>
@@ -425,7 +421,7 @@ function AddSubscriptionForm({
           <select
             value={kind}
             onChange={e => setKind(e.target.value as NotificationKind)}
-            className="w-full px-2 py-1.5 border border-line rounded-lg bg-paper text-sm focus:outline-none focus:border-lime-deep"
+            className="w-full px-2 py-2 border border-line rounded-lg bg-paper text-sm focus:outline-none focus:border-lime-deep min-h-[40px]"
           >
             {availableKinds.map(k => (
               <option key={k} value={k}>{KIND_META[k].label}</option>
@@ -439,7 +435,7 @@ function AddSubscriptionForm({
           <select
             value={channel}
             onChange={e => setChannel(e.target.value as NotificationChannel)}
-            className="w-full px-2 py-1.5 border border-line rounded-lg bg-paper text-sm focus:outline-none focus:border-lime-deep"
+            className="w-full px-2 py-2 border border-line rounded-lg bg-paper text-sm focus:outline-none focus:border-lime-deep min-h-[40px]"
           >
             {availableChannelsForKind.map(c => (
               <option key={c} value={c}>{c === "email" ? "Email" : "Telegram"}</option>
@@ -454,19 +450,19 @@ function AddSubscriptionForm({
         </p>
       )}
       {error && <p className="mt-3 text-xs text-rose font-mono">{error}</p>}
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex gap-2 flex-wrap">
         <button
           type="button"
           onClick={handleAdd}
           disabled={saving}
-          className="px-4 py-2 text-sm bg-ink text-paper rounded-lg hover:bg-ink-soft disabled:opacity-50 transition font-medium"
+          className="flex-1 sm:flex-initial px-4 py-2.5 text-sm bg-ink text-paper rounded-lg hover:bg-ink-soft disabled:opacity-50 transition font-medium min-h-[44px]"
         >
           {saving ? "Добавляется…" : "Добавить"}
         </button>
         <button
           type="button"
           onClick={onClose}
-          className="px-4 py-2 text-sm border border-line text-ink-muted hover:text-ink hover:bg-paper rounded-lg transition"
+          className="flex-1 sm:flex-initial px-4 py-2.5 text-sm border border-line text-ink-muted hover:text-ink hover:bg-paper rounded-lg transition min-h-[44px]"
         >
           Отмена
         </button>
