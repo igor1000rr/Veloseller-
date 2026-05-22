@@ -1,51 +1,113 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import AckButton from "./AckButton";
-import BulkAckButton from "./BulkAckButton";
 import Link from "next/link";
+import { Icons } from "../../_components/Icons";
+import { InfoTooltip } from "../../_components/InfoTooltip";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const KIND_META: Record<string, { label: string; cls: string; tone: "rose" | "orange" | "azure" | "ink" }> = {
-  critical_stock:     { label: "Критически мало",   cls: "text-rose border-rose/30 bg-rose/10",       tone: "rose" },
-  low_stock:          { label: "Мало",              cls: "text-orange border-orange/30 bg-orange/10", tone: "orange" },
-  dead_inventory:     { label: "Неликвид",          cls: "text-ink-soft border-line bg-bg-soft",      tone: "ink" },
-  repeated_stockout:  { label: "Регулярный OOS",    cls: "text-orange border-orange/40 bg-orange/15", tone: "orange" },
-  underestimated_sku: { label: "Недооценён",       cls: "text-azure border-azure/30 bg-azure/10",   tone: "azure" },
+/**
+ * Страница «Отчёты» — этап 2 миграции «алерты → отчёты».
+ *
+ * Раньше: real-time таблица alerts (kind/SKU/Сообщение), пользователь
+ *   нажимал «Принять» на каждом или массово.
+ * Теперь: история отправленных Excel-отчётов из таблицы report_history.
+ *   Каждая запись = один файл (email или telegram), может содержать
+ *   несколько kinds на одну дату.
+ *
+ * Файлы XLSX пока хранятся только в отправленном email/telegram —
+ * Supabase Storage для повторного скачивания будет в этапе 3.
+ */
+
+const KIND_LABELS: Record<string, string> = {
+  critical_stock:     "Критический остаток",
+  low_stock:          "Низкий остаток",
+  dead_inventory:     "Неликвид",
+  repeated_stockout:  "Частый out-of-stock",
+  underestimated_sku: "Недооценённый SKU",
+  sync_error:         "Ошибки синхронизации",
+  weekly_report:      "Сводка по складу",
 };
 
-export default async function AlertsPage({ searchParams }: { searchParams: Promise<{ kind?: string }> }) {
-  const sp = await searchParams;
-  const filterKind = sp.kind;
+const KIND_TONE: Record<string, string> = {
+  critical_stock:     "text-rose border-rose/30 bg-rose/10",
+  low_stock:          "text-orange border-orange/30 bg-orange/10",
+  dead_inventory:     "text-ink-soft border-line bg-bg-soft",
+  repeated_stockout:  "text-orange border-orange/40 bg-orange/15",
+  underestimated_sku: "text-azure border-azure/30 bg-azure/10",
+  sync_error:         "text-rose border-rose/40 bg-rose/15",
+  weekly_report:      "text-lime-deep border-lime-deep/30 bg-lime-soft",
+};
 
+const STATUS_META: Record<string, { label: string; cls: string }> = {
+  sent:    { label: "Отправлен", cls: "text-lime-deep border-lime-deep/30 bg-lime-soft" },
+  failed:  { label: "Ошибка",    cls: "text-rose border-rose/30 bg-rose/10" },
+  skipped: { label: "Пропущен",  cls: "text-ink-hush border-line bg-bg-soft" },
+};
+
+type ReportHistoryRow = {
+  id: string;
+  sent_at: string;
+  day_of_week: number;
+  kinds: string[];
+  channel: "email" | "telegram";
+  status: "sent" | "failed" | "skipped";
+  sku_counts: Record<string, number>;
+  file_name: string | null;
+  file_size_bytes: number | null;
+  error_message: string | null;
+};
+
+function formatBytes(n: number | null): string {
+  if (n == null || n <= 0) return "—";
+  if (n < 1024) return `${n} Б`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} КБ`;
+  return `${(n / (1024 * 1024)).toFixed(2)} МБ`;
+}
+
+function formatDateRu(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString("ru-RU", {
+    day: "numeric", month: "long", year: "numeric",
+    weekday: "long",
+  });
+}
+
+function formatTimeRu(iso: string): string {
+  return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+}
+
+export default async function ReportsPage() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data: allAlerts } = await supabase
-    .from("alerts")
-    .select("kind,acknowledged_at")
+  // История отправленных отчётов — последние 100 за всё время.
+  // Группируем визуально по дате (одна дата = один заголовок),
+  // но email и telegram отправки за тот же день остаются отдельными карточками.
+  const { data: history } = await supabase
+    .from("report_history")
+    .select("id,sent_at,day_of_week,kinds,channel,status,sku_counts,file_name,file_size_bytes,error_message")
     .eq("seller_id", user.id)
-    .is("acknowledged_at", null);
+    .order("sent_at", { ascending: false })
+    .limit(100);
 
-  const byKind: Record<string, number> = {};
-  for (const a of allAlerts ?? []) {
-    byKind[(a as any).kind] = (byKind[(a as any).kind] ?? 0) + 1;
-  }
-  const groupedKinds = Object.entries(byKind).sort((a, b) => b[1] - a[1]);
-  const totalActive = (allAlerts ?? []).length;
+  const rows = (history ?? []) as ReportHistoryRow[];
 
-  let listQuery = supabase
-    .from("alerts")
-    .select("id,kind,message,created_at,acknowledged_at,product_id,payload,products(sku,product_name)")
+  // Активные подписки — чтобы в пустом состоянии показать что настроено.
+  const { count: subsCount } = await supabase
+    .from("notification_subscriptions")
+    .select("id", { count: "exact", head: true })
     .eq("seller_id", user.id)
-    .order("created_at", { ascending: false })
-    .limit(50);
-  if (filterKind) {
-    listQuery = listQuery.eq("kind", filterKind).is("acknowledged_at", null);
+    .eq("enabled", true);
+
+  // Группировка по дате (sent_date) для UI заголовков.
+  const groups = new Map<string, ReportHistoryRow[]>();
+  for (const r of rows) {
+    const dateKey = r.sent_at.slice(0, 10);
+    if (!groups.has(dateKey)) groups.set(dateKey, []);
+    groups.get(dateKey)!.push(r);
   }
-  const { data: alerts } = await listQuery;
-  const list = alerts ?? [];
 
   return (
     <div className="space-y-6">
@@ -53,13 +115,18 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
         <div className="min-w-0">
           <div className="inline-flex items-center gap-2 mb-2">
             <span className="size-1 rounded-full bg-lime-deep" />
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Reports</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">
+              Reports history
+            </span>
           </div>
-          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink">Отчёты</h1>
+          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink flex items-center flex-wrap">
+            <span>Отчёты</span>
+            <InfoTooltip text="История отправленных Excel-файлов. Отчёты формируются по расписанию из ваших подписок — день недели задаётся в настройках. Несколько отчётов на один день объединяются в один файл с разными листами." />
+          </h1>
           <p className="text-ink-muted text-sm mt-1">
-            {totalActive > 0
-              ? <>Активных событий: <strong className="text-ink">{totalActive}</strong>. Отмечайте выполненные — проблемы уходят из списка.</>
-              : <>Все события обработаны. Следующий отчёт придёт по расписанию.</>
+            {rows.length > 0
+              ? <>Всего отправлено: <strong className="text-ink tabular">{rows.length}</strong></>
+              : <>Здесь будет история отправленных Excel-отчётов</>
             }
           </p>
         </div>
@@ -69,107 +136,151 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-line bg-paper text-sm text-ink-muted hover:text-ink hover:bg-bg-soft hover:border-lime-deep/40 transition min-h-[36px]"
           >
             <span aria-hidden="true">⚙</span>
-            <span className="hidden sm:inline">Настроить отчёты</span>
-            <span className="sm:hidden">Настроить</span>
+            <span>Настройка отчётов</span>
+            {subsCount != null && subsCount > 0 && (
+              <span className="font-mono text-[10px] text-ink-hush">({subsCount})</span>
+            )}
           </Link>
-          {totalActive > 0 && <BulkAckButton count={totalActive} />}
         </div>
       </header>
 
-      {groupedKinds.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-          <Link
-            href={"/dashboard/alerts" as any}
-            className={`rounded-xl border p-3 sm:p-4 hover:shadow-sm transition ${
-              !filterKind ? "border-ink bg-bg-soft" : "border-line bg-paper"
-            }`}
-          >
-            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Все</div>
-            <div className="font-display text-xl sm:text-2xl tabular text-ink font-medium mt-1">{totalActive}</div>
-          </Link>
-          {groupedKinds.map(([kind, count]) => {
-            const meta = KIND_META[kind] ?? { label: kind, cls: "text-ink-soft border-line bg-bg-soft", tone: "ink" as const };
-            const active = filterKind === kind;
-            return (
-              <div
-                key={kind}
-                className={`rounded-xl border p-3 sm:p-4 transition ${
-                  active ? "border-ink shadow-sm" : "border-line bg-paper hover:shadow-sm"
-                }`}
-              >
-                <Link href={`/dashboard/alerts?kind=${kind}` as any} className="block">
-                  <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{meta.label}</div>
-                  <div className="font-display text-xl sm:text-2xl tabular text-ink font-medium mt-1">{count}</div>
-                </Link>
-                <div className="mt-2">
-                  <BulkAckButton kind={kind} count={count} kindLabel={meta.label} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {list.length === 0 ? (
-        <div className="rounded-2xl border border-line bg-paper p-8 md:p-14 text-center">
-          <p className="text-ink-muted text-sm">
-            {filterKind ? "Нет событий этого типа." : "Событий пока нет — пересчёт ещё не запускался или у SKU нет проблем."}
-          </p>
-        </div>
+      {rows.length === 0 ? (
+        <EmptyState subsCount={subsCount ?? 0} />
       ) : (
-        <div className="rounded-2xl border border-line bg-paper overflow-hidden">
-          <div className="px-3 sm:px-4 py-3 bg-bg-soft border-b border-line flex items-center justify-between gap-3 flex-wrap">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
-              {filterKind ? `Показываем первые ${list.length} «${KIND_META[filterKind]?.label ?? filterKind}»` : `Последние ${list.length} событий`}
-            </span>
-            <span className="font-mono text-[10px] text-ink-hush hidden md:inline">кликните «Принять» рядом с группой чтобы массово</span>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead className="bg-bg-soft border-b border-line">
-                <tr>
-                  <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Тип</th>
-                  <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">SKU</th>
-                  <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Сообщение</th>
-                  <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold hidden md:table-cell">Дата</th>
-                  <th className="text-right px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold"></th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-line">
-                {list.map((a: any) => {
-                  const meta = KIND_META[a.kind] ?? { label: a.kind, cls: "text-ink-soft border-line bg-bg-soft" };
-                  const product = Array.isArray(a.products) ? a.products[0] : a.products;
-                  return (
-                    <tr key={a.id} className={`hover:bg-bg-soft/50 transition ${a.acknowledged_at ? "opacity-50" : ""}`}>
-                      <td className="px-3 sm:px-4 py-3">
-                        <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold whitespace-nowrap ${meta.cls}`}>
-                          {meta.label}
-                        </span>
-                      </td>
-                      <td className="px-3 sm:px-4 py-3">
-                        <div className="font-mono text-xs text-ink">{product?.sku ?? "—"}</div>
-                        <div className="text-xs text-ink-hush">{product?.product_name ?? ""}</div>
-                      </td>
-                      <td className="px-3 sm:px-4 py-3 text-ink-soft">
-                        {a.message}
-                        <div className="md:hidden mt-1 text-[11px] text-ink-hush font-mono">
-                          {new Date(a.created_at).toLocaleString("ru-RU")}
-                        </div>
-                      </td>
-                      <td className="px-3 sm:px-4 py-3 text-ink-hush text-xs whitespace-nowrap font-mono hidden md:table-cell">
-                        {new Date(a.created_at).toLocaleString("ru-RU")}
-                      </td>
-                      <td className="px-3 sm:px-4 py-3 text-right">
-                        {!a.acknowledged_at && <AckButton id={a.id} />}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+        <div className="space-y-6">
+          {Array.from(groups.entries()).map(([dateKey, dayRows]) => (
+            <div key={dateKey} className="space-y-3">
+              <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold border-b border-line pb-2">
+                {formatDateRu(dayRows[0].sent_at)}
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {dayRows.map(r => (
+                  <ReportCard key={r.id} row={r} />
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       )}
     </div>
+  );
+}
+
+function EmptyState({ subsCount }: { subsCount: number }) {
+  return (
+    <div className="rounded-2xl border border-line bg-paper p-6 sm:p-10 text-center space-y-4">
+      <div className="inline-flex items-center justify-center size-14 rounded-full bg-lime-soft text-lime-deep mx-auto">
+        <Icons.ArrowRight size={20} />
+      </div>
+      <div className="space-y-2 max-w-md mx-auto">
+        <h2 className="font-display text-xl font-medium text-ink">Отчётов пока не было</h2>
+        <p className="text-sm text-ink-muted">
+          {subsCount > 0
+            ? <>У вас настроено <b className="text-ink">{subsCount}</b> подписок. Первый отчёт придёт в указанный день недели в 12:00 МСК.</>
+            : <>Настройте подписки — выберите какие отчёты получать и в какой день недели. По умолчанию у вас уже добавлены все 7 типов отчётов на понедельник.</>
+          }
+        </p>
+      </div>
+      <div className="pt-2">
+        <Link
+          href={"/dashboard/alerts/subscriptions" as any}
+          className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-ink text-paper text-sm font-medium hover:bg-ink-soft transition min-h-[40px]"
+        >
+          Открыть настройки <Icons.ArrowRight size={12} />
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function ReportCard({ row }: { row: ReportHistoryRow }) {
+  const status = STATUS_META[row.status] ?? STATUS_META.sent;
+  const isFailure = row.status === "failed";
+  const isSkipped = row.status === "skipped";
+
+  return (
+    <div className={`rounded-2xl border bg-paper p-4 transition ${
+      isFailure ? "border-rose/30" : isSkipped ? "border-line opacity-75" : "border-line"
+    }`}>
+      <div className="flex items-start justify-between gap-2 flex-wrap mb-3">
+        <div className="flex items-center gap-2 flex-wrap">
+          <ChannelBadge channel={row.channel} />
+          <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold ${status.cls}`}>
+            {status.label}
+          </span>
+          <span className="font-mono text-[11px] text-ink-hush">
+            {formatTimeRu(row.sent_at)}
+          </span>
+        </div>
+        {row.file_size_bytes != null && row.status === "sent" && (
+          <span className="font-mono text-[10px] text-ink-hush tabular whitespace-nowrap">
+            {formatBytes(row.file_size_bytes)}
+          </span>
+        )}
+      </div>
+
+      {/* Список kinds с количеством SKU */}
+      <div className="space-y-1.5">
+        {row.kinds.map(kind => {
+          const label = KIND_LABELS[kind] ?? kind;
+          const tone = KIND_TONE[kind] ?? "text-ink-soft border-line bg-bg-soft";
+          const count = row.sku_counts?.[kind] ?? 0;
+          return (
+            <div key={kind} className="flex items-center justify-between gap-2">
+              <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold ${tone}`}>
+                {label}
+              </span>
+              <span className="font-mono text-xs tabular text-ink-soft">
+                {count > 0 ? <>{count} SKU</> : <span className="text-ink-hush">—</span>}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Имя файла — только информационное, без download (Storage в TODO) */}
+      {row.file_name && row.status === "sent" && (
+        <div className="mt-3 pt-3 border-t border-line">
+          <p className="font-mono text-[11px] text-ink-hush break-all">
+            📎 {row.file_name}
+          </p>
+        </div>
+      )}
+
+      {/* Ошибка — раскрытая по умолчанию */}
+      {isFailure && row.error_message && (
+        <div className="mt-3 pt-3 border-t border-rose/20">
+          <p className="font-mono text-[11px] text-rose break-words">
+            {row.error_message}
+          </p>
+        </div>
+      )}
+
+      {/* Skipped — короткое объяснение если есть */}
+      {isSkipped && row.error_message && (
+        <div className="mt-3 pt-3 border-t border-line">
+          <p className="font-mono text-[11px] text-ink-hush">
+            {row.error_message === "no data"
+              ? "За этот день не было данных по выбранным фильтрам"
+              : row.error_message}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ChannelBadge({ channel }: { channel: "email" | "telegram" }) {
+  if (channel === "email") {
+    return (
+      <span className="inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold text-azure bg-azure/10 border-azure/30">
+        Email
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold text-lime-deep bg-lime-soft border-lime-deep/30">
+      Telegram
+    </span>
   );
 }
