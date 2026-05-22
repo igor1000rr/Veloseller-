@@ -698,6 +698,7 @@ const stats = [
   { label: "Метрик по каждому SKU", value: "23", sub: "включая достоверность данных" },
 ];
 // Правка Александра: порядок Ozon FBS, Ozon FBO, WB FBS, WB FBO, Google Sheet
+// Resend убран — это внутренний инфраструктурный сервис, не для глаз пользователя
 const integrations = [
   { name: "Ozon FBS",        tag: "API",       dot: "#005bff" },
   { name: "Ozon FBO",        tag: "API",       dot: "#005bff" },
@@ -705,7 +706,6 @@ const integrations = [
   { name: "Wildberries FBO", tag: "API",       dot: "#a71179" },
   { name: "Google Sheets",   tag: "READ-ONLY", dot: "#0F9D58" },
   { name: "Telegram",        tag: "BOT",       dot: "#229ED9" },
-  { name: "Resend",          tag: "EMAIL",     dot: "#000" },
 ];
 const compareLeft = [
   "Считаешь скорость продаж вручную раз в месяц",
