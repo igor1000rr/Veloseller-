@@ -31,6 +31,10 @@ logger = logging.getLogger("veloseller.recalc")
 _PRODUCT_IN_BATCH = 200
 _VERBOSE_FAILURES_PER_RECALC = 3
 
+# Типы событий, считающихся "движением товара" для inactive_sku_count.
+# Если за период не было ни одного такого события — SKU считается без активности.
+_MOVEMENT_EVENT_TYPES = {EventType.SALES_LIKE.value, EventType.REPLENISHMENT_LIKE.value}
+
 
 def _seller_timezone(sb, seller_id: str) -> str:
     res = sb.table("sellers").select("timezone").eq("id", seller_id).execute()
@@ -425,6 +429,13 @@ def recalc_seller(seller_id, period_days=30, progress=None):
             events_written += _write_inventory_events(sb, pid, event_rows, period_start, period_end)
             changelog_written += _write_changelog(sb, seller_id, pid, aggregates, period_start, period_end)
 
+            # Для inactive_sku_count: было ли движение (sales/replenishment) за период?
+            # Если SKU ни разу не продавался и не пополнялся — считаем неактивным.
+            has_movements = any(
+                er.get("event_type") in _MOVEMENT_EVENT_TYPES
+                for er in event_rows
+            )
+
             daily_prices = [(a.day, a.price) for a in aggregates if a.price > 0]
             price_changes = detect_price_changes(daily_prices)
             if price_changes:
@@ -476,6 +487,7 @@ def recalc_seller(seller_id, period_days=30, progress=None):
                 "pid": pid, "metric": metric, "current_stock": current_stock,
                 "current_price": current_price, "availability_now": current_stock > 0,
                 "aggregates": aggregates,
+                "has_movements": has_movements,
             })
             if metric.adjusted_velocity > 0:
                 velocities_for_median.append(metric.adjusted_velocity)
@@ -609,6 +621,28 @@ def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
         1 for item in sku_data
         if item["metric"].coverage_days is not None and item["metric"].coverage_days > 180
     )
+
+    # Правки 4 (Александр):
+    # inactive_sku_count — SKU с нулевым остатком И без движений за период.
+    # Эти SKU сняты с продажи (или ещё не продавались) и в остальных метриках
+    # участвовать не должны. На фронте они скрываются по умолчанию.
+    inactive_count = sum(
+        1 for item in sku_data
+        if not item["availability_now"] and not item.get("has_movements", True)
+    )
+
+    # frequently_oos_sku_count — SKU где stockout_days > 15 за период (более
+    # 15 дней out-of-stock за месяц). Сигнал систематической проблемы.
+    frequently_oos_count = sum(
+        1 for item in sku_data
+        if item["metric"].stockout_days > 15
+    )
+
+    # Правка 2 Александра: "Нет в наличии" должно быть = товары с нулевым остатком,
+    # ПО КОТОРЫМ БЫЛО ДВИЖЕНИЕ за 30 дней. То есть из oos_count вычитаем inactive.
+    # Это даёт активный OOS — то, чем реально надо заниматься.
+    active_oos_count = max(0, oos_count - inactive_count)
+
     lost_total = 0.0
     for item in sku_data:
         m = item["metric"]
@@ -627,9 +661,11 @@ def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
         "total_sku_count": len(sku_data),
-        "oos_sku_count": oos_count,
+        "oos_sku_count": active_oos_count,
         "low_stock_sku_count": low_count,
         "dead_inventory_sku_count": dead_count,
+        "inactive_sku_count": inactive_count,
+        "frequently_oos_sku_count": frequently_oos_count,
         "inventory_concentration_50": inv_conc,
         "demand_concentration_50": dem_conc,
         "total_inventory_value": float(total_value),
