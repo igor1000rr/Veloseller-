@@ -14,6 +14,10 @@ import { parseApiError, type ParsedError } from "@/lib/error-parser";
  * Один Ozon API-ключ → 2 склада (FBO + FBS, остатки берутся по разным фильтрам).
  * Один WB token → 2 склада (FBO через Statistics API + FBS через Marketplace API).
  * Для WB FBS токену нужны категории: Статистика + Маркетплейс + Контент.
+ *
+ * Правка Александра: после согласия на парный склад название склада сбрасывается
+ * на пустое — реализовано через key={kind} на KindForm, что монтирует новый
+ * экземпляр компонента и сбрасывает локальный useState с name.
  */
 type WarehouseKind = "ozon_fbo" | "ozon_fbs" | "wb_fbo" | "wb_fbs" | "google_sheet";
 
@@ -26,14 +30,8 @@ type WarehouseMeta = {
   pair?: WarehouseKind; // для предложения добавить парный склад (FBO ↔ FBS)
 };
 
+// Правка Александра: порядок Ozon FBS, Ozon FBO, WB FBS, WB FBO, Google Sheet
 const WAREHOUSES: WarehouseMeta[] = [
-  {
-    kind: "ozon_fbo",
-    title: "Ozon FBO",
-    text: "Анализ остатков на складах Ozon (товары на FBO-складах маркетплейса).",
-    dot: "#005bff", status: "ready",
-    pair: "ozon_fbs",
-  },
   {
     kind: "ozon_fbs",
     title: "Ozon FBS",
@@ -42,11 +40,11 @@ const WAREHOUSES: WarehouseMeta[] = [
     pair: "ozon_fbo",
   },
   {
-    kind: "wb_fbo",
-    title: "Wildberries FBO",
-    text: "Анализ остатков на складах WB (товары на FBO-складах маркетплейса).",
-    dot: "#a71179", status: "ready",
-    pair: "wb_fbs",
+    kind: "ozon_fbo",
+    title: "Ozon FBO",
+    text: "Анализ остатков на складах Ozon (товары на FBO-складах маркетплейса).",
+    dot: "#005bff", status: "ready",
+    pair: "ozon_fbs",
   },
   {
     kind: "wb_fbs",
@@ -54,6 +52,13 @@ const WAREHOUSES: WarehouseMeta[] = [
     text: "Анализ вашего склада через остатки FBS WB (товары на вашем складе). Токен с правами Статистика + Маркетплейс + Контент.",
     dot: "#a71179", status: "ready",
     pair: "wb_fbo",
+  },
+  {
+    kind: "wb_fbo",
+    title: "Wildberries FBO",
+    text: "Анализ остатков на складах WB (товары на FBO-складах маркетплейса).",
+    dot: "#a71179", status: "ready",
+    pair: "wb_fbs",
   },
   {
     kind: "google_sheet",
@@ -93,7 +98,11 @@ export default function NewConnectionPage() {
       ) : selected?.status === "wip" ? (
         <WipPanel warehouse={selected} onCancel={() => setKind(null)} />
       ) : (
+        // key={kind} монтирует новый экземпляр KindForm при смене типа —
+        // useState внутри (включая name) сбрасывается на дефолт.
+        // Правка Александра: после согласия на парный склад название поле пустое.
         <KindForm
+          key={kind}
           kind={kind}
           onCancel={() => setKind(null)}
           onDone={() => {
@@ -323,8 +332,9 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
               <input required type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)}
                 className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
             </div>
+            {/* Правка Александра: "может питать оба склада" → "подходит для нескольких складов" */}
             <p className="font-mono text-[11px] text-ink-hush">
-              Один Ozon API-ключ может питать оба склада: Ozon FBO (остатки на складах маркетплейса) и Ozon FBS (ваш склад).
+              Один Ozon API-ключ подходит для нескольких складов: Ozon FBO (остатки на складах маркетплейса) и Ozon FBS (ваш склад).
               После подключения предложим добавить второй.
             </p>
           </>
@@ -365,8 +375,8 @@ function PairSuggestModal({
 
   const isOzonPair = suggest === "ozon_fbs" || suggest === "ozon_fbo";
   const sameKeyText = isOzonPair
-    ? "У вас тот же API-ключ может дать остатки и из другого источника."
-    : "У вас тот же токен может дать остатки и из другого источника.";
+    ? "Тот же API-ключ подходит для нескольких складов."
+    : "Тот же токен подходит для нескольких складов.";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 backdrop-blur-sm p-4" onClick={onDismiss}>
@@ -445,7 +455,7 @@ function WbInstructions({ isFbs }: { isFbs: boolean }) {
       </ol>
       {isFbs && (
         <p className="mt-3 text-[11px] text-ink-hush">
-          У одного токена WB можно ставить несколько категорий одновременно. Тот же токен подойдёт и для WB FBO.
+          У одного токена WB можно ставить несколько категорий одновременно. Тот же токен подходит для нескольких складов.
         </p>
       )}
     </div>

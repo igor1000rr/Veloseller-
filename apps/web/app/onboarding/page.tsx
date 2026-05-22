@@ -33,10 +33,11 @@ export default async function OnboardingPage() {
         </h1>
         <p className="mt-2 text-ink-muted text-sm">3 шага до подключения</p>
 
+        {/* Правка Александра: текст обращения на «вы», уточнение про email отчёты */}
         <div className="mt-5 p-4 rounded-2xl border border-line bg-bg-soft text-sm text-ink-soft leading-relaxed">
-          Чтобы Veloseller начал считать TVelo, нужны ежедневные записи по твоим SKU.
+          Чтобы Veloseller начал считать TVelo, нужны ежедневные записи по вашим SKU.
           Актуальные расчёты через 7 дней. Наиболее точные показатели через 30 дней.
-          Мы отправим тебе на email сводные отчёты за эти даты.
+          Мы отправим вам на email сводные отчёты за эти даты.
         </div>
 
         <ol className="mt-8 space-y-3">
@@ -58,7 +59,7 @@ export default async function OnboardingPage() {
             n={3}
             title="Дождись пересчёта"
             done={step3Done}
-            description="Синхронизация запускается каждый час или нажми «Пересчитать сейчас» на dashboard"
+            description="Синхронизация запускается каждые 6 часов или нажми «Пересчитать сейчас» на dashboard"
             cta={step2Done && !step3Done ? { href: "/dashboard", label: "Открыть dashboard" } : null}
           />
         </ol>
@@ -66,7 +67,7 @@ export default async function OnboardingPage() {
         {step1Done && step2Done && step3Done && (
           <div className="mt-8 p-6 rounded-2xl border-2 border-lime-deep/40 bg-lime-soft text-center">
             <p className="font-display text-lg text-ink font-medium mb-3">
-              🎉 Готово! Veloseller считает твою скорость продаж.
+              🎉 Готово! Veloseller считает вашу скорость продаж.
             </p>
             <Link
               href="/dashboard"

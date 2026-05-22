@@ -203,8 +203,9 @@ export default async function LandingPage() {
               </span>
             </div>
 
+            {/* Правка Александра: H1 одной строкой "Скорость продаж без искажений" */}
             <h1 className="mt-6 font-display text-[44px] sm:text-5xl md:text-6xl xl:text-7xl leading-[0.95] tracking-tight font-medium">
-              Скорость продаж<br className="hidden sm:block" />{" "}
+              Скорость продаж{" "}
               <span className="text-lime-deep italic font-display">без искажений</span>
             </h1>
 
@@ -565,13 +566,10 @@ export default async function LandingPage() {
             <div className="col-span-1 md:col-span-2">
               <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Типы складов</div>
               <ul className="mt-4 space-y-2.5 text-sm">
-                <li className="text-ink-soft">Ozon FBO</li>
                 <li className="text-ink-soft">Ozon FBS</li>
+                <li className="text-ink-soft">Ozon FBO</li>
+                <li className="text-ink-soft">Wildberries FBS</li>
                 <li className="text-ink-soft">Wildberries FBO</li>
-                <li className="flex items-center gap-1.5 text-ink-soft">
-                  Wildberries FBS
-                  <span className="font-mono text-[9px] text-orange uppercase border border-orange/30 bg-orange/10 px-1 rounded">soon</span>
-                </li>
                 <li className="text-ink-soft">Google Sheet</li>
               </ul>
             </div>
@@ -699,11 +697,12 @@ const stats = [
   { label: "Типов складов", value: "5", sub: "Ozon FBO/FBS, WB FBO/FBS, Sheets" },
   { label: "Метрик по каждому SKU", value: "23", sub: "включая достоверность данных" },
 ];
+// Правка Александра: порядок Ozon FBS, Ozon FBO, WB FBS, WB FBO, Google Sheet
 const integrations = [
-  { name: "Ozon FBO",        tag: "API",       dot: "#005bff" },
   { name: "Ozon FBS",        tag: "API",       dot: "#005bff" },
+  { name: "Ozon FBO",        tag: "API",       dot: "#005bff" },
+  { name: "Wildberries FBS", tag: "API",       dot: "#a71179" },
   { name: "Wildberries FBO", tag: "API",       dot: "#a71179" },
-  { name: "Wildberries FBS", tag: "SOON",      dot: "#a71179" },
   { name: "Google Sheets",   tag: "READ-ONLY", dot: "#0F9D58" },
   { name: "Telegram",        tag: "BOT",       dot: "#229ED9" },
   { name: "Resend",          tag: "EMAIL",     dot: "#000" },
