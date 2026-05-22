@@ -6,6 +6,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 /**
  * Панель фильтров SKU. State в URL.
  * Mobile-friendly: поиск занимает всю ширину на мобиле, диапазоны stack.
+ *
+ * Блок "Диапазоны" по умолчанию РАСКРЫТ (правка пользователя — всё важно и нужно).
+ * Кнопка остаётся, чтобы можно было свернуть и освободить экран при необходимости.
  */
 export function SkusFilters({ warehouseCreatedAt }: { warehouseCreatedAt: string | null }) {
   const router = useRouter();
@@ -22,12 +25,9 @@ export function SkusFilters({ warehouseCreatedAt }: { warehouseCreatedAt: string
   const [dateFrom, setDateFrom] = useState(sp.get("date_from") ?? "");
   const [dateTo, setDateTo] = useState(sp.get("date_to") ?? "");
 
-  const [expanded, setExpanded] = useState(() => {
-    return !!(sp.get("stock_min") || sp.get("stock_max")
-           || sp.get("oos_min") || sp.get("oos_max")
-           || sp.get("lost_min") || sp.get("lost_max")
-           || sp.get("date_from") || sp.get("date_to"));
-  });
+  // По умолчанию раскрыто всегда — диапазоны важны и нужны пользователю.
+  // Раньше: раскрыто только если уже стоял какой-то range-фильтр в URL.
+  const [expanded, setExpanded] = useState(true);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
