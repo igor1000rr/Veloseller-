@@ -1,67 +1,16 @@
-"""Тесты scheduler.py — БАГ 30/31 пагинация + per-seller try/catch + БАГ 89/90."""
+"""Тесты scheduler.py — БАГ 30/31 пагинация + per-seller try/catch + БАГ 89/90.
+
+Этап 2 «алерты → отчёты»: удалён `_job_send_daily_digests`, добавлен
+`_job_daily_reports` который вызывает `dispatch_daily_reports()` из reports.py.
+Старые тесты класса `TestDailyDigestPerSellerTryCatch` удалены, новые
+— ниже в `TestDailyReports`.
+"""
 from __future__ import annotations
 import os
 os.environ["ENABLE_SCHEDULER"] = "false"
 
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
-
-
-class TestDailyDigestPerSellerTryCatch:
-    """БАГ 30: один упавший email/telegram не должен валить digest для остальных."""
-
-    def test_continues_on_email_failure(self, monkeypatch):
-        """Если для одного seller email падает, для других продолжаем."""
-        mock_sb = MagicMock()
-        sellers_data = [
-            {"id": "s1", "email": "a@b.com", "display_name": "A", "telegram_chat_id": None,
-             "notify_email": True, "notify_telegram": False},
-            {"id": "s2", "email": "b@b.com", "display_name": "B", "telegram_chat_id": None,
-             "notify_email": True, "notify_telegram": False},
-            {"id": "s3", "email": "c@b.com", "display_name": "C", "telegram_chat_id": None,
-             "notify_email": True, "notify_telegram": False},
-        ]
-        monkeypatch.setattr("app.jobs.scheduler.fetch_all", lambda q: sellers_data)
-        monkeypatch.setattr("app.jobs.scheduler.get_supabase", lambda: mock_sb)
-
-        mock_sb.table.return_value.select.return_value.eq.return_value.is_.return_value.gte.return_value.order.return_value.limit.return_value.execute.return_value = MagicMock(
-            data=[{"kind": "low_stock", "message": "test", "products": {"sku": "X"}}]
-        )
-
-        send_calls = []
-        def fake_send(to, name, alerts):
-            send_calls.append(to)
-            if to == "b@b.com":
-                raise Exception("Resend API down")
-            return True
-
-        monkeypatch.setattr("app.notifications.send_alert_digest", fake_send)
-
-        from app.jobs.scheduler import _job_send_daily_digests
-        _job_send_daily_digests()
-
-        assert "a@b.com" in send_calls
-        assert "b@b.com" in send_calls
-        assert "c@b.com" in send_calls
-
-    def test_skips_opt_out_sellers(self, monkeypatch):
-        """Sellers с обеими нотификациями выключенными — skip без запросов alerts."""
-        mock_sb = MagicMock()
-        sellers_data = [
-            {"id": "s1", "email": "a@b.com", "display_name": "A", "telegram_chat_id": None,
-             "notify_email": False, "notify_telegram": False},
-        ]
-        monkeypatch.setattr("app.jobs.scheduler.fetch_all", lambda q: sellers_data)
-        monkeypatch.setattr("app.jobs.scheduler.get_supabase", lambda: mock_sb)
-
-        send_calls = []
-        monkeypatch.setattr("app.notifications.send_alert_digest",
-                            lambda *a, **kw: send_calls.append(a))
-
-        from app.jobs.scheduler import _job_send_daily_digests
-        _job_send_daily_digests()
-
-        assert len(send_calls) == 0
 
 
 class TestSyncConnectionsPagination:
@@ -83,6 +32,46 @@ class TestSyncConnectionsPagination:
         _job_sync_active_connections()
 
         assert fetch_all_called["count"] == 1
+
+
+# ============================================================================
+# Этап 2 «алерты → отчёты»: новый универсальный cron daily-reports.
+# ============================================================================
+
+class TestDailyReports:
+    """`_job_daily_reports` — обёртка над dispatch_daily_reports.
+
+    Сам dispatch_daily_reports тестируется отдельно в test_reports.py.
+    """
+
+    def test_job_calls_dispatch(self, monkeypatch):
+        """Job делегирует в reports.dispatch_daily_reports()."""
+        calls = {"n": 0}
+
+        def fake_dispatch():
+            calls["n"] += 1
+
+        monkeypatch.setattr("app.jobs.reports.dispatch_daily_reports", fake_dispatch)
+
+        from app.jobs.scheduler import _job_daily_reports
+        _job_daily_reports()
+
+        assert calls["n"] == 1
+
+    def test_job_swallows_exceptions(self, monkeypatch):
+        """Если dispatch бросает — cron не падает (только лог).
+
+        Это важно для prod-стабильности: один битый seller не должен ронять
+        весь scheduler.
+        """
+        def boom():
+            raise RuntimeError("DB down")
+
+        monkeypatch.setattr("app.jobs.reports.dispatch_daily_reports", boom)
+
+        # Не должно выбросить исключение наружу
+        from app.jobs.scheduler import _job_daily_reports
+        _job_daily_reports()
 
 
 # ============================================================================
