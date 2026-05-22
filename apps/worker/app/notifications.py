@@ -9,6 +9,8 @@
 на veloseller.ru, ссылки вели на несуществующий домен).
 
 Multi-warehouse (май 2026): send_sync_error_notification + send_weekly_report_email.
+Этап 2 «алерты → отчёты»: send_report_email — универсальная отправка
+Excel с динамическим описанием листов по kinds.
 """
 from __future__ import annotations
 
@@ -21,13 +23,28 @@ from typing import Optional
 logger = logging.getLogger("veloseller.notifications")
 
 
+_KIND_LABELS = {
+    "low_stock":          "Низкий остаток",
+    "critical_stock":     "Критический остаток",
+    "dead_inventory":     "Неликвид",
+    "repeated_stockout":  "Частый out-of-stock",
+    "underestimated_sku": "Недооценённый SKU",
+    "sync_error":         "Ошибки синхронизации",
+    "weekly_report":      "Сводка по складу",
+}
+
+
 def _app_url() -> str:
     raw = os.getenv("APP_URL") or "https://veloseller.ru"
     return raw.split(",")[0].strip().rstrip("/")
 
 
 def send_alert_digest(to_email: str, seller_name: Optional[str], alerts: list[dict]) -> bool:
-    """Шлёт daily digest по непрочитанным критичным alerts."""
+    """Шлёт daily digest по непрочитанным критичным alerts.
+
+    Старый формат (real-time alerts). Оставлен на время перехода,
+    но в новой схеме не используется — всё идёт через send_report_email по расписанию.
+    """
     api_key = os.getenv("RESEND_API_KEY")
     from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
     if not api_key:
@@ -168,7 +185,11 @@ def send_weekly_report_email(
     xlsx_bytes: bytes,
     filename: str,
 ) -> bool:
-    """Шлёт еженедельный Excel-отчёт как attachment через Resend."""
+    """Шлёт еженедельный Excel-отчёт как attachment через Resend.
+
+    Старая функция — фикс схема с 3 листами. Оставлена для бекворд-совместимости
+    со старым apps/worker/app/jobs/weekly_report.py.
+    """
     api_key = os.getenv("RESEND_API_KEY")
     from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
     if not api_key:
@@ -214,4 +235,83 @@ def send_weekly_report_email(
         return True
     except Exception as e:
         logger.exception(f"Resend weekly report failed for {to_email}: {e}")
+        return False
+
+
+def send_report_email(
+    to_email: str,
+    seller_name: Optional[str],
+    kinds: list[str],
+    sku_counts: dict[str, int],
+    xlsx_bytes: bytes,
+    filename: str,
+) -> bool:
+    """Универсальная отправка Excel-отчёта (этап 2 «отчёты»).
+
+    В отличие от send_weekly_report_email — динамическое описание листов:
+    список kinds + количество SKU в каждом.
+
+    Args:
+        kinds: список notification_kind в файле (по одному листу на каждый)
+        sku_counts: {kind: число_строк}
+    """
+    api_key = os.getenv("RESEND_API_KEY")
+    from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
+    if not api_key:
+        logger.info("RESEND_API_KEY не задан — пропускаю report для %s", to_email)
+        return False
+
+    try:
+        import resend
+        resend.api_key = api_key
+    except ImportError:
+        logger.warning("resend SDK не установлен")
+        return False
+
+    safe_name = html.escape(seller_name) if seller_name else ""
+    greeting = f"Привет{', ' + safe_name if safe_name else ''}!"
+    app_url = _app_url()
+
+    # Динамический список листов в HTML теле письма
+    list_items = []
+    for kind in kinds:
+        label = html.escape(_KIND_LABELS.get(kind, kind))
+        n = sku_counts.get(kind, 0)
+        if n > 0:
+            list_items.append(f"<li><b>{label}</b> — {n} SKU</li>")
+    items_html = "\n".join(list_items) or "<li>Данных нет</li>"
+
+    # Субжект вид "Veloseller — Отчёт от 26.05.2026". Длиный список kinds не влезет в subject.
+    from datetime import datetime as _dt
+    today_str = _dt.utcnow().strftime("%d.%m.%Y")
+    subject = f"Veloseller — Отчёт от {today_str}"
+
+    html_body = f"""<!DOCTYPE html><html><body style="font-family:-apple-system,sans-serif;color:#0f172a;max-width:680px;margin:0 auto;padding:24px">
+<h2 style="color:#0f766e;margin:0 0 16px">Veloseller — отчёты склада</h2>
+<p>{greeting}</p>
+<p>По расписанию сформирован Excel-файл со следующими листами:</p>
+<ul>
+{items_html}
+</ul>
+<p style="margin-top:24px"><a href="{app_url}/dashboard/alerts" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">История отчётов</a></p>
+<p style="color:#64748b;font-size:12px;margin-top:32px">Настроить периодичность и состав отчётов можно в <a href="{app_url}/dashboard/alerts/subscriptions" style="color:#0f766e">настройках</a>.</p>
+</body></html>"""
+
+    try:
+        resend.Emails.send({
+            "from": from_email,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_body,
+            "attachments": [{
+                "filename": filename,
+                "content": base64.b64encode(xlsx_bytes).decode("ascii"),
+            }],
+        })
+        logger.info("report email sent", extra={
+            "to": to_email, "size": len(xlsx_bytes), "kinds": kinds,
+        })
+        return True
+    except Exception as e:
+        logger.exception(f"Resend report email failed for {to_email}: {e}")
         return False

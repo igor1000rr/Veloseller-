@@ -3,10 +3,12 @@
 - recalc-all каждый час
 - sync активных marketplace-connections РАЗ В СУТКИ в 02:00 UTC
 - expire-subscriptions в 03:00 UTC (откатываем в trial истёкшие платные подписки)
-- daily digest в 09:00 UTC
-- weekly Excel report по понедельникам в 09:00 UTC (12:00 МСК)
+- daily-reports в 09:00 UTC (этап 2 алерты→отчёты — диспетчер по day_of_week)
 - snapshots retention в 04:00 UTC (БАГ 89)
 - reset stuck syncing каждые 10 минут (БАГ 90)
+
+Старые джобы daily-digest и weekly-report удалены — их функциял
+выполняет универсальный daily-reports через notification_subscriptions.
 """
 from __future__ import annotations
 
@@ -90,19 +92,10 @@ def _job_sync_active_connections() -> None:
 
 
 def _job_expire_subscriptions() -> None:
-    """Откатывает истёкшие платные подписки в trial.
-
-    Ищет sellers где subscription_expires_at < now() AND plan != 'trial'.
-    Для каждого: plan='trial', plan_warehouses_limit=15, subscription_expires_at=NULL.
-
-    Данные складов НЕ удаляются — юзер может продлить подписку и продолжить.
-    Лимит trial=15 складов — старые склады остаются видимыми даже если их больше 15.
-    """
+    """Откатывает истёкшие платные подписки в trial."""
     try:
         sb = get_supabase()
         now_iso = datetime.now(timezone.utc).isoformat()
-
-        # Ищем sellers с истёкшей подпиской (plan != trial и дата истекла)
         expired_res = (
             sb.table("sellers")
             .select("id,email,plan,subscription_expires_at")
@@ -115,7 +108,6 @@ def _job_expire_subscriptions() -> None:
         if not expired:
             logger.info("expire-subscriptions: nothing to expire")
             return
-
         for s in expired:
             try:
                 sb.table("sellers").update({
@@ -130,74 +122,23 @@ def _job_expire_subscriptions() -> None:
                 })
             except Exception:
                 logger.exception("failed to expire subscription for %s", s.get("id"))
-
         logger.warning("expire-subscriptions: rolled back %d sellers to trial", len(expired))
     except Exception:
         logger.exception("expire-subscriptions job failed")
 
 
-def _job_send_daily_digests() -> None:
-    """Daily email + Telegram digest по непрочитанным alerts последних 24 часов."""
-    from app.notifications import send_alert_digest
-    from app.telegram import send_message as tg_send, format_alerts_digest
-    try:
-        sb = get_supabase()
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-        sellers = fetch_all(
-            sb.table("sellers").select("id,email,display_name,telegram_chat_id,notify_email,notify_telegram")
-        )
-        sent_email = 0
-        sent_telegram = 0
-        skipped = 0
-        for s in sellers:
-            try:
-                if not s.get("notify_email", True) and not s.get("notify_telegram", True):
-                    skipped += 1
-                    continue
-                alerts = (
-                    sb.table("alerts")
-                    .select("kind,message,created_at,products(sku,product_name)")
-                    .eq("seller_id", s["id"])
-                    .is_("acknowledged_at", "null")
-                    .gte("created_at", yesterday)
-                    .order("created_at", desc=True)
-                    .limit(50).execute()
-                )
-                if not alerts.data:
-                    continue
-                if s.get("email") and s.get("notify_email", True):
-                    try:
-                        if send_alert_digest(s["email"], s.get("display_name"), alerts.data):
-                            sent_email += 1
-                    except Exception:
-                        logger.exception("Email digest failed for seller %s", s["id"])
-                if s.get("telegram_chat_id") and s.get("notify_telegram", True):
-                    try:
-                        text = format_alerts_digest(alerts.data)
-                        if text and tg_send(s["telegram_chat_id"], text):
-                            sent_telegram += 1
-                    except Exception:
-                        logger.exception("Telegram digest failed for seller %s", s["id"])
-            except Exception:
-                logger.exception("Daily digest failed for seller %s", s.get("id"))
-                continue
-        logger.info("Daily digest job done", extra={
-            "total_sellers": len(sellers),
-            "sent_email": sent_email,
-            "sent_telegram": sent_telegram,
-            "skipped_optout": skipped,
-        })
-    except Exception as e:
-        logger.exception("Daily digest job failed: %s", e)
+def _job_daily_reports() -> None:
+    """Каждый день 09:00 UTC — диспетчер Excel-отчётов.
 
-
-def _job_weekly_report() -> None:
-    """Понедельник 09:00 UTC — еженедельный Excel-отчёт по складам."""
+    См. apps/worker/app/jobs/reports.py: по каждому seller собирает включённые
+    подписки с params.day_of_week == сегодня, строит один XLSX с листами по kinds,
+    отправляет через email/telegram, пишет в report_history.
+    """
     try:
-        from app.jobs.weekly_report import send_weekly_reports
-        send_weekly_reports()
+        from app.jobs.reports import dispatch_daily_reports
+        dispatch_daily_reports()
     except Exception:
-        logger.exception("weekly_report scheduler job failed")
+        logger.exception("daily-reports scheduler job failed")
 
 
 def _job_snapshots_retention() -> None:
@@ -266,7 +207,6 @@ def start_scheduler() -> None:
         id="sync-active-connections",
         replace_existing=True,
     )
-    # Авто-истечение подписок: ежедневно в 03:00 UTC (между sync в 02:00 и snapshots-retention в 04:00)
     _scheduler.add_job(
         _job_expire_subscriptions,
         CronTrigger(hour=3, minute=0),
@@ -279,17 +219,12 @@ def start_scheduler() -> None:
         id="snapshots-retention",
         replace_existing=True,
     )
+    # Этап 2 «алерты → отчёты»: ежедневный диспетчер. Отбирает подписки
+    # с params.day_of_week == isoweekday(today). Приходят 09:00 UTC = 12:00 МСК.
     _scheduler.add_job(
-        _job_send_daily_digests,
+        _job_daily_reports,
         CronTrigger(hour=9, minute=0),
-        id="daily-digest",
-        replace_existing=True,
-    )
-    # Еженедельный Excel отчёт: понедельник 09:00 UTC (12:00 МСК)
-    _scheduler.add_job(
-        _job_weekly_report,
-        CronTrigger(day_of_week="mon", hour=9, minute=0),
-        id="weekly-report",
+        id="daily-reports",
         replace_existing=True,
     )
     _scheduler.add_job(
