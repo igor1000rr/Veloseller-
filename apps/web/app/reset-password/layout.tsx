@@ -1,0 +1,11 @@
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Новый пароль",
+  description: "Установка нового пароля для аккаунта Veloseller.",
+  robots: { index: false, follow: false },
+};
+
+export default function ResetPasswordLayout({ children }: { children: React.ReactNode }) {
+  return children;
+}
