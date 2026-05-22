@@ -32,11 +32,18 @@ function isDashboardFilter(s: string | undefined): s is DashboardFilter {
       || s === "oos" || s === "inactive";
 }
 
-// Парсинг числа из query — пустое или невалидное возвращает null
 function parseIntOrNull(s: string | undefined): number | null {
   if (s == null || s === "") return null;
   const n = parseInt(s, 10);
   return Number.isFinite(n) ? n : null;
+}
+
+// Парсинг даты в формате YYYY-MM-DD из query
+function parseDateOrNull(s: string | undefined): string | null {
+  if (s == null || s === "") return null;
+  // Простая валидация YYYY-MM-DD
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+  return s;
 }
 
 export default async function SkusPage({ searchParams }: {
@@ -53,6 +60,9 @@ export default async function SkusPage({ searchParams }: {
     oos_min?: string;
     oos_max?: string;
     lost_min?: string;
+    lost_max?: string;
+    date_from?: string;
+    date_to?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -63,13 +73,15 @@ export default async function SkusPage({ searchParams }: {
   const dashFilter: DashboardFilter | null = isDashboardFilter(sp.filter) ? sp.filter : null;
   const includeInactive = sp.include_inactive === "1" || dashFilter === "inactive";
 
-  // Параметры панели фильтров (SkusFilters)
   const search = (sp.q ?? "").trim();
   const stockMin = parseIntOrNull(sp.stock_min);
   const stockMax = parseIntOrNull(sp.stock_max);
   const oosMin = parseIntOrNull(sp.oos_min);
   const oosMax = parseIntOrNull(sp.oos_max);
   const lostMin = parseIntOrNull(sp.lost_min);
+  const lostMax = parseIntOrNull(sp.lost_max);
+  const dateFrom = parseDateOrNull(sp.date_from);
+  const dateTo = parseDateOrNull(sp.date_to);
 
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -79,6 +91,8 @@ export default async function SkusPage({ searchParams }: {
   if (!user) return null;
 
   const selected = await getSelectedWarehouse(supabase, user.id);
+  // warehouseCreatedAt используется для min даты в календаре
+  const warehouseCreatedAt = selected?.created_at ?? null;
 
   let productsQuery = supabase
     .from("products")
@@ -97,7 +111,7 @@ export default async function SkusPage({ searchParams }: {
     productsQuery = productsQuery.eq("connection_id", selected.id);
   }
 
-  // Серверные фильтры по dashFilter (из обзора)
+  // dashFilter из обзора
   if (dashFilter === "low_stock") {
     productsQuery = productsQuery
       .lte("tvelo_metrics.coverage_days", 7)
@@ -120,15 +134,12 @@ export default async function SkusPage({ searchParams }: {
     productsQuery = productsQuery.or("current_stock.gt.0,adjusted_velocity.gt.0", { foreignTable: "tvelo_metrics" });
   }
 
-  // Сегмент-чип
   if (segmentFilter) {
     productsQuery = productsQuery.eq("tvelo_metrics.inventory_segment", segmentFilter);
   }
 
-  // Фильтры из панели SkusFilters
+  // Фильтры панели
   if (search) {
-    // ILIKE по SKU и названию. Кавычки нужны — иначе Postgres трактует
-    // комму как разделитель условий в .or().
     const escaped = search.replace(/[%_]/g, "\\$&");
     productsQuery = productsQuery.or(`sku.ilike.%${escaped}%,product_name.ilike.%${escaped}%`);
   }
@@ -144,11 +155,17 @@ export default async function SkusPage({ searchParams }: {
   if (oosMax !== null) {
     productsQuery = productsQuery.lte("tvelo_metrics.stockout_days", oosMax);
   }
-  // Потерянная выручка = velocity × stockout × price. Серверно эту формулу
-  // через Supabase не выразить (нет арифметики в .gte). Поэтому фильтр lost_min
-  // применяем после запроса в памяти. Это даст неточный count'у — для уведомления
-  // юзера мы покажем "после фильтра X из Y".
-  const lostFilterActiveButPostProcess = lostMin !== null && lostMin > 0;
+  // Календарь date_from / date_to — фильтрует по period_end (дата последнего пересчёта)
+  if (dateFrom) {
+    productsQuery = productsQuery.gte("tvelo_metrics.period_end", dateFrom);
+  }
+  if (dateTo) {
+    productsQuery = productsQuery.lte("tvelo_metrics.period_end", dateTo);
+  }
+  // lost_min / lost_max — формула не выразима через Supabase API, применяется
+  // пост-фильтром в памяти после получения данных.
+  const lostFilterActiveButPostProcess =
+    (lostMin !== null && lostMin > 0) || lostMax !== null;
 
   const { data: products, count } = await productsQuery
     .order("sku").range(from, to);
@@ -168,7 +185,6 @@ export default async function SkusPage({ searchParams }: {
     }
   }
 
-  // Привязка к выбранному периоду + расчёт lostRev для пост-фильтра
   let filtered = (products ?? []).map((p: any) => {
     const metrics = (p.tvelo_metrics as any[] | undefined) ?? [];
     const matchedMetric = metrics.find(m => {
@@ -178,7 +194,6 @@ export default async function SkusPage({ searchParams }: {
     return { ...p, tvelo_metrics: matchedMetric ? [matchedMetric] : [] };
   });
 
-  // Пост-фильтр по потерянной выручке
   const lostByProduct: Record<string, number> = {};
   for (const p of filtered) {
     const m = p.tvelo_metrics?.[0];
@@ -188,7 +203,12 @@ export default async function SkusPage({ searchParams }: {
     lostByProduct[p.product_id] = lost;
   }
   if (lostFilterActiveButPostProcess) {
-    filtered = filtered.filter((p: any) => (lostByProduct[p.product_id] ?? 0) > (lostMin as number));
+    filtered = filtered.filter((p: any) => {
+      const v = lostByProduct[p.product_id] ?? 0;
+      if (lostMin !== null && v <= lostMin) return false;
+      if (lostMax !== null && v > lostMax) return false;
+      return true;
+    });
   }
 
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
@@ -206,13 +226,15 @@ export default async function SkusPage({ searchParams }: {
     if (periodDays !== 30) params.set("period", String(periodDays));
     if (dashFilter && overrides.filter !== null) params.set("filter", overrides.filter ?? dashFilter);
     if (includeInactive && !dashFilter) params.set("include_inactive", "1");
-    // Прокидываем все фильтры из панели чтобы пагинация и сегмент-чипы их не теряли
     if (search) params.set("q", search);
     if (stockMin !== null) params.set("stock_min", String(stockMin));
     if (stockMax !== null) params.set("stock_max", String(stockMax));
     if (oosMin !== null) params.set("oos_min", String(oosMin));
     if (oosMax !== null) params.set("oos_max", String(oosMax));
     if (lostMin !== null) params.set("lost_min", String(lostMin));
+    if (lostMax !== null) params.set("lost_max", String(lostMax));
+    if (dateFrom) params.set("date_from", dateFrom);
+    if (dateTo) params.set("date_to", dateTo);
     for (const [k, v] of Object.entries(overrides)) {
       if (v === null) params.delete(k);
       else if (v !== undefined && k !== "page" && k !== "segment" && k !== "filter") params.set(k, String(v));
@@ -298,7 +320,6 @@ export default async function SkusPage({ searchParams }: {
         </div>
       </header>
 
-      {/* Фильтр из обзора */}
       {dashFilter && (
         <div className="flex items-center gap-3 rounded-xl border border-lime-deep/30 bg-lime-soft p-3 flex-wrap">
           <span className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold shrink-0">
@@ -321,7 +342,6 @@ export default async function SkusPage({ searchParams }: {
         </div>
       )}
 
-      {/* Чекбокс "Включить SKU без активности" — кроме случая когда фильтр сам по неактивным */}
       {!dashFilter && (
         <div className="flex items-center gap-2 text-sm text-ink-muted">
           <Link
@@ -340,8 +360,8 @@ export default async function SkusPage({ searchParams }: {
         </div>
       )}
 
-      {/* Панель фильтров (client component) */}
-      <SkusFilters />
+      {/* Панель фильтров (client) — передаём warehouseCreatedAt для min календаря */}
+      <SkusFilters warehouseCreatedAt={warehouseCreatedAt} />
 
       {!selected && (
         <div className="rounded-xl border border-orange/30 bg-orange/5 p-4 flex items-start gap-3">
