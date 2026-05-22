@@ -16,10 +16,12 @@ export const dynamic = "force-dynamic";
  *
  * Период: 7, 30 (default), 90 дней.
  *
- * Multi-warehouse фильтр (май 2026):
+ * Multi-warehouse фильтр:
  * - Если ?warehouse_id=<id> указан явно — фильтруем по нему
  * - Иначе берём выбранный из cookie vs-warehouse
- * - Если выбранный = null (нет складов) — экспорт всех (обратная совместимость)
+ *
+ * user_notes (правка 9 Александра) — заметка по SKU, идёт последней колонкой
+ * чтобы юзер мог открыть Excel и сразу видеть свои пометки рядом с метриками.
  */
 export async function GET(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
@@ -37,7 +39,6 @@ export async function GET(req: NextRequest) {
   const format = (url.searchParams.get("format") ?? "csv").toLowerCase();
   const isExcel = format === "excel" || format === "xlsx";
 
-  // Multi-warehouse фильтр
   let warehouseId = url.searchParams.get("warehouse_id");
   let warehouseName = "";
   if (!warehouseId) {
@@ -66,7 +67,7 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from("products")
       .select(`
-        product_id, sku, product_name, connection_id,
+        product_id, sku, product_name, connection_id, user_notes,
         tvelo_metrics (
           confirmed_velocity, adjusted_velocity, median_30d_velocity,
           confidence_score, confidence_breakdown,
@@ -105,9 +106,10 @@ export async function GET(req: NextRequest) {
     "confidence_replenishment", "confidence_anomaly",
     "confidence_missing", "confidence_low_history",
     "lost_revenue_estimate",
+    // Правка 9 Александра: заметки последней колонкой
+    "user_notes",
   ];
 
-  // Разделитель и экранирование
   const sep = isExcel ? ";" : ",";
   const escape = (v: any): string => {
     if (v == null) return "";
@@ -124,11 +126,14 @@ export async function GET(req: NextRequest) {
       return Math.abs(len - (periodDays - 1)) <= 1;
     }) ?? metrics[0];
 
+    const userNotes = p.user_notes ?? "";
+
     if (!matched) {
       lines.push([
         escape(p.sku), escape(p.product_name),
         periodDays, "", "", "", "", "", "", "", "", "", "", "", "", "",
         "", "", "", "", "", "", "",
+        escape(userNotes),
       ].join(sep));
       continue;
     }
@@ -153,6 +158,7 @@ export async function GET(req: NextRequest) {
       cb.initial ?? "", cb.replenishment_like ?? "", cb.anomaly_like ?? "",
       cb.missing_data ?? "", cb.low_history ?? "",
       lostRevenue,
+      escape(userNotes),
     ].join(sep));
   }
 
@@ -164,9 +170,6 @@ export async function GET(req: NextRequest) {
   const baseName = `veloseller-metrics-${periodDays}d${warehouseSlug}-${today}`;
 
   if (isExcel) {
-    // CSV с UTF-8 BOM + точка-с-запятой разделитель — Excel открывает как таблицу
-    // BOM = 0xEF 0xBB 0xBF — сигнал Excel'ю что файл UTF-8 (иначе кракозябры)
-    // .xls extension — Excel по умолчанию откроет без диалога импорта
     const bom = "\uFEFF";
     return new Response(bom + csv, {
       headers: {
