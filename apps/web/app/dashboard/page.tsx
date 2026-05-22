@@ -124,7 +124,6 @@ export default async function DashboardOverview({ searchParams }: {
     .map(v => v.confidence)
     .filter((c): c is number => c != null);
   // confidence_score в БД хранится в процентах (0-100), НЕ в долях.
-  // Раньше было * 100 → выходило 4000% на экране.
   const avgConfidence = confidenceValues.length > 0
     ? confidenceValues.reduce((a, b) => a + b, 0) / confidenceValues.length
     : null;
@@ -254,7 +253,6 @@ export default async function DashboardOverview({ searchParams }: {
         <Kpi
           label="Достоверность данных"
           tooltip="Средняя достоверность данных по магазину. Чем больше дней снимаем snapshots — тем выше показатель."
-          /* БАГФИКС: confidence_score в БД уже в процентах (0-100). Было * 100 → выходило 4000%. */
           value={avgConfidence != null ? `${avgConfidence.toFixed(0)}%` : "—"}
           tone="accent"
         />
@@ -333,9 +331,9 @@ export default async function DashboardOverview({ searchParams }: {
       {alerts && alerts.length > 0 && (
         <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
           <div className="flex items-center justify-between flex-wrap gap-3">
-            <h2 className="font-display text-lg font-medium text-ink">Последние уведомления</h2>
+            <h2 className="font-display text-lg font-medium text-ink">Последние события</h2>
             <Link href={"/dashboard/alerts" as any} className="text-xs font-mono uppercase tracking-wider text-lime-deep hover:underline">
-              Все →
+              Все отчёты →
             </Link>
           </div>
           <ul className="mt-3 space-y-2">
