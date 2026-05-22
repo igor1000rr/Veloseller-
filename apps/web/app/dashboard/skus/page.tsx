@@ -4,6 +4,8 @@ import { VelocitySparkline } from "./VelocitySparkline";
 import { Icons } from "../../_components/Icons";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 import { getSelectedWarehouse, warehouseKindLabel } from "@/lib/warehouse";
+import { SkusFilters } from "./SkusFilters";
+import { NotesCell } from "./NotesCell";
 
 const PAGE_SIZE = 50;
 
@@ -15,9 +17,6 @@ const SEGMENTS = [
   { value: "dead_inventory_risk", label: "Неликвид" },
 ];
 
-// Прешеты фильтров из обзора. Каждый кликабельный блок дашборда передаёт
-// ?filter=<key>&period=<days> — на странице SKU мы конвертируем это в
-// SQL-условия по соответствующим полям tvelo_metrics.
 type DashboardFilter = "low_stock" | "lost_revenue" | "dead_inventory" | "oos" | "inactive";
 
 const DASHBOARD_FILTER_LABELS: Record<DashboardFilter, string> = {
@@ -33,6 +32,13 @@ function isDashboardFilter(s: string | undefined): s is DashboardFilter {
       || s === "oos" || s === "inactive";
 }
 
+// Парсинг числа из query — пустое или невалидное возвращает null
+function parseIntOrNull(s: string | undefined): number | null {
+  if (s == null || s === "") return null;
+  const n = parseInt(s, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
 export default async function SkusPage({ searchParams }: {
   searchParams: Promise<{
     page?: string;
@@ -41,6 +47,12 @@ export default async function SkusPage({ searchParams }: {
     period?: string;
     filter?: string;
     include_inactive?: string;
+    q?: string;
+    stock_min?: string;
+    stock_max?: string;
+    oos_min?: string;
+    oos_max?: string;
+    lost_min?: string;
   }>;
 }) {
   const sp = await searchParams;
@@ -48,13 +60,16 @@ export default async function SkusPage({ searchParams }: {
   const segmentFilter = sp.segment ?? "";
   const reorderDays = Math.max(1, parseInt(sp.reorder_days ?? "30", 10) || 30);
   const periodDays = (sp.period === "7" || sp.period === "90") ? parseInt(sp.period) : 30;
-
-  // Прешет с обзора. Когда юзер кликнул action-блок — приходит сюда с фильтром.
   const dashFilter: DashboardFilter | null = isDashboardFilter(sp.filter) ? sp.filter : null;
-
-  // По умолчанию неактивные SKU скрыты. Включаются галочкой "Включить SKU без активности"
-  // или авто-включаются если филь dashFilter = "inactive".
   const includeInactive = sp.include_inactive === "1" || dashFilter === "inactive";
+
+  // Параметры панели фильтров (SkusFilters)
+  const search = (sp.q ?? "").trim();
+  const stockMin = parseIntOrNull(sp.stock_min);
+  const stockMax = parseIntOrNull(sp.stock_max);
+  const oosMin = parseIntOrNull(sp.oos_min);
+  const oosMax = parseIntOrNull(sp.oos_max);
+  const lostMin = parseIntOrNull(sp.lost_min);
 
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -65,10 +80,6 @@ export default async function SkusPage({ searchParams }: {
 
   const selected = await getSelectedWarehouse(supabase, user.id);
 
-  // Сразу делаем запрос с inner join — это нужно для серверного фильтра
-  // по tvelo_metrics. inner гарантирует что вернутся только продукты у которых
-  // есть метрика за период. Если по продукту нет метрики — он либо новый,
-  // либо синки ещё не было.
   let productsQuery = supabase
     .from("products")
     .select(`
@@ -86,48 +97,62 @@ export default async function SkusPage({ searchParams }: {
     productsQuery = productsQuery.eq("connection_id", selected.id);
   }
 
-  // Серверные фильтры по dashFilter — применяются ДО пагинации, что важно
-  // для правильного count'а и отображения только нужных SKU.
-  // coverage_days и stockout_days — поля tvelo_metrics.
+  // Серверные фильтры по dashFilter (из обзора)
   if (dashFilter === "low_stock") {
     productsQuery = productsQuery
       .lte("tvelo_metrics.coverage_days", 7)
       .gt("tvelo_metrics.current_stock", 0);
   } else if (dashFilter === "lost_revenue") {
-    // Потерянная выручка > 0 = было OOS И была скорость. Фильтр через stockout_days > 0
-    // и velocity > 0 — это эквивалентно lost_revenue > 0.
     productsQuery = productsQuery
       .gt("tvelo_metrics.stockout_days", 0)
       .gt("tvelo_metrics.adjusted_velocity", 0);
   } else if (dashFilter === "dead_inventory") {
     productsQuery = productsQuery.gt("tvelo_metrics.coverage_days", 180);
   } else if (dashFilter === "oos") {
-    // Нет в наличии (активный OOS) = stock = 0 + было движение.
-    // "Было движение" в наших данных = adjusted_velocity > 0 (что-то продавалось).
     productsQuery = productsQuery
       .eq("tvelo_metrics.current_stock", 0)
       .gt("tvelo_metrics.adjusted_velocity", 0);
   } else if (dashFilter === "inactive") {
-    // SKU без активности = stock = 0 + velocity = 0
     productsQuery = productsQuery
       .eq("tvelo_metrics.current_stock", 0)
       .eq("tvelo_metrics.adjusted_velocity", 0);
   } else if (!includeInactive) {
-    // Когда нет dashFilter и галочка "включить неактивные" off — прячем тех,
-    // у кого и stock = 0 и velocity = 0. По умолчанию это поведение —
-    // юзер видит только товары, с которыми реально может работать.
     productsQuery = productsQuery.or("current_stock.gt.0,adjusted_velocity.gt.0", { foreignTable: "tvelo_metrics" });
   }
 
-  // Сегмент-фильтр (legacy chips «Все/Быстрые/...»)
+  // Сегмент-чип
   if (segmentFilter) {
     productsQuery = productsQuery.eq("tvelo_metrics.inventory_segment", segmentFilter);
   }
 
+  // Фильтры из панели SkusFilters
+  if (search) {
+    // ILIKE по SKU и названию. Кавычки нужны — иначе Postgres трактует
+    // комму как разделитель условий в .or().
+    const escaped = search.replace(/[%_]/g, "\\$&");
+    productsQuery = productsQuery.or(`sku.ilike.%${escaped}%,product_name.ilike.%${escaped}%`);
+  }
+  if (stockMin !== null) {
+    productsQuery = productsQuery.gte("tvelo_metrics.current_stock", stockMin);
+  }
+  if (stockMax !== null) {
+    productsQuery = productsQuery.lte("tvelo_metrics.current_stock", stockMax);
+  }
+  if (oosMin !== null) {
+    productsQuery = productsQuery.gte("tvelo_metrics.stockout_days", oosMin);
+  }
+  if (oosMax !== null) {
+    productsQuery = productsQuery.lte("tvelo_metrics.stockout_days", oosMax);
+  }
+  // Потерянная выручка = velocity × stockout × price. Серверно эту формулу
+  // через Supabase не выразить (нет арифметики в .gte). Поэтому фильтр lost_min
+  // применяем после запроса в памяти. Это даст неточный count'у — для уведомления
+  // юзера мы покажем "после фильтра X из Y".
+  const lostFilterActiveButPostProcess = lostMin !== null && lostMin > 0;
+
   const { data: products, count } = await productsQuery
     .order("sku").range(from, to);
 
-  // Sparkline нужен по каждой строке — берём историю velocity за 7 точек
   const productIds = (products ?? []).map((p: any) => p.product_id);
   const sparkData: Record<string, number[]> = {};
   if (productIds.length > 0) {
@@ -143,9 +168,8 @@ export default async function SkusPage({ searchParams }: {
     }
   }
 
-  // tvelo_metrics возвращается массивом — берём строку, соответствующую
-  // выбранному периоду (7/30/90 дней). Это даёт периодные метрики на UI.
-  const filtered = (products ?? []).map((p: any) => {
+  // Привязка к выбранному периоду + расчёт lostRev для пост-фильтра
+  let filtered = (products ?? []).map((p: any) => {
     const metrics = (p.tvelo_metrics as any[] | undefined) ?? [];
     const matchedMetric = metrics.find(m => {
       const len = Math.round((new Date(m.period_end).getTime() - new Date(m.period_start).getTime()) / 86400_000);
@@ -154,6 +178,19 @@ export default async function SkusPage({ searchParams }: {
     return { ...p, tvelo_metrics: matchedMetric ? [matchedMetric] : [] };
   });
 
+  // Пост-фильтр по потерянной выручке
+  const lostByProduct: Record<string, number> = {};
+  for (const p of filtered) {
+    const m = p.tvelo_metrics?.[0];
+    const lost = m
+      ? Number(m.adjusted_velocity ?? 0) * Number(m.stockout_days ?? 0) * Number(m.current_price ?? 0)
+      : 0;
+    lostByProduct[p.product_id] = lost;
+  }
+  if (lostFilterActiveButPostProcess) {
+    filtered = filtered.filter((p: any) => (lostByProduct[p.product_id] ?? 0) > (lostMin as number));
+  }
+
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
 
   const exportParams = new URLSearchParams();
@@ -161,7 +198,6 @@ export default async function SkusPage({ searchParams }: {
   if (selected) exportParams.set("warehouse_id", selected.id);
   const exportQS = exportParams.toString();
 
-  // Хелпер для сборки query-string при смене страницы/сегмента
   const buildQs = (overrides: Record<string, string | number | null>) => {
     const params = new URLSearchParams();
     if (page !== 1 && overrides.page !== null) params.set("page", String(overrides.page ?? page));
@@ -170,7 +206,13 @@ export default async function SkusPage({ searchParams }: {
     if (periodDays !== 30) params.set("period", String(periodDays));
     if (dashFilter && overrides.filter !== null) params.set("filter", overrides.filter ?? dashFilter);
     if (includeInactive && !dashFilter) params.set("include_inactive", "1");
-    // Применяем overrides
+    // Прокидываем все фильтры из панели чтобы пагинация и сегмент-чипы их не теряли
+    if (search) params.set("q", search);
+    if (stockMin !== null) params.set("stock_min", String(stockMin));
+    if (stockMax !== null) params.set("stock_max", String(stockMax));
+    if (oosMin !== null) params.set("oos_min", String(oosMin));
+    if (oosMax !== null) params.set("oos_max", String(oosMax));
+    if (lostMin !== null) params.set("lost_min", String(lostMin));
     for (const [k, v] of Object.entries(overrides)) {
       if (v === null) params.delete(k);
       else if (v !== undefined && k !== "page" && k !== "segment" && k !== "filter") params.set(k, String(v));
@@ -198,7 +240,6 @@ export default async function SkusPage({ searchParams }: {
           )}
         </div>
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Excel/CSV экспорт — в углу панели управления */}
           <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1">
             <a
               href={`/api/export/metrics?${exportQS}&format=excel`}
@@ -217,7 +258,6 @@ export default async function SkusPage({ searchParams }: {
               CSV
             </a>
           </div>
-          {/* Закупка на N дней */}
           <form className="flex items-center gap-2 text-sm">
             <label className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Закупка на</label>
             <input
@@ -228,9 +268,9 @@ export default async function SkusPage({ searchParams }: {
             {segmentFilter && <input type="hidden" name="segment" value={segmentFilter} />}
             {dashFilter && <input type="hidden" name="filter" value={dashFilter} />}
             {periodDays !== 30 && <input type="hidden" name="period" value={periodDays} />}
+            {search && <input type="hidden" name="q" value={search} />}
             <button type="submit" className="px-2.5 py-1.5 text-xs bg-ink text-paper rounded-lg hover:bg-ink-soft transition">→</button>
           </form>
-          {/* Сегменты */}
           <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1">
             {SEGMENTS.map(s => {
               const params = new URLSearchParams();
@@ -239,6 +279,7 @@ export default async function SkusPage({ searchParams }: {
               if (periodDays !== 30) params.set("period", String(periodDays));
               if (dashFilter) params.set("filter", dashFilter);
               if (includeInactive && !dashFilter) params.set("include_inactive", "1");
+              if (search) params.set("q", search);
               const qs = params.toString();
               const isActive = segmentFilter === s.value;
               return (
@@ -257,7 +298,7 @@ export default async function SkusPage({ searchParams }: {
         </div>
       </header>
 
-      {/* Активный фильтр с обзора — показываем чип со ссылкой "сбросить" */}
+      {/* Фильтр из обзора */}
       {dashFilter && (
         <div className="flex items-center gap-3 rounded-xl border border-lime-deep/30 bg-lime-soft p-3 flex-wrap">
           <span className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold shrink-0">
@@ -299,6 +340,9 @@ export default async function SkusPage({ searchParams }: {
         </div>
       )}
 
+      {/* Панель фильтров (client component) */}
+      <SkusFilters />
+
       {!selected && (
         <div className="rounded-xl border border-orange/30 bg-orange/5 p-4 flex items-start gap-3">
           <span className="text-orange mt-0.5 shrink-0">⛔️</span>
@@ -326,12 +370,9 @@ export default async function SkusPage({ searchParams }: {
               <Th align="right">Медиана</Th>
               <Th align="center">Тренд</Th>
               <Th align="right">Покрытие</Th>
-              <Th align="right">
-                OOS ({periodDays}д)
-              </Th>
+              <Th align="right">OOS ({periodDays}д)</Th>
               <Th align="right">Продажи</Th>
               <Th align="right">Закупка ({reorderDays}д)</Th>
-              {/* CONF → ДСТ с tooltip */}
               <Th align="right" accent>
                 <span className="inline-flex items-center">
                   ДСТ
@@ -350,11 +391,8 @@ export default async function SkusPage({ searchParams }: {
               const medVel = m?.median_30d_velocity != null ? Number(m.median_30d_velocity) : 0;
               const stockoutDays = m?.stockout_days != null ? Number(m.stockout_days) : 0;
               const inStockDays = m?.in_stock_days != null ? Number(m.in_stock_days) : 0;
-              const price = m?.current_price != null ? Number(m.current_price) : 0;
-              // Продажи за период = velocity × in_stock_days (только дни в наличии)
               const salesUnits = Math.round(adjVel * inStockDays);
-              // Потерянная выручка по SKU = velocity × stockout_days × price
-              const lostRev = adjVel * stockoutDays * price;
+              const lostRev = lostByProduct[p.product_id] ?? 0;
               const reorderQty = Math.round(adjVel * reorderDays);
               const isUnderestimated = m?.underestimated_sku;
 
@@ -396,7 +434,6 @@ export default async function SkusPage({ searchParams }: {
                   <td className="px-4 py-3 text-right font-semibold tabular text-lime-deep">
                     {adjVel > 0 ? reorderQty : "—"}
                   </td>
-                  {/* ДСТ — небольшое выделение фоном */}
                   <td className="px-4 py-3 text-right tabular bg-lime-soft/30">
                     {m?.confidence_score != null ? (
                       <span className="font-semibold text-ink">{Number(m.confidence_score).toFixed(0)}%</span>
@@ -414,8 +451,8 @@ export default async function SkusPage({ searchParams }: {
                       <span className="text-ink-hush">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-3 text-ink-soft text-xs max-w-[200px] truncate" title={p.user_notes ?? ""}>
-                    {p.user_notes ?? <span className="text-ink-hush">—</span>}
+                  <td className="px-4 py-3">
+                    <NotesCell productId={p.product_id} initial={p.user_notes ?? null} />
                   </td>
                 </tr>
               );
@@ -424,7 +461,7 @@ export default async function SkusPage({ searchParams }: {
               <tr>
                 <td colSpan={15} className="px-4 py-12 text-center text-ink-muted text-sm">
                   {selected
-                    ? `Пока нет данных по складу «${selected.name}». Дождитесь первой синхронизации или проверьте фильтр.`
+                    ? `Пока нет данных по складу «${selected.name}». Дождитесь первой синхронизации или проверьте фильтры.`
                     : "Пока нет данных или ничего не подходит под фильтр."}
                 </td>
               </tr>
@@ -472,14 +509,6 @@ function Th({ children, align = "left", accent = false }: {
   );
 }
 
-/**
- * Цветной Health (Александр):
- * - 0..30  — красный (rose)
- * - 30..70 — оранжевый
- * - 70..100 — зелёный (lime-deep)
- *
- * Делаю числом + цветной "пилюлей" фоном, выделение умеренное.
- */
 function HealthBadge({ score }: { score: number | null }) {
   if (score == null) return <span className="text-ink-hush">—</span>;
   const n = Number(score);
