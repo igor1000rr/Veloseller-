@@ -46,6 +46,7 @@ export default async function LandingPage() {
             <a href="#how" className="text-sm text-ink-soft hover:text-lime-deep transition">Как работает</a>
             <a href="#integrations" className="text-sm text-ink-soft hover:text-lime-deep transition">Интеграции</a>
             <a href="#pricing" className="text-sm text-ink-soft hover:text-lime-deep transition">Тарифы</a>
+            <Link href={"/news" as any} className="text-sm text-ink-soft hover:text-lime-deep transition">Новости</Link>
             <a href="#faq" className="text-sm text-ink-soft hover:text-lime-deep transition">FAQ</a>
           </nav>
           <div className="flex items-center gap-2 md:gap-3">
@@ -441,6 +442,7 @@ export default async function LandingPage() {
               ["#features", "Возможности"],
               ["#how", "Как работает"],
               ["#pricing", "Тарифы"],
+              ["/news", "Новости"],
               ["#faq", "FAQ"],
             ]} />
             <div className="col-span-1 md:col-span-2">
