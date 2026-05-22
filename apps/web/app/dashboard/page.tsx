@@ -92,10 +92,6 @@ export default async function DashboardOverview({ searchParams }: {
     .order("period_end", { ascending: false })
     .limit(14);
 
-  // tvelo_metrics — фильтруем по products.connection_id выбранного склада.
-  // Используется для расчёта скоростей продаж и средней достоверности данных.
-  // inactive_sku_count и frequently_oos_sku_count теперь читаются прямо из
-  // store_metrics (считаются в воркере).
   const tveloRows = await fetchAll<{
     adjusted_velocity: number;
     confidence_score: number | null;
@@ -110,10 +106,7 @@ export default async function DashboardOverview({ searchParams }: {
       .order("period_end", { ascending: false })
       .range(from, to),
   );
-  const latestByProduct = new Map<string, {
-    velocity: number;
-    confidence: number | null;
-  }>();
+  const latestByProduct = new Map<string, { velocity: number; confidence: number | null }>();
   for (const m of tveloRows) {
     if (!latestByProduct.has(m.product_id)) {
       latestByProduct.set(m.product_id, {
@@ -127,7 +120,6 @@ export default async function DashboardOverview({ searchParams }: {
   const avgVelocity = velocities.length > 0 ? velocities.reduce((a, b) => a + b, 0) / velocities.length : 0;
   const slowVelocity = velocities.length > 0 ? velocities[Math.floor(velocities.length * 0.1)] : 0;
 
-  // Достоверность данных — среднее confidence_score по выбранному складу
   const confidenceValues = Array.from(latestByProduct.values())
     .map(v => v.confidence)
     .filter((c): c is number => c != null);
@@ -145,23 +137,22 @@ export default async function DashboardOverview({ searchParams }: {
 
   const showMultiWarehouseBanner = allWarehouses.length > 1;
 
-  // Линки на SKU-страницу с фильтрами (страница пока их не парсит — это итерация 3)
   const skusLink = (filter: string) => `/dashboard/skus?period=${period}&filter=${filter}` as any;
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="font-display text-3xl md:text-4xl font-medium tracking-tight text-ink">Обзор склада</h1>
+        <div className="min-w-0">
+          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl font-medium tracking-tight text-ink">Обзор склада</h1>
           <div className="mt-1.5 flex items-center gap-2 flex-wrap text-sm text-ink-muted">
             <span className="size-1.5 rounded-full bg-lime-deep" />
-            <span className="font-medium text-ink">{currentWarehouseName}</span>
+            <span className="font-medium text-ink truncate">{currentWarehouseName}</span>
             <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
               {warehouseKindLabel(currentWarehouseKind)}
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           <PeriodSelector current={period} />
           <RecalcButton />
         </div>
@@ -184,7 +175,7 @@ export default async function DashboardOverview({ searchParams }: {
 
       <DayProgress daysSinceSetup={daysSinceSetup} />
 
-      {/* ===== ПОЛОСА 1: 3 средних блока (action-блоки) ===== */}
+      {/* ===== ПОЛОСА 1: 3 средних блока ===== */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <ActionCard
           href={skusLink("low_stock")}
@@ -213,15 +204,16 @@ export default async function DashboardOverview({ searchParams }: {
       </div>
 
       {/* ===== ПОЛОСА 2: 2 больших блока ===== */}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-4 md:gap-6 md:grid-cols-2">
         <HealthScoreBlock score={storeMetrics?.warehouse_health_score} />
 
-        <div className="rounded-2xl border border-line bg-paper p-6">
+        <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold flex items-center">
             Денег на остатках
             <InfoTooltip text={`Σ stock_quantity × current_price по всем SKU. Сколько ${currency === "RUB" ? "рублей" : "денег"} лежит на складе в виде товара — это твой замороженный оборотный капитал.`} />
           </div>
-          <div className="mt-3 font-display text-4xl md:text-5xl tracking-tight font-medium text-ink tabular">
+          {/* Mobile: text-2xl чтобы длинные суммы не вылазили за пределы. Desktop: text-5xl. break-words на случай совсем гигантских значений. */}
+          <div className="mt-3 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium text-ink tabular break-words">
             {fmt(storeMetrics?.total_inventory_value)}
           </div>
           <div className="mt-4 rounded-lg border border-orange/20 bg-orange/5 p-3 flex items-center justify-between gap-3 flex-wrap">
@@ -229,7 +221,7 @@ export default async function DashboardOverview({ searchParams }: {
               Заморожено в неликвиде
               <InfoTooltip text="Деньги в SKU с coverage > 180 дней. Эти средства фактически не работают — товар будет продаваться полгода+. Кандидаты на распродажу, возврат поставщику или списание." />
             </span>
-            <span className="font-display tabular text-xl text-orange font-medium">
+            <span className="font-display tabular text-lg sm:text-xl text-orange font-medium break-words">
               {fmt(storeMetrics?.store_frozen_inventory_value)}
             </span>
           </div>
@@ -237,7 +229,7 @@ export default async function DashboardOverview({ searchParams }: {
       </div>
 
       {/* ===== ПОЛОСА 3: 4 маленьких KPI ===== */}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
         <Kpi
           href={"/dashboard/skus" as any}
           label="Всего SKU"
@@ -266,9 +258,9 @@ export default async function DashboardOverview({ searchParams }: {
         />
       </div>
 
-      {/* ===== ПОЛОСА 4: 3 средних блока (концентрации + частые OOS) ===== */}
+      {/* ===== ПОЛОСА 4: 3 средних ===== */}
       <div className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border border-line bg-paper p-5">
+        <div className="rounded-2xl border border-line bg-paper p-4 sm:p-5">
           <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
             Концентрация остатков
             <InfoTooltip text="Сколько топ-SKU держат 50% всех денег в остатках. Малое число (например 5-10 из 1000) = большая концентрация: потерять 1-2 ключевых SKU = потерять половину склада." />
@@ -278,7 +270,7 @@ export default async function DashboardOverview({ searchParams }: {
           </div>
           <div className="mt-1 text-xs text-ink-muted">дают 50% остатков по деньгам</div>
         </div>
-        <div className="rounded-2xl border border-line bg-paper p-5">
+        <div className="rounded-2xl border border-line bg-paper p-4 sm:p-5">
           <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
             Концентрация спроса
             <InfoTooltip text="Сколько SKU создают 50% всего спроса (скорость × цена). Маленькое число = узкое горлышко: эти SKU критичны для выручки, дефицит по ним = крупные потери." />
@@ -288,7 +280,7 @@ export default async function DashboardOverview({ searchParams }: {
           </div>
           <div className="mt-1 text-xs text-ink-muted">дают 50% спроса</div>
         </div>
-        <div className="rounded-2xl border border-orange/30 bg-orange/5 p-5">
+        <div className="rounded-2xl border border-orange/30 bg-orange/5 p-4 sm:p-5">
           <div className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold flex items-center">
             Часто отсутствуют на складе
             <InfoTooltip text="Товары, которые более 15 дней за последний месяц отсутствовали на складе. Регулярный дефицит — повод проверить логистику или закупку." />
@@ -302,11 +294,12 @@ export default async function DashboardOverview({ searchParams }: {
 
       {/* ===== ПОЛОСА 5: 3 скорости продаж ===== */}
       <div>
-        <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3 flex items-center">
-          Скорости продаж по SKU склада «{currentWarehouseName}»
+        <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3 flex items-center flex-wrap">
+          <span>Скорости продаж по SKU склада «{currentWarehouseName}»</span>
           <InfoTooltip text="Распределение adjusted_velocity (штук в день) по всем SKU выбранного склада. Быстрая = 90-й перцентиль, Средняя = mean, Медленная = 10-й перцентиль. Помогает понять структуру ассортимента." />
         </h3>
-        <div className="grid grid-cols-3 gap-3">
+        {/* Mobile: text меньше + меньший gap чтобы 3 карты влезли. Desktop без изменений. */}
+        <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <VelocityCard label="Быстрая" value={fastVelocity} sub="топ 10% SKU" tone="fast" tooltip="P90: 90% SKU продаются медленнее, 10% — быстрее. Это твои бестселлеры." />
           <VelocityCard label="Средняя" value={avgVelocity}  sub="по всем SKU"  tone="mid"  tooltip="Арифметическое среднее скорости продаж по всем активным SKU. Хороший baseline для сравнения." />
           <VelocityCard label="Медленная" value={slowVelocity} sub="нижние 10%" tone="slow" tooltip="P10: 90% SKU продаются быстрее. Кандидаты на оптимизацию ассортимента." />
@@ -327,18 +320,17 @@ export default async function DashboardOverview({ searchParams }: {
       </div>
 
       {/* ===== ПОЛОСА 7: Dead inventory ===== */}
-      <div className="rounded-2xl border border-line bg-paper p-6">
-        <h3 className="font-display text-lg font-medium text-ink flex items-center">
-          Неликвид (товары &gt; 6 месяцев)
+      <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
+        <h3 className="font-display text-base sm:text-lg font-medium text-ink flex items-center flex-wrap">
+          <span>Неликвид (товары &gt; 6 месяцев)</span>
           <InfoTooltip text="SKU с coverage > 180 дней. Динамика количества (левая ось) и денег (правая). Если растёт — закупка неэффективна, надо разбираться." position="bottom" />
         </h3>
         <p className="text-xs text-ink-muted mt-1 mb-4">Динамика количества SKU и замороженных денег</p>
         <DeadInventoryChart history={storeHistory ?? []} currency={currency} />
       </div>
 
-      {/* Alerts */}
       {alerts && alerts.length > 0 && (
-        <div className="rounded-2xl border border-line bg-paper p-6">
+        <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <h2 className="font-display text-lg font-medium text-ink">Последние уведомления</h2>
             <Link href={"/dashboard/alerts" as any} className="text-xs font-mono uppercase tracking-wider text-lime-deep hover:underline">
@@ -359,11 +351,6 @@ export default async function DashboardOverview({ searchParams }: {
   );
 }
 
-/**
- * ActionCard — средний блок-кнопка для полосы 1. Кликабельный, ведёт на SKU
- * с фильтром. Тон: danger (красный, для потерянной выручки), warn (оранжевый,
- * для низкого остатка/неликвида).
- */
 function ActionCard({ href, label, value, sub, tone, tooltip }: {
   href?: string;
   label: string;
@@ -380,12 +367,13 @@ function ActionCard({ href, label, value, sub, tone, tooltip }: {
   const subColor = tone === "danger" ? "text-rose/80" : "text-orange/80";
 
   const inner = (
-    <div className={`group rounded-2xl border-2 p-5 transition ${toneClasses} ${href ? "cursor-pointer hover:shadow-md" : ""}`}>
+    <div className={`group rounded-2xl border-2 p-4 sm:p-5 transition ${toneClasses} ${href ? "cursor-pointer hover:shadow-md" : ""}`}>
       <div className={`font-mono text-[10px] uppercase tracking-widest font-semibold flex items-center ${labelColor}`}>
         {label}
         {tooltip && <InfoTooltip text={tooltip} />}
       </div>
-      <div className={`mt-2 font-display text-3xl md:text-4xl tabular font-medium tracking-tight ${valueColor}`}>
+      {/* Mobile text-2xl чтобы длинные суммы (Потерянная выручка) не выпрыгивали */}
+      <div className={`mt-2 font-display text-2xl sm:text-3xl md:text-4xl tabular font-medium tracking-tight break-words ${valueColor}`}>
         {value}
       </div>
       <div className={`mt-1.5 text-xs leading-relaxed ${subColor}`}>{sub}</div>
@@ -400,10 +388,6 @@ function ActionCard({ href, label, value, sub, tone, tooltip }: {
   return href ? <Link href={href as any}>{inner}</Link> : inner;
 }
 
-/**
- * Kpi — маленький KPI для полосы 3. Опционально кликабельный.
- * Тона: warn (оранжевый), muted (серый — для неактивных), accent (lime — для достоверности).
- */
 function Kpi({ href, label, value, tone, tooltip }: {
   href?: string;
   label: string;
@@ -418,12 +402,12 @@ function Kpi({ href, label, value, tone, tooltip }: {
                         "text-ink";
 
   const inner = (
-    <div className={`rounded-2xl border border-line bg-paper p-4 transition ${href ? "hover:border-lime-deep/40 hover:shadow-sm cursor-pointer" : ""}`}>
+    <div className={`rounded-2xl border border-line bg-paper p-3 sm:p-4 transition ${href ? "hover:border-lime-deep/40 hover:shadow-sm cursor-pointer" : ""}`}>
       <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
         {label}
         {tooltip && <InfoTooltip text={tooltip} />}
       </div>
-      <div className={`mt-1.5 font-display text-2xl md:text-3xl tabular font-medium tracking-tight ${valueColor}`}>
+      <div className={`mt-1.5 font-display text-xl sm:text-2xl md:text-3xl tabular font-medium tracking-tight ${valueColor}`}>
         {value}
       </div>
     </div>
@@ -438,20 +422,21 @@ function VelocityCard({ label, value, sub, tone, tooltip }: { label: string; val
     tone === "mid"  ? "border-l-azure text-azure" :
                       "border-l-orange text-orange";
   return (
-    <div className={`bg-paper border border-line border-l-4 rounded-xl p-4 ${cls.replace("text-", "")}`}>
-      <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
+    <div className={`bg-paper border border-line border-l-4 rounded-xl p-3 sm:p-4 ${cls.replace("text-", "")}`}>
+      <div className="font-mono text-[9px] sm:text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
         {label}
         {tooltip && <InfoTooltip text={tooltip} />}
       </div>
-      <div className={`mt-1 font-display text-2xl tabular font-medium ${cls.split(" ")[1]}`}>{value.toFixed(2)}</div>
-      <div className="text-[10px] text-ink-hush mt-0.5 font-mono uppercase tracking-wider">{sub}</div>
+      {/* Mobile text-lg чтобы число с двумя знаками после точки помещалось на 110px карточке */}
+      <div className={`mt-1 font-display text-lg sm:text-xl md:text-2xl tabular font-medium ${cls.split(" ")[1]}`}>{value.toFixed(2)}</div>
+      <div className="text-[9px] sm:text-[10px] text-ink-hush mt-0.5 font-mono uppercase tracking-wider">{sub}</div>
     </div>
   );
 }
 
 function ChartCard({ title, children, tooltip }: { title: string; children: React.ReactNode; tooltip?: string }) {
   return (
-    <div className="rounded-2xl border border-line bg-paper p-6">
+    <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
       <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3 flex items-center">
         {title}
         {tooltip && <InfoTooltip text={tooltip} />}

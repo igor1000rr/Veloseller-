@@ -7,16 +7,6 @@ import { SubscriptionsList, type Subscription } from "./SubscriptionsList";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-/**
- * Страница управления подписками на уведомления (правка 11 Александра).
- *
- * Юзер видит список всех своих подписок с возможностью включить/выключить,
- * изменить параметры (пороги, частоту) или удалить. Кнопка "+ Добавить
- * уведомление" — для добавления нового типа.
- *
- * Это не страница алертов (/dashboard/alerts) — там показываются конкретные
- * сработавшие алерты по SKU. Здесь — настройки на КОГДА и КАК слать.
- */
 export default async function SubscriptionsPage() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -39,10 +29,10 @@ export default async function SubscriptionsPage() {
             Subscriptions
           </span>
         </div>
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink flex items-center">
-              Настройка уведомлений
+        <div className="flex items-start justify-between flex-wrap gap-3">
+          <div className="flex-1 min-w-0">
+            <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink flex items-center flex-wrap">
+              <span>Настройка уведомлений</span>
               <InfoTooltip text="Здесь вы выбираете о чём вам присылать оповещения. Можно отключить ненужные типы или изменить пороги срабатывания." />
             </h1>
             <p className="text-sm text-ink-muted mt-1">
@@ -52,17 +42,16 @@ export default async function SubscriptionsPage() {
           </div>
           <Link
             href={"/dashboard/alerts" as any}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-line bg-paper text-sm text-ink-muted hover:text-ink hover:bg-bg-soft transition"
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-line bg-paper text-sm text-ink-muted hover:text-ink hover:bg-bg-soft transition shrink-0 min-h-[36px]"
           >
-            <span className="rotate-180"><Icons.ArrowRight size={11} /></span> К списку алертов
+            <span className="rotate-180"><Icons.ArrowRight size={11} /></span> К алертам
           </Link>
         </div>
       </header>
 
       <SubscriptionsList subscriptions={subscriptions} />
 
-      {/* Поясняющий блок про доставку и текущую конфигурацию */}
-      <div className="rounded-xl border border-azure/30 bg-azure/5 p-4">
+      <div className="rounded-xl border border-azure/30 bg-azure/5 p-3 sm:p-4">
         <h3 className="font-display text-sm font-medium text-ink mb-2">
           О каналах доставки
         </h3>
@@ -77,7 +66,7 @@ export default async function SubscriptionsPage() {
             Если не привязано — уведомления молча не доходят.
           </li>
         </ul>
-        <p className="mt-3 text-xs text-ink-hush">
+        <p className="mt-3 text-xs text-ink-hush break-words">
           Письма приходят с <code className="bg-paper px-1.5 py-0.5 rounded text-ink-soft">noreply@veloseller.ru</code>.
           Если не видите — проверьте папку «Спам».
         </p>
