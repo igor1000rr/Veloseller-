@@ -3,13 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * Кнопка массового подтверждения алертов.
- *
- * Mobile-friendly:
- * - В режиме подтверждения на мобиле элементы стакают вертикально (вопрос сверху,
- *   кнопки Да/Отмена под ним), на десктопе остаются в строку.
- * - Размер шрифта поднял до text-xs (12px) — 10px было сложно прочитать на мобиле.
- * - Тач-таргеты py-1.5 → py-2 (~32px).
+ * Кнопка массового подтверждения событий в отчёте.
  */
 export default function BulkAckButton({
   kind,
@@ -53,7 +47,7 @@ export default function BulkAckButton({
   return (
     <span className="inline-flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-1.5">
       <span className="text-[11px] sm:text-[10px] text-ink-muted font-mono">
-        Принять {count} {kindLabel ? `«${kindLabel}»` : "алертов"}?
+        Принять {count} {kindLabel ? `«${kindLabel}»` : "событий"}?
       </span>
       <span className="inline-flex gap-1.5">
         <button

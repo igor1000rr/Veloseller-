@@ -26,25 +26,25 @@ export default async function SubscriptionsPage() {
         <div className="inline-flex items-center gap-2 mb-2">
           <span className="size-1 rounded-full bg-lime-deep" />
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">
-            Subscriptions
+            Reports
           </span>
         </div>
         <div className="flex items-start justify-between flex-wrap gap-3">
           <div className="flex-1 min-w-0">
             <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink flex items-center flex-wrap">
-              <span>Настройка уведомлений</span>
-              <InfoTooltip text="Здесь вы выбираете о чём вам присылать оповещения. Можно отключить ненужные типы или изменить пороги срабатывания." />
+              <span>Настройка отчётов</span>
+              <InfoTooltip text="Здесь вы выбираете какие Excel-отчёты присылать и в какой день недели. Если несколько отчётов на один день — придёт один файл с разными листами." />
             </h1>
             <p className="text-sm text-ink-muted mt-1">
-              Каждое уведомление можно включить, изменить параметры или совсем удалить.
-              Получайте то что хотите, по тем параметрам как вам нужно.
+              Каждый отчёт можно включить, изменить пороги и день отправки, или совсем удалить.
+              Приходит одним файлом Excel со списком SKU — не засоряет почту по каждому товару.
             </p>
           </div>
           <Link
             href={"/dashboard/alerts" as any}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-line bg-paper text-sm text-ink-muted hover:text-ink hover:bg-bg-soft transition shrink-0 min-h-[36px]"
           >
-            <span className="rotate-180"><Icons.ArrowRight size={11} /></span> К алертам
+            <span className="rotate-180"><Icons.ArrowRight size={11} /></span> К отчётам
           </Link>
         </div>
       </header>
@@ -63,7 +63,7 @@ export default async function SubscriptionsPage() {
           <li>
             <b className="text-ink">Telegram</b> — нужно привязать чат-бота через
             <Link href={"/account" as any} className="text-lime-deep hover:underline ml-1">профиль</Link>.
-            Если не привязано — уведомления молча не доходят.
+            Если не привязано — отчёты молча не доходят.
           </li>
         </ul>
         <p className="mt-3 text-xs text-ink-hush break-words">

@@ -53,24 +53,23 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
         <div className="min-w-0">
           <div className="inline-flex items-center gap-2 mb-2">
             <span className="size-1 rounded-full bg-lime-deep" />
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Alerts</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Reports</span>
           </div>
-          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink">Уведомления</h1>
+          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink">Отчёты</h1>
           <p className="text-ink-muted text-sm mt-1">
             {totalActive > 0
-              ? <>Активных: <strong className="text-ink">{totalActive}</strong>. Отмечайте выполненные — проблемы уходят из inbox‘а.</>
-              : <>Все алерты обработаны.</>
+              ? <>Активных событий: <strong className="text-ink">{totalActive}</strong>. Отмечайте выполненные — проблемы уходят из списка.</>
+              : <>Все события обработаны. Следующий отчёт придёт по расписанию.</>
             }
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          {/* На мобиле сокращенная надпись */}
           <Link
             href={"/dashboard/alerts/subscriptions" as any}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-line bg-paper text-sm text-ink-muted hover:text-ink hover:bg-bg-soft hover:border-lime-deep/40 transition min-h-[36px]"
           >
             <span aria-hidden="true">⚙</span>
-            <span className="hidden sm:inline">Настроить уведомления</span>
+            <span className="hidden sm:inline">Настроить отчёты</span>
             <span className="sm:hidden">Настроить</span>
           </Link>
           {totalActive > 0 && <BulkAckButton count={totalActive} />}
@@ -114,19 +113,17 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
       {list.length === 0 ? (
         <div className="rounded-2xl border border-line bg-paper p-8 md:p-14 text-center">
           <p className="text-ink-muted text-sm">
-            {filterKind ? "Нет алертов этого типа." : "Алертов пока нет — пересчёт ещё не запускался или у SKU нет проблем."}
+            {filterKind ? "Нет событий этого типа." : "Событий пока нет — пересчёт ещё не запускался или у SKU нет проблем."}
           </p>
         </div>
       ) : (
         <div className="rounded-2xl border border-line bg-paper overflow-hidden">
-          {/* Шапка таблицы — два текста сделал stack-friendly */}
           <div className="px-3 sm:px-4 py-3 bg-bg-soft border-b border-line flex items-center justify-between gap-3 flex-wrap">
             <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
-              {filterKind ? `Показываем первые ${list.length} «${KIND_META[filterKind]?.label ?? filterKind}»` : `Последние ${list.length} алертов`}
+              {filterKind ? `Показываем первые ${list.length} «${KIND_META[filterKind]?.label ?? filterKind}»` : `Последние ${list.length} событий`}
             </span>
             <span className="font-mono text-[10px] text-ink-hush hidden md:inline">кликните «Принять» рядом с группой чтобы массово</span>
           </div>
-          {/* overflow-x-auto добавлен — 5 колонок с длинными сообщениями ломают вёрстку без скрола */}
           <div className="overflow-x-auto">
             <table className="w-full min-w-[640px] text-sm">
               <thead className="bg-bg-soft border-b border-line">
@@ -155,7 +152,6 @@ export default async function AlertsPage({ searchParams }: { searchParams: Promi
                       </td>
                       <td className="px-3 sm:px-4 py-3 text-ink-soft">
                         {a.message}
-                        {/* На мобиле дата показывается под сообщением */}
                         <div className="md:hidden mt-1 text-[11px] text-ink-hush font-mono">
                           {new Date(a.created_at).toLocaleString("ru-RU")}
                         </div>

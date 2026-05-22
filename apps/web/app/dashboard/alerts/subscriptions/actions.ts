@@ -4,22 +4,28 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
- * Server actions для управления подписками на уведомления.
+ * Server actions для управления подписками на отчёты.
  *
  * Все операции работают только над подписками текущего юзера — RLS на таблице
  * гарантирует изоляцию, но для defense-in-depth дополнительно фильтруем по seller_id.
  *
- * Типы подписок (kind):
- *   low_stock           — порог coverage_days, default 7
- *   critical_stock      — порог coverage_days, default 3
- *   dead_inventory      — порог coverage_days, default 180
- *   repeated_stockout   — порог stockout_days, default 3
- *   underestimated_sku  — без параметров (внутренний триггер)
- *   sync_error          — без параметров (всегда при ошибке синка)
- *   weekly_report       — день недели day_of_week (1-7)
- *   daily_digest        — час локального времени hour_local (0-23)
+ * Типы отчётов (kind), все формируются Excel по дню недели (day_of_week 1-7):
+ *   low_stock           — порог coverage_days_threshold (default 7)
+ *   critical_stock      — порог coverage_days_threshold (default 3)
+ *   dead_inventory      — порог coverage_days_threshold (default 180)
+ *   repeated_stockout   — порог stockout_days_threshold (default 3)
+ *   underestimated_sku  — без доп. параметров
+ *   sync_error          — без доп. параметров
+ *   weekly_report       — сводный отчёт по всему складу
  *
  * Каналы (channel): email | telegram
+ *
+ * Дефолт (триггер на инсерт sellers): все 7 kinds включены, email, день=1 (пн).
+ * Если несколько отчётов на один день — worker формирует один XLSX с листами по типам.
+ *
+ * daily_digest удалён в миграции reports_refactor_daily_digest_and_day_of_week.
+ * Enum-value в БД осталось (удалить enum value в Postgres невозможно без drop+recreate),
+ * но в UI/worker больше не используется.
  */
 export type NotificationKind =
   | "low_stock"
@@ -28,19 +34,12 @@ export type NotificationKind =
   | "repeated_stockout"
   | "underestimated_sku"
   | "sync_error"
-  | "weekly_report"
-  | "daily_digest";
+  | "weekly_report";
 
 export type NotificationChannel = "email" | "telegram";
 
 type ActionResult = { ok: boolean; error?: string };
 
-/**
- * Создать или обновить подписку. Уникальность (seller, kind, channel)
- * гарантируется constraint'ом в БД — используем upsert через UPDATE/INSERT
- * (Supabase SDK не выводит правильный upsert для composite key из RLS-таблицы,
- * поэтому делаем вручную).
- */
 export async function upsertSubscription(
   kind: NotificationKind,
   channel: NotificationChannel,
@@ -52,7 +51,6 @@ export async function upsertSubscription(
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { ok: false, error: "unauthorized" };
 
-    // Проверяем существует ли запись
     const { data: existing } = await supabase
       .from("notification_subscriptions")
       .select("id")
@@ -82,10 +80,6 @@ export async function upsertSubscription(
   }
 }
 
-/**
- * Удалить подписку. После удаления уведомления типа kind через channel
- * больше не приходят. Восстановить можно через "Добавить уведомление".
- */
 export async function deleteSubscription(subscriptionId: string): Promise<ActionResult> {
   try {
     const supabase = await createSupabaseServerClient();
@@ -107,10 +101,6 @@ export async function deleteSubscription(subscriptionId: string): Promise<Action
   }
 }
 
-/**
- * Тоггл enabled — быстрая операция включить/выключить без редактирования
- * параметров. Используется на чекбокс в списке.
- */
 export async function toggleSubscription(
   subscriptionId: string,
   enabled: boolean,

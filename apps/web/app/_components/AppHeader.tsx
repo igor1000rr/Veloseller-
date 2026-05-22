@@ -48,11 +48,13 @@ export default function AppHeader({
 
   useEffect(() => { setOpen(false); }, [pathname]);
 
+  // "Отчёты" (было "Уведомления"): переход на модель weekly Excel-отчётов.
+  // URL /dashboard/alerts оставлен — это технический адрес из базы alerts.
   const links = variant === "dashboard"
     ? [
         { href: "/dashboard",           label: "Обзор" },
         { href: "/dashboard/skus",      label: "SKU" },
-        { href: "/dashboard/alerts",    label: "Уведомления", badge: unreadAlerts },
+        { href: "/dashboard/alerts",    label: "Отчёты", badge: unreadAlerts },
         { href: "/dashboard/dynamics",  label: "Динамика" },
         { href: "/dashboard/changelog", label: "Журнал" },
         { href: "/connections",         label: "Склады" },
@@ -112,7 +114,6 @@ export default function AppHeader({
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Десктопный WarehouseSelector — спрятан на мобиле, в мобильном меню внизу свой. */}
           {variant === "dashboard" && warehouses && (
             <div className="hidden sm:block">
               <WarehouseSelector warehouses={warehouses} selectedId={selectedWarehouseId ?? null} />
@@ -162,7 +163,6 @@ export default function AppHeader({
       </div>
 
       {open && (
-        /* КРИТИКА: было bg-bg — сливалось с body. Поменял на bg-paper + inline style на случай проблем. */
         <div
           className="fixed inset-0 z-50 lg:hidden bg-paper flex flex-col slide-down"
           style={{ backgroundColor: "#ffffff" }}

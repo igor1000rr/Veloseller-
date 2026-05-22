@@ -27,76 +27,92 @@ export type KindMeta = {
   }>;
 };
 
+/**
+ * Все kinds имеют параметр day_of_week (1-7) — день формирования отчёта.
+ * Дефолт = 1 (понедельник).
+ *
+ * Отчёты формируются в виде Excel-файлов (список SKU + название + значение
+ * характеристики). Если на один день приходится несколько отчётов — worker собирает
+ * их в один XLSX с отдельными листами по типам.
+ */
+const DAY_OF_WEEK_PARAM = {
+  key: "day_of_week",
+  label: "День отправки",
+  type: "select" as const,
+  default: 1,
+  options: [
+    { value: 1, label: "Понедельник" },
+    { value: 2, label: "Вторник" },
+    { value: 3, label: "Среда" },
+    { value: 4, label: "Четверг" },
+    { value: 5, label: "Пятница" },
+    { value: 6, label: "Суббота" },
+    { value: 7, label: "Воскресенье" },
+  ],
+  hint: "Отчёты на один день приходят в одном Excel-файле разными листами.",
+};
+
 export const KIND_META: Record<NotificationKind, KindMeta> = {
   low_stock: {
     label: "Низкий остаток",
     description: "Когда покрытие SKU падает до порога — товар скоро закончится.",
-    paramSchema: [{
-      key: "coverage_days_threshold", label: "Порог покрытия",
-      type: "number", default: 7, min: 1, max: 60, suffix: "дн",
-      hint: "Когда coverage_days SKU становится меньше или равно этому числу",
-    }],
+    paramSchema: [
+      {
+        key: "coverage_days_threshold", label: "Порог покрытия",
+        type: "number", default: 7, min: 1, max: 60, suffix: "дн",
+        hint: "Когда coverage_days SKU становится меньше или равно этому числу",
+      },
+      DAY_OF_WEEK_PARAM,
+    ],
   },
   critical_stock: {
     label: "Критический остаток",
     description: "Совсем мало товара — закупка нужна срочно.",
-    paramSchema: [{
-      key: "coverage_days_threshold", label: "Порог покрытия",
-      type: "number", default: 3, min: 1, max: 14, suffix: "дн",
-    }],
+    paramSchema: [
+      {
+        key: "coverage_days_threshold", label: "Порог покрытия",
+        type: "number", default: 3, min: 1, max: 14, suffix: "дн",
+      },
+      DAY_OF_WEEK_PARAM,
+    ],
   },
   dead_inventory: {
     label: "Неликвид",
-    description: "SKU не продаётся — деньги заморожены в товаре.",
-    paramSchema: [{
-      key: "coverage_days_threshold", label: "Порог покрытия",
-      type: "number", default: 180, min: 30, max: 365, suffix: "дн",
-      hint: "SKU с coverage больше этого числа = неликвид",
-    }],
+    description: "SKU не продаётся — деньги заморожены в товаре. Расчёт по среднему TVelo за последние 30 дней.",
+    paramSchema: [
+      {
+        key: "coverage_days_threshold", label: "Порог покрытия",
+        type: "number", default: 180, min: 30, max: 365, suffix: "дн",
+        hint: "SKU с coverage больше этого числа = неликвид",
+      },
+      DAY_OF_WEEK_PARAM,
+    ],
   },
   repeated_stockout: {
     label: "Частый out-of-stock",
-    description: "SKU регулярно отсутствует — проблема с поставками.",
-    paramSchema: [{
-      key: "stockout_days_threshold", label: "Дней OOS",
-      type: "number", default: 3, min: 1, max: 30, suffix: "дн",
-    }],
+    description: "SKU регулярно отсутствует — проблема с поставками. Расчёт за последние 30 дней.",
+    paramSchema: [
+      {
+        key: "stockout_days_threshold", label: "Дней OOS",
+        type: "number", default: 3, min: 1, max: 30, suffix: "дн",
+      },
+      DAY_OF_WEEK_PARAM,
+    ],
   },
   underestimated_sku: {
     label: "Недооценённый SKU",
-    description: "Скорость SKU выше медианы при out-of-stock — недополучаете выручку.",
-    paramSchema: [],
+    description: "Скорость SKU выше медианы при out-of-stock — недополучаете выручку. Расчёт по среднему TVelo за последние 30 дней.",
+    paramSchema: [DAY_OF_WEEK_PARAM],
   },
   sync_error: {
     label: "Ошибка синхронизации",
-    description: "Когда API маркетплейса не отвечает или ключи истекли.",
-    paramSchema: [],
+    description: "Сводка проблем с подключением к API маркетплейса — ключи истекли, ретраи не помогли.",
+    paramSchema: [DAY_OF_WEEK_PARAM],
   },
   weekly_report: {
-    label: "Еженедельный отчёт",
-    description: "Excel с топ-50 потерь, неликвидом и динамикой за неделю.",
-    paramSchema: [{
-      key: "day_of_week", label: "День недели",
-      type: "select", default: 1,
-      options: [
-        { value: 1, label: "Понедельник" },
-        { value: 2, label: "Вторник" },
-        { value: 3, label: "Среда" },
-        { value: 4, label: "Четверг" },
-        { value: 5, label: "Пятница" },
-        { value: 6, label: "Суббота" },
-        { value: 7, label: "Воскресенье" },
-      ],
-    }],
-  },
-  daily_digest: {
-    label: "Ежедневный обзор",
-    description: "Сводка важных событий за сутки одним письмом.",
-    paramSchema: [{
-      key: "hour_local", label: "Час отправки",
-      type: "number", default: 9, min: 0, max: 23, suffix: ":00",
-      hint: "По часовому поясу профиля",
-    }],
+    label: "Сводный отчёт",
+    description: "Excel-сводка по всему складу: топ-50 потерь, неликвид, динамика за неделю.",
+    paramSchema: [DAY_OF_WEEK_PARAM],
   },
 };
 
@@ -114,7 +130,11 @@ export function SubscriptionsList({ subscriptions }: { subscriptions: Subscripti
   const router = useRouter();
   const [, startTransition] = useTransition();
 
-  const subscribedPairs = new Set(subscriptions.map(s => `${s.kind}__${s.channel}`));
+  // Фильтруем daily_digest из результатов БД — миграция уже удалила,
+  // но enum-value остался. Defense-in-depth на случай старых записей.
+  const cleanSubs = subscriptions.filter(s => s.kind in KIND_META);
+
+  const subscribedPairs = new Set(cleanSubs.map(s => `${s.kind}__${s.channel}`));
   const availableToAdd: Array<{ kind: NotificationKind; channel: NotificationChannel }> = [];
   for (const kind of Object.keys(KIND_META) as NotificationKind[]) {
     for (const channel of ["email", "telegram"] as NotificationChannel[]) {
@@ -126,16 +146,16 @@ export function SubscriptionsList({ subscriptions }: { subscriptions: Subscripti
 
   return (
     <div className="space-y-3">
-      {subscriptions.length === 0 && !adding && (
+      {cleanSubs.length === 0 && !adding && (
         <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center">
           <p className="font-display text-lg text-ink font-medium">У вас пока нет подписок</p>
           <p className="mt-2 text-sm text-ink-muted max-w-md mx-auto">
-            Добавьте уведомления чтобы получать оповещения о важных событиях по складу.
+            Добавьте отчёты чтобы получать Excel-файлы со списками SKU по важным событиям склада.
           </p>
         </div>
       )}
 
-      {subscriptions.map(sub => (
+      {cleanSubs.map(sub => (
         <SubscriptionRow key={sub.id} sub={sub} />
       ))}
 
@@ -154,11 +174,11 @@ export function SubscriptionsList({ subscriptions }: { subscriptions: Subscripti
           onClick={() => setAdding(true)}
           className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line bg-paper p-4 text-ink-muted hover:text-ink hover:border-lime-deep/40 hover:bg-bg-soft transition font-medium min-h-[56px]"
         >
-          <Icons.ArrowRight size={14} /> Добавить уведомление
+          <Icons.ArrowRight size={14} /> Добавить отчёт
         </button>
       ) : (
         <div className="text-xs text-ink-hush text-center py-2">
-          Все возможные уведомления уже подписаны
+          Все возможные отчёты уже подписаны
         </div>
       )}
     </div>
@@ -182,7 +202,7 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
   }
 
   function handleDelete() {
-    if (!confirm(`Удалить уведомление "${meta.label}"?`)) return;
+    if (!confirm(`Удалить отчёт «${meta.label}»?`)) return;
     setError(null);
     startTransition(async () => {
       const res = await deleteSubscription(sub.id);
@@ -239,7 +259,6 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
           )}
         </div>
 
-        {/* Кнопки — на мобиле занимают всю ширину, на sm+ — в ряд */}
         <div className="w-full sm:w-auto flex items-center gap-2 sm:shrink-0">
           {meta.paramSchema.length > 0 && (
             <button
@@ -372,9 +391,6 @@ function AddSubscriptionForm({
     .filter(a => a.kind === kind)
     .map(a => a.channel);
 
-  // Фикс anti-pattern: setState в useEffect, а не в render.
-  // Раньше был: if (!includes) setChannel(...) прямо в теле функции —
-  // это могло вызвать бесконечный re-render в определённых условиях.
   useEffect(() => {
     if (!availableChannelsForKind.includes(channel) && availableChannelsForKind.length > 0) {
       setChannel(availableChannelsForKind[0]);
@@ -403,7 +419,7 @@ function AddSubscriptionForm({
   return (
     <div className="rounded-2xl border-2 border-lime-deep/40 bg-lime-soft p-3 sm:p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-display text-base font-medium text-ink">Новое уведомление</h3>
+        <h3 className="font-display text-base font-medium text-ink">Новый отчёт</h3>
         <button
           type="button"
           onClick={onClose}
@@ -416,7 +432,7 @@ function AddSubscriptionForm({
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
-            Тип уведомления
+            Тип отчёта
           </label>
           <select
             value={kind}
@@ -446,7 +462,7 @@ function AddSubscriptionForm({
       <p className="mt-3 text-xs text-ink-muted">{meta.description}</p>
       {meta.paramSchema.length > 0 && (
         <p className="mt-1 text-[11px] text-ink-hush">
-          Параметры по умолчанию можно изменить после создания.
+          Параметры по умолчанию можно изменить после создания. Дефолтный день — понедельник.
         </p>
       )}
       {error && <p className="mt-3 text-xs text-rose font-mono">{error}</p>}
