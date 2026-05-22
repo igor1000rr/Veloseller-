@@ -1,29 +1,21 @@
-// robots.txt: разрешаем краулерам публичную часть, блокируем приватную.
-
-import type { MetadataRoute } from "next";
-import { SITE_URL } from "@/lib/news";
+import type { MetadataRoute } from 'next';
 
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: [
-      {
-        userAgent: "*",
-        allow: "/",
-        disallow: [
-          "/api/",
-          "/dashboard/",
-          "/admin/",
-          "/account/",
-          "/billing/",
-          "/connections/",
-          "/onboarding/",
-          "/auth/",
-          "/reset-password",
-          "/forgot-password",
-        ],
-      },
-    ],
-    sitemap: `${SITE_URL}/sitemap.xml`,
-    host: SITE_URL,
+    rules: {
+      userAgent: '*',
+      allow: '/',
+      disallow: [
+        '/api/',
+        '/dashboard/',
+        '/admin/',
+        '/account/',
+        '/billing/',
+        '/onboarding/',
+        '/connections/',
+        '/auth/',
+      ],
+    },
+    sitemap: 'https://veloseller.ru/sitemap.xml',
   };
 }
