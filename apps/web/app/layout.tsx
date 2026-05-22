@@ -48,6 +48,17 @@ export const metadata: Metadata = {
   publisher: "Veloseller",
   category: "business",
   alternates: { canonical: "/" },
+  // Иконки: favicon мульти-формат, apple-touch-icon, PWA-манифест
+  icons: {
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+    shortcut: "/favicon.ico",
+  },
+  manifest: "/site.webmanifest",
   openGraph: {
     type: "website",
     locale: "ru_RU",
@@ -56,12 +67,21 @@ export const metadata: Metadata = {
     description:
       "TVelo учитывает out-of-stock дни. Реальная скорость продаж, прогноз нехватки, минимальный остаток, дни покрытия.",
     url: SITE_URL,
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Veloseller — управление остатками на Wildberries и Ozon",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
     title: "Veloseller — управление остатками для Wildberries и Ozon",
     description:
       "TVelo, дни покрытия, safety stock, прогноз out-of-stock для селлеров маркетплейсов.",
+    images: ["/og-image.png"],
   },
   robots: {
     index: true,
