@@ -18,8 +18,12 @@ export type FilterRanges = {
  *
  * Layout по правке Александра (paint-скрин):
  * - ПЕРИОД (2 даты) + чекбокс «Включить SKU без активности» в одной строке
- * - НАЛИЧИЕ / ДНЕЙ OOS / ПОТЕРЯННАЯ ВЫРУЧКА — в одну линию (3 колонки)
+ * - НАЛИЧИЕ / ДНЕЙ БЕЗ ПРОДАЖ / ПОТЕРЯННАЯ ВЫРУЧКА — в одну линию (3 колонки)
  * - Placeholder в полях «от»/«до» — реальные min/max из БД (видно диапазон)
+ *
+ * Правка 10 Правок 4: label «Дней OOS» → «Дней без продаж».
+ * URL-параметры oos_min/oos_max остались (stockout_days в БД) — не ломаем
+ * букмарки и внешние линки из обзора.
  *
  * Блок всегда раскрыт (предыдущий коммит 2f4b4cc — «всё важно и нужно»).
  */
@@ -195,8 +199,8 @@ export function SkusFilters({
             onMaxChange={v => { setStockMax(v); scheduleUpdate({ stock_max: v }); }}
           />
           <RangeField
-            label="Дней OOS"
-            hint="Out-of-stock дней за выбранный период"
+            label="Дней без продаж"
+            hint="Сколько дней товар отсутствовал на складе (OOS) за период"
             minPlaceholder={String(ranges.oosMin)}
             maxPlaceholder={String(ranges.oosMax)}
             minVal={oosMin}

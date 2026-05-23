@@ -19,13 +19,15 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  *   weekly_report       — сводный отчёт по всему складу
  *
  * Каналы (channel): email | telegram
+ * Частота (frequency): weekly | monthly (Правка 11 Правок 4)
+ *   weekly  — каждую неделю в day_of_week
+ *   monthly — в первый day_of_week каждого месяца (today.day <= 7)
  *
- * Дефолт (триггер на инсерт sellers): все 7 kinds включены, email, день=1 (пн).
- * Если несколько отчётов на один день — worker формирует один XLSX с листами по типам.
+ * Дефолт (триггер на инсерт sellers): все 7 kinds включены, email, день=1 (пн),
+ * frequency=weekly. Если несколько отчётов на один день — worker формирует один
+ * XLSX с листами по типам.
  *
  * daily_digest удалён в миграции reports_refactor_daily_digest_and_day_of_week.
- * Enum-value в БД осталось (удалить enum value в Postgres невозможно без drop+recreate),
- * но в UI/worker больше не используется.
  */
 export type NotificationKind =
   | "low_stock"
@@ -37,6 +39,7 @@ export type NotificationKind =
   | "weekly_report";
 
 export type NotificationChannel = "email" | "telegram";
+export type NotificationFrequency = "weekly" | "monthly";
 
 type ActionResult = { ok: boolean; error?: string };
 
@@ -45,6 +48,7 @@ export async function upsertSubscription(
   channel: NotificationChannel,
   enabled: boolean,
   params: Record<string, unknown>,
+  frequency: NotificationFrequency = "weekly",
 ): Promise<ActionResult> {
   try {
     const supabase = await createSupabaseServerClient();
@@ -62,14 +66,14 @@ export async function upsertSubscription(
     if (existing) {
       const { error } = await supabase
         .from("notification_subscriptions")
-        .update({ enabled, params })
+        .update({ enabled, params, frequency })
         .eq("id", existing.id)
         .eq("seller_id", user.id);
       if (error) return { ok: false, error: error.message };
     } else {
       const { error } = await supabase
         .from("notification_subscriptions")
-        .insert({ seller_id: user.id, kind, channel, enabled, params });
+        .insert({ seller_id: user.id, kind, channel, enabled, params, frequency });
       if (error) return { ok: false, error: error.message };
     }
 

@@ -1,10 +1,11 @@
-"""Универсальный диспетчер еженедельных Excel-отчётов.
+"""Диспетчер Excel-отчётов: weekly + monthly.
 
-Архитектура (этап 2 перехода «алерты → отчёты»):
+Архитектура (этап 2 перехода «алерты → отчёты» + правка 11 Правок 4):
 
 - Каждый день в 09:00 UTC запускается `dispatch_daily_reports()`
 - Для каждого seller'а ищем все enabled подписки в notification_subscriptions
-  где params.day_of_week = isoweekday(today)
+  где params.day_of_week = isoweekday(today). Для monthly — ещё и today.day <= 7
+  (первый такой day_of_week в месяце).
 - Группируем подписки по (seller_id, channel) — если несколько kinds на один день
   → один XLSX с разными листами
 - Отправка: email (Resend attachment) или telegram (Bot API sendDocument)
@@ -30,7 +31,7 @@ STORAGE_BUCKET = "report-files"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-# ─── Форматирование ─────────────────────────────────────────────────────────────
+# ─── Форматирование ────────────────────────────────────────────────────
 
 def _format_money(value: Any, currency: str = "RUB") -> str:
     if value is None:
@@ -53,7 +54,7 @@ def _column_widths(ws, widths: dict[str, int]) -> None:
         ws.column_dimensions[col_letter].width = width
 
 
-# ─── Метаданные kinds (label + sheet builder) ──────────────────────────────────────
+# ─── Метаданные kinds (label + sheet builder) ───────────────────────────────
 
 SHEET_ROW_LIMIT = 500
 
@@ -73,7 +74,7 @@ def _sheet_name(kind: str) -> str:
     return KIND_LABELS.get(kind, kind)[:31]
 
 
-# ─── Fetchers ───────────────────────────────────────────────────────────────────
+# ─── Fetchers ────────────────────────────────────────────────────────────────
 
 def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
     """Возвращает строки для листа Excel в формате [{sku, name, ...}, ...]."""
@@ -175,7 +176,7 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
     return []
 
 
-# ─── Sheet builders ─────────────────────────────────────────────────────────────────
+# ─── Sheet builders ────────────────────────────────────────────────────────────────
 
 def _row_product(r: dict) -> tuple[str, str]:
     p = r.get("products") or {}
@@ -329,7 +330,7 @@ def _build_xlsx(kind_rows: dict[str, list[dict]], currency: str) -> bytes:
     return buf.getvalue()
 
 
-# ─── Storage upload ─────────────────────────────────────────────────────────────
+# ─── Storage upload ────────────────────────────────────────────────────────────
 
 def _upload_xlsx_to_storage(
     sb,
@@ -364,7 +365,7 @@ def _upload_xlsx_to_storage(
         return None
 
 
-# ─── Dispatcher ─────────────────────────────────────────────────────────────────────
+# ─── Dispatcher ───────────────────────────────────────────────────────────────────
 
 def _today_iso_date() -> str:
     return datetime.now(timezone.utc).date().isoformat()
@@ -420,11 +421,13 @@ def _record_history(
 def dispatch_daily_reports() -> None:
     try:
         sb = get_supabase()
-        today_dow = datetime.now(timezone.utc).isoweekday()
+        now_utc = datetime.now(timezone.utc)
+        today_dow = now_utc.isoweekday()
+        today_dom = now_utc.day  # для фильтра monthly: первый day_of_week месяца
 
         all_subs = fetch_all(
             sb.table("notification_subscriptions")
-            .select("seller_id,kind,channel,enabled,params")
+            .select("seller_id,kind,channel,enabled,params,frequency")
             .eq("enabled", True)
         )
 
@@ -437,10 +440,18 @@ def dispatch_daily_reports() -> None:
                 dow = 1
             if dow != today_dow:
                 continue
+
+            # Правка 11 Правок 4: weekly / monthly
+            # • weekly  — каждую неделю в dow (дефолтное поведение)
+            # • monthly — только в первый dow месяца (т.е. today.day <= 7)
+            frequency = sub.get("frequency") or "weekly"
+            if frequency == "monthly" and today_dom > 7:
+                continue
+
             groups[(sub["seller_id"], sub["channel"])].append(sub)
 
         if not groups:
-            logger.info("dispatch_daily_reports: nothing scheduled for dow=%d", today_dow)
+            logger.info("dispatch_daily_reports: nothing scheduled for dow=%d dom=%d", today_dow, today_dom)
             return
 
         sent_email = 0
@@ -567,8 +578,8 @@ def dispatch_daily_reports() -> None:
                 failed += 1
 
         logger.info(
-            "dispatch_daily_reports done dow=%d groups=%d email=%d tg=%d skipped=%d failed=%d",
-            today_dow, len(groups), sent_email, sent_telegram, skipped, failed,
+            "dispatch_daily_reports done dow=%d dom=%d groups=%d email=%d tg=%d skipped=%d failed=%d",
+            today_dow, today_dom, len(groups), sent_email, sent_telegram, skipped, failed,
         )
     except Exception:
         logger.exception("dispatch_daily_reports crashed")

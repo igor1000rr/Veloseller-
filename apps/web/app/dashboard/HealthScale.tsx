@@ -5,7 +5,13 @@
  *  60-74  = Внимание
  *  40-59  = Риск
  *  0-39   = Критично
+ *
+ * Правка 4.1 Александра (Правки 4): SKU без активности исключаются
+ * из расчёта на бекенде (apps/worker/app/jobs/recalc.py::_write_store_metrics).
+ * Информация про это выводится в тултипе HealthScoreBlock.
  */
+import { InfoTooltip } from "../_components/InfoTooltip";
+
 export function HealthScale({
   score,
   size = "md",
@@ -55,8 +61,9 @@ export function HealthScoreBlock({ score }: { score: number | null | undefined }
   return (
     <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold flex items-center">
           Состояние склада
+          <InfoTooltip text="Взвешенная оценка здоровья склада (0-100): health_score по SKU взвешивается по стоимости остатка, из этого вычитается вес дефицитных SKU. SKU без активности (нет остатка и нет движений за 30 дней) в расчёт не включаются." />
         </div>
         <HealthScale score={v} size="md" />
       </div>
