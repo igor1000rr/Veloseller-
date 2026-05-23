@@ -14,7 +14,7 @@ export default async function SubscriptionsPage() {
 
   const { data: subs } = await supabase
     .from("notification_subscriptions")
-    .select("id,kind,channel,enabled,params,created_at")
+    .select("id,kind,channel,enabled,params,frequency,created_at")
     .eq("seller_id", user.id)
     .order("created_at", { ascending: true });
 
@@ -33,10 +33,10 @@ export default async function SubscriptionsPage() {
           <div className="flex-1 min-w-0">
             <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink flex items-center flex-wrap">
               <span>Настройка отчётов</span>
-              <InfoTooltip text="Здесь вы выбираете какие Excel-отчёты присылать и в какой день недели. Если несколько отчётов на один день — придёт один файл с разными листами." />
+              <InfoTooltip text="Здесь вы выбираете какие Excel-отчёты присылать, в какой день недели и как часто (еженедельно или ежемесячно). Если несколько отчётов на один день — придёт один файл с разными листами." />
             </h1>
             <p className="text-sm text-ink-muted mt-1">
-              Каждый отчёт можно включить, изменить пороги и день отправки, или совсем удалить.
+              Каждый отчёт можно включить, изменить пороги, день отправки и частоту, или совсем удалить.
               Приходит одним файлом Excel со списком SKU — не засоряет почту по каждому товару.
             </p>
           </div>

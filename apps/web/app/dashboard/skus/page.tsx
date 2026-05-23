@@ -380,7 +380,7 @@ export default async function SkusPage({ searchParams }: {
               <Th col="confidence" align="right" accent>
                 <span className="inline-flex items-center">
                   ДСТ
-                  <InfoTooltip text="Достоверность данных за указанный период. Чем больше дней для расчёта, тем выше качество предоставляемой информации." />
+                  <InfoTooltip text="Достоверность данных за указанный период. Чем больше дней для расчёта, тем выше качество предоставляемой информации. Учитывайте этот показатель для совершения действий." />
                 </span>
               </Th>
               <Th col="health" align="right">Health</Th>

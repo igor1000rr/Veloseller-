@@ -9,6 +9,7 @@ import {
   toggleSubscription,
   type NotificationKind,
   type NotificationChannel,
+  type NotificationFrequency,
 } from "./actions";
 
 export type KindMeta = {
@@ -29,11 +30,8 @@ export type KindMeta = {
 
 /**
  * Все kinds имеют параметр day_of_week (1-7) — день формирования отчёта.
- * Дефолт = 1 (понедельник).
- *
- * Отчёты формируются в виде Excel-файлов (список SKU + название + значение
- * характеристики). Если на один день приходится несколько отчётов — worker собирает
- * их в один XLSX с отдельными листами по типам.
+ * Частота отправки (weekly/monthly) хранится отдельной колонкой
+ * notification_subscriptions.frequency, а не в params.
  */
 const DAY_OF_WEEK_PARAM = {
   key: "day_of_week",
@@ -116,12 +114,22 @@ export const KIND_META: Record<NotificationKind, KindMeta> = {
   },
 };
 
+const FREQUENCY_OPTIONS: Array<{ value: NotificationFrequency; label: string; hint: string }> = [
+  { value: "weekly",  label: "Еженедельно", hint: "Каждую неделю в выбранный день" },
+  { value: "monthly", label: "Ежемесячно",  hint: "В первый выбранный день недели каждого месяца" },
+];
+
+function frequencyLabel(f: NotificationFrequency): string {
+  return FREQUENCY_OPTIONS.find(o => o.value === f)?.label ?? "Еженедельно";
+}
+
 export type Subscription = {
   id: string;
   kind: NotificationKind;
   channel: NotificationChannel;
   enabled: boolean;
   params: Record<string, any>;
+  frequency: NotificationFrequency | null;
   created_at: string;
 };
 
@@ -192,6 +200,8 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
 
+  const currentFreq: NotificationFrequency = sub.frequency ?? "weekly";
+
   function handleToggle() {
     setError(null);
     startTransition(async () => {
@@ -231,6 +241,7 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-display text-base font-medium text-ink">{meta.label}</span>
             <ChannelBadge channel={sub.channel} />
+            <FrequencyBadge frequency={currentFreq} />
             {!sub.enabled && (
               <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">— отключено</span>
             )}
@@ -252,6 +263,9 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
                   </span>
                 );
               })}
+              <span className="font-mono text-ink-soft">
+                <span className="text-ink-hush">Частота:</span> <span className="font-semibold">{frequencyLabel(currentFreq)}</span>
+              </span>
             </div>
           )}
           {error && (
@@ -260,15 +274,13 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
         </div>
 
         <div className="w-full sm:w-auto flex items-center gap-2 sm:shrink-0">
-          {meta.paramSchema.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setEditing(e => !e)}
-              className="flex-1 sm:flex-initial text-xs px-3 py-2 rounded-lg border border-line text-ink-muted hover:text-ink hover:bg-bg-soft transition font-medium min-h-[36px]"
-            >
-              {editing ? "Закрыть" : "Изменить"}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={() => setEditing(e => !e)}
+            className="flex-1 sm:flex-initial text-xs px-3 py-2 rounded-lg border border-line text-ink-muted hover:text-ink hover:bg-bg-soft transition font-medium min-h-[36px]"
+          >
+            {editing ? "Закрыть" : "Изменить"}
+          </button>
           <button
             type="button"
             onClick={handleDelete}
@@ -280,7 +292,7 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
         </div>
       </div>
 
-      {editing && meta.paramSchema.length > 0 && (
+      {editing && (
         <EditParamsForm sub={sub} meta={meta} onClose={() => setEditing(false)} />
       )}
     </div>
@@ -296,6 +308,7 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
     }
     return init;
   });
+  const [frequency, setFrequency] = useState<NotificationFrequency>(sub.frequency ?? "weekly");
   const [, startTransition] = useTransition();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -304,7 +317,7 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
     setError(null);
     setSaving(true);
     startTransition(async () => {
-      const res = await upsertSubscription(sub.kind, sub.channel, sub.enabled, params);
+      const res = await upsertSubscription(sub.kind, sub.channel, sub.enabled, params, frequency);
       setSaving(false);
       if (!res.ok) {
         setError(res.error ?? "ошибка сохранения");
@@ -350,6 +363,23 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
             {p.hint && <p className="mt-1 text-[11px] text-ink-hush">{p.hint}</p>}
           </div>
         ))}
+        <div>
+          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
+            Частота отправки
+          </label>
+          <select
+            value={frequency}
+            onChange={e => setFrequency(e.target.value as NotificationFrequency)}
+            className="w-full px-2 py-2 border border-line rounded-lg bg-paper text-sm focus:outline-none focus:border-lime-deep min-h-[40px]"
+          >
+            {FREQUENCY_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-[11px] text-ink-hush">
+            {FREQUENCY_OPTIONS.find(o => o.value === frequency)?.hint}
+          </p>
+        </div>
       </div>
       {error && <p className="mt-3 text-xs text-rose font-mono">{error}</p>}
       <div className="mt-3 flex gap-2 flex-wrap">
@@ -382,6 +412,7 @@ function AddSubscriptionForm({
 }) {
   const [kind, setKind] = useState<NotificationKind>(availableToAdd[0]?.kind ?? "low_stock");
   const [channel, setChannel] = useState<NotificationChannel>(availableToAdd[0]?.channel ?? "email");
+  const [frequency, setFrequency] = useState<NotificationFrequency>("weekly");
   const [, startTransition] = useTransition();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -406,7 +437,7 @@ function AddSubscriptionForm({
     for (const p of meta.paramSchema) params[p.key] = p.default;
 
     startTransition(async () => {
-      const res = await upsertSubscription(kind, channel, true, params);
+      const res = await upsertSubscription(kind, channel, true, params, frequency);
       setSaving(false);
       if (!res.ok) {
         setError(res.error ?? "ошибка");
@@ -429,7 +460,7 @@ function AddSubscriptionForm({
           ✕
         </button>
       </div>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
           <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
             Тип отчёта
@@ -458,13 +489,25 @@ function AddSubscriptionForm({
             ))}
           </select>
         </div>
+        <div>
+          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
+            Частота
+          </label>
+          <select
+            value={frequency}
+            onChange={e => setFrequency(e.target.value as NotificationFrequency)}
+            className="w-full px-2 py-2 border border-line rounded-lg bg-paper text-sm focus:outline-none focus:border-lime-deep min-h-[40px]"
+          >
+            {FREQUENCY_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </div>
       </div>
       <p className="mt-3 text-xs text-ink-muted">{meta.description}</p>
-      {meta.paramSchema.length > 0 && (
-        <p className="mt-1 text-[11px] text-ink-hush">
-          Параметры по умолчанию можно изменить после создания. Дефолтный день — понедельник.
-        </p>
-      )}
+      <p className="mt-1 text-[11px] text-ink-hush">
+        Параметры (порог, день, частоту) можно изменить после создания. Дефолт — понедельник, еженедельно.
+      </p>
       {error && <p className="mt-3 text-xs text-rose font-mono">{error}</p>}
       <div className="mt-4 flex gap-2 flex-wrap">
         <button
@@ -498,6 +541,18 @@ function ChannelBadge({ channel }: { channel: NotificationChannel }) {
   return (
     <span className="inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold text-lime-deep bg-lime-soft border-lime-deep/30">
       Telegram
+    </span>
+  );
+}
+
+function FrequencyBadge({ frequency }: { frequency: NotificationFrequency }) {
+  const label = frequencyLabel(frequency);
+  const cls = frequency === "monthly"
+    ? "text-orange bg-orange/10 border-orange/30"
+    : "text-ink-soft bg-bg-soft border-line";
+  return (
+    <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold ${cls}`}>
+      {label}
     </span>
   );
 }
