@@ -18,10 +18,11 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // Главная имеет свой title без template — он самый важный для SEO,
-// title.absolute убирает суффикс " — Veloseller" из layout
+// title.absolute убирает суффикс " — Veloseller" из layout.
+// Правка Александра: title должен соответствовать h1 — "Скорость продаж без искажений".
 export const metadata: Metadata = {
   title: {
-    absolute: "Veloseller — управление остатками для Wildberries, Ozon FBO и FBS",
+    absolute: "Скорость продаж без искажений — Veloseller",
   },
   description:
     "Сервис для маркетплейс-селлеров: TVelo (реальная скорость продаж с учётом out-of-stock дней), дни покрытия, прогноз нехватки, расчёт минимального остатка (safety stock), потерянная выручка. Подключение через API Wildberries, Ozon или Google Sheets за 5 минут.",

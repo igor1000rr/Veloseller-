@@ -43,12 +43,15 @@ export default async function DashboardOverview({ searchParams }: {
   ]);
 
   if (allWarehouses.length === 0) {
+    // Правка Александра: текст empty-state синхронизирован с /onboarding —
+    // про "актуальные расчёты через 7 дней, наиболее точные через 30 дней".
     return (
       <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center">
         <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Подключите первый склад</h1>
-        <p className="mx-auto mt-3 max-w-xl text-ink-muted">
-          Чтобы Veloseller начал считать TVelo, нужны ежедневные snapshots остатков и цен.
-          Подключите Ozon FBO/FBS, Wildberries или Google Sheet.
+        <p className="mx-auto mt-3 max-w-xl text-ink-muted leading-relaxed">
+          Чтобы Veloseller начал считать TVelo, нужны ежедневные записи по вашим SKU.
+          Актуальные расчёты через 7 дней. Наиболее точные показатели через 30 дней.
+          Мы отправим вам на email сводные отчёты за эти даты.
         </p>
         <div className="mt-6 flex gap-3 justify-center flex-wrap">
           <Link href={"/onboarding" as any} className="inline-flex items-center rounded-lg border border-line bg-bg-soft text-ink px-5 py-3 font-semibold hover:border-lime-deep/40 transition">Гид по настройке</Link>
