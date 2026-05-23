@@ -1,5 +1,5 @@
 """Telegram bot notifications. Без gRPC/long-polling — только Bot API send_message.
-Этап 3: ссылки в дайджесте ведут на /dashboard/reports (URL rename).
+Ссылки в дайджесте ведут на /dashboard/alerts (текущий URL).
 """
 from __future__ import annotations
 import html
@@ -93,7 +93,7 @@ def format_alerts_digest(alerts: list[dict]) -> str:
     if len(alerts) > 20:
         lines.append(f"\n…ещё {len(alerts) - 20}")
     app_url = _app_url()
-    lines.append(f'\n<a href="{app_url}/dashboard/reports">Открыть в Veloseller</a>')
+    lines.append(f'\n<a href="{app_url}/dashboard/alerts">Открыть в Veloseller</a>')
     return "\n".join(lines)
 
 

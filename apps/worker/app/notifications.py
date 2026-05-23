@@ -1,7 +1,7 @@
 """Отправка email-уведомлений через Resend.
 
 Если RESEND_API_KEY не задан — функции no-op (логируют и возвращают False).
-Этап 3: ссылки в email ведут на /dashboard/reports (URL rename).
+Ссылки в email ведут на /dashboard/alerts (текущий URL).
 """
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ def send_alert_digest(to_email: str, seller_name: Optional[str], alerts: list[di
 <table style="width:100%;border-collapse:collapse;margin-top:16px;font-size:14px">
 <thead><tr style="background:#f8fafc"><th style="text-align:left;padding:8px 12px">Тип</th><th style="text-align:left;padding:8px 12px">SKU</th><th style="text-align:left;padding:8px 12px">Сообщение</th></tr></thead>
 <tbody>{''.join(rows)}</tbody></table>
-<p style="margin-top:24px"><a href="{app_url}/dashboard/reports" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">Открыть в Veloseller</a></p>
+<p style="margin-top:24px"><a href="{app_url}/dashboard/alerts" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">Открыть в Veloseller</a></p>
 <p style="color:#64748b;font-size:12px;margin-top:32px">Если не хотите получать эти письма — отпишитесь в настройках профиля.</p>
 </body></html>"""
 
@@ -229,7 +229,7 @@ def send_report_email(
     xlsx_bytes: bytes,
     filename: str,
 ) -> bool:
-    """Универсальная отправка Excel-отчёта. CTA на /dashboard/reports."""
+    """Универсальная отправка Excel-отчёта."""
     api_key = os.getenv("RESEND_API_KEY")
     from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
     if not api_key:
@@ -266,8 +266,8 @@ def send_report_email(
 <ul>
 {items_html}
 </ul>
-<p style="margin-top:24px"><a href="{app_url}/dashboard/reports" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">История отчётов</a></p>
-<p style="color:#64748b;font-size:12px;margin-top:32px">Настроить периодичность и состав отчётов можно в <a href="{app_url}/dashboard/reports/subscriptions" style="color:#0f766e">настройках</a>.</p>
+<p style="margin-top:24px"><a href="{app_url}/dashboard/alerts" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">История отчётов</a></p>
+<p style="color:#64748b;font-size:12px;margin-top:32px">Настроить периодичность и состав отчётов можно в <a href="{app_url}/dashboard/alerts/subscriptions" style="color:#0f766e">настройках</a>.</p>
 </body></html>"""
 
     try:
