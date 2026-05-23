@@ -585,6 +585,26 @@ def recalc_seller(seller_id, period_days=30, progress=None):
 def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
     if not sku_data:
         return 0
+
+    # Правка 4.1 Александра (Veloseller правки 4):
+    # "Состояние склада не считаем товары SKU без активности"
+    # Также применяется к остальным агрегатам (концентрации, остатки,
+    # заморожено, demand pattern) — Александр в правке 1 написал:
+    # "в остальных расчётах им [inactive] участвовать не нужно".
+    #
+    # Inactive = SKU с нулевым остатком И без движений (sales/replenishment)
+    # за период. Эти товары сняты с продажи (или ещё не появлялись на складе).
+    # Включать их в health/конц/остатки = искажать общую картину магазина.
+    #
+    # ВНИМАНИЕ: счётчики (total/oos/low/dead/inactive/frequently_oos) и
+    # lost_revenue считаются по всем sku_data — это сами по себе
+    # диагностические метрики, без которых пользователь не увидит сколько
+    # неактивных SKU у него вообще есть.
+    active_sku_data = [
+        item for item in sku_data
+        if item["availability_now"] or item.get("has_movements", True)
+    ]
+
     sku_health_inputs = [
         SkuHealthInput(
             product_id=item["pid"],
@@ -595,7 +615,7 @@ def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
             median_30d_velocity=item["metric"].median_30d_velocity,
             is_out_of_stock=not item["availability_now"],
         )
-        for item in sku_data
+        for item in active_sku_data
     ]
     inv_items = [SkuValue(s.product_id, s.stock_quantity * s.price) for s in sku_health_inputs]
     dem_items = [
@@ -604,14 +624,17 @@ def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
     ]
     inv_conc = concentration_50(inv_items)
     dem_conc = concentration_50(dem_items)
-    coverage_by_sku = {item["pid"]: item["metric"].coverage_days for item in sku_data}
+    coverage_by_sku = {item["pid"]: item["metric"].coverage_days for item in active_sku_data}
     total_value = total_inventory_value(sku_health_inputs)
     frozen_value = frozen_inventory_value(sku_health_inputs, coverage_by_sku)
     wh_score = warehouse_health_score(sku_health_inputs)
     seg_distribution = {}
-    for item in sku_data:
+    for item in active_sku_data:
         seg = (item["metric"].segment.value if item["metric"].segment else "insufficient_data")
         seg_distribution[seg] = seg_distribution.get(seg, 0) + 1
+
+    # Счётчики — по всем SKU (включая inactive). Иначе total_sku_count будет
+    # неконсистентен с тем, что показывается на вкладке SKU при include_inactive=1.
     oos_count = sum(1 for item in sku_data if not item["availability_now"])
     low_count = sum(
         1 for item in sku_data
@@ -622,27 +645,27 @@ def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
         if item["metric"].coverage_days is not None and item["metric"].coverage_days > 180
     )
 
-    # Правки 4 (Александр):
     # inactive_sku_count — SKU с нулевым остатком И без движений за период.
-    # Эти SKU сняты с продажи (или ещё не продавались) и в остальных метриках
-    # участвовать не должны. На фронте они скрываются по умолчанию.
+    # На фронте они скрываются по умолчанию (правка 1 Александра).
     inactive_count = sum(
         1 for item in sku_data
         if not item["availability_now"] and not item.get("has_movements", True)
     )
 
-    # frequently_oos_sku_count — SKU где stockout_days > 15 за период (более
-    # 15 дней out-of-stock за месяц). Сигнал систематической проблемы.
+    # frequently_oos_sku_count — SKU где stockout_days > 15 за период.
+    # Сигнал систематической проблемы с поставками.
     frequently_oos_count = sum(
         1 for item in sku_data
         if item["metric"].stockout_days > 15
     )
 
-    # Правка 2 Александра: "Нет в наличии" должно быть = товары с нулевым остатком,
-    # ПО КОТОРЫМ БЫЛО ДВИЖЕНИЕ за 30 дней. То есть из oos_count вычитаем inactive.
-    # Это даёт активный OOS — то, чем реально надо заниматься.
+    # Правка 2 Александра: "Нет в наличии" = товары с нулевым остатком,
+    # ПО КОТОРЫМ БЫЛО ДВИЖЕНИЕ за 30 дней. Из oos_count вычитаем inactive
+    # → активный OOS, то чем реально надо заниматься.
     active_oos_count = max(0, oos_count - inactive_count)
 
+    # lost_revenue — по всем SKU. У inactive естественно = 0 (нет velocity
+    # или stockout_days = 0), поэтому фильтрация не нужна.
     lost_total = 0.0
     for item in sku_data:
         m = item["metric"]
@@ -656,6 +679,7 @@ def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
         ]
         avg_price = average_stockout_price(prices_during_stockout, item["current_price"])
         lost_total += m.adjusted_velocity * m.stockout_days * avg_price
+
     sb.table("store_metrics").upsert({
         "seller_id": seller_id,
         "period_start": period_start.isoformat(),
