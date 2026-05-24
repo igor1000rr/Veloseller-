@@ -187,20 +187,7 @@ class TestActiveOosCount:
     Нельзя показывать «Нет в наличии = 1500» если 1497 из них неактивны."""
 
     def test_oos_minus_inactive(self):
-        sku_data = [
-            # 3 активных OOS (нет остатка но были движения)
-            _make_item("oos-active-1", current_stock=0,
-                       adjusted_velocity=1.0, has_movements=True),
-            _make_item("oos-active-2", current_stock=0,
-                       adjusted_velocity=2.0, has_movements=True),
-            _make_item("oos-active-3", current_stock=0,
-                       adjusted_velocity=0.5, has_movements=True),
-            # 5 inactive (тоже stock=0 но без движений)
-            _make_item(f"inactive-{i}", current_stock=0, has_movements=False)
-            for i in range(5)
-        ]
-        # Примечание: последняя строка в list comprehension — баг: это сгенерирует 1 item, а не 5.
-        # Переделываем явно:
+        # 3 активных OOS (нет остатка но были движения) + 5 inactive (без движений)
         sku_data = [
             _make_item("oos-active-1", current_stock=0,
                        adjusted_velocity=1.0, has_movements=True),
