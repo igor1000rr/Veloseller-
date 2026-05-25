@@ -723,7 +723,12 @@ def _compute_aggregates(sku_data):
 
 
 def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
-    """Записывает store_metrics — агрегат по всему магазину (всем складам)."""
+    """Записывает store_metrics — агрегат по всему магазину (всем складам).
+
+    computed_at передаём явно: DEFAULT now() в БД срабатывает только при INSERT.
+    При UPSERT-UPDATE без явной передачи computed_at останется старым, и
+    SELECT по computed_at >= X на фронте не увидит обновлённую запись.
+    """
     aggregates = _compute_aggregates(sku_data)
     if aggregates is None:
         return 0
@@ -732,6 +737,7 @@ def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
         "seller_id": seller_id,
         "period_start": period_start.isoformat(),
         "period_end": period_end.isoformat(),
+        "computed_at": datetime.now(timezone.utc).isoformat(),
         **aggregates,
     }
     sb.table("store_metrics").upsert(
@@ -751,6 +757,9 @@ def _write_warehouse_metrics(sb, seller_id, sku_data, period_start, period_end):
 
     Легаси-продукты без connection_id (если есть) пропускаются — попадают
     только в store_metrics.
+
+    computed_at передаём явно по той же причине что и в _write_store_metrics:
+    DEFAULT now() не срабатывает при UPDATE.
     """
     if not sku_data:
         return 0
@@ -761,6 +770,8 @@ def _write_warehouse_metrics(sb, seller_id, sku_data, period_start, period_end):
         if not conn_id:
             continue
         by_connection.setdefault(conn_id, []).append(item)
+
+    now_iso = datetime.now(timezone.utc).isoformat()
 
     written = 0
     for conn_id, items in by_connection.items():
@@ -773,6 +784,7 @@ def _write_warehouse_metrics(sb, seller_id, sku_data, period_start, period_end):
                 "connection_id": conn_id,
                 "period_start": period_start.isoformat(),
                 "period_end": period_end.isoformat(),
+                "computed_at": now_iso,
                 **aggregates,
             }
             sb.table("warehouse_metrics").upsert(
