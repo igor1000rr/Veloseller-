@@ -64,9 +64,32 @@ sudo -u "$DEPLOY_USER" -H bash -c "
   .venv/bin/pip install --quiet -r requirements.txt
 "
 
+# ===== systemd-units (sync changes from repo to /etc) =====
+# Раньше юниты копировались только в setup-server.sh при первичном бутстрапе.
+# Из-за этого изменения в deploy/*.service не подхватывались на проде —
+# например, 25.05.2026 правка --workers 2 → --workers 1 потребовала ручного
+# вмешательства, иначе scheduler продолжал работать в двух копиях.
+# Теперь сравниваем содержимое и копируем если разное.
+SYSTEMD_DIR=/etc/systemd/system
+UNIT_CHANGED=0
+for unit in veloseller-web.service veloseller-worker.service; do
+  src="$DEPLOY_DIR/deploy/$unit"
+  dst="$SYSTEMD_DIR/$unit"
+  if [ ! -f "$dst" ] || ! cmp -s "$src" "$dst"; then
+    log "Обновляем systemd unit: $unit"
+    cp "$src" "$dst"
+    chmod 644 "$dst"
+    UNIT_CHANGED=1
+  fi
+done
+
+if [ "$UNIT_CHANGED" = "1" ]; then
+  log "Перезагружаем systemd конфигурацию (daemon-reload)…"
+  systemctl daemon-reload
+fi
+
 # ===== Service start =====
 log "Рестарт systemd сервисов…"
-systemctl daemon-reload
 systemctl restart veloseller-worker
 sleep 3
 systemctl restart veloseller-web
