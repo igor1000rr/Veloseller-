@@ -31,7 +31,7 @@ STORAGE_BUCKET = "report-files"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-# ─── Форматирование ────────────────────────────────────────────────────
+# ─── Форматирование ─────────────────────────────────────
 
 def _format_money(value: Any, currency: str = "RUB") -> str:
     if value is None:
@@ -54,7 +54,7 @@ def _column_widths(ws, widths: dict[str, int]) -> None:
         ws.column_dimensions[col_letter].width = width
 
 
-# ─── Метаданные kinds (label + sheet builder) ───────────────────────────────
+# ─── Метаданные kinds (label + sheet builder) ───────────────────────
 
 SHEET_ROW_LIMIT = 500
 
@@ -74,7 +74,7 @@ def _sheet_name(kind: str) -> str:
     return KIND_LABELS.get(kind, kind)[:31]
 
 
-# ─── Fetchers ────────────────────────────────────────────────────────────────
+# ─── Fetchers ────────────────────────────────────────────
 
 def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
     """Возвращает строки для листа Excel в формате [{sku, name, ...}, ...]."""
@@ -176,7 +176,7 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
     return []
 
 
-# ─── Sheet builders ────────────────────────────────────────────────────────────────
+# ─── Sheet builders ───────────────────────────────────────────────────
 
 def _row_product(r: dict) -> tuple[str, str]:
     p = r.get("products") or {}
@@ -330,7 +330,7 @@ def _build_xlsx(kind_rows: dict[str, list[dict]], currency: str) -> bytes:
     return buf.getvalue()
 
 
-# ─── Storage upload ────────────────────────────────────────────────────────────
+# ─── Storage upload ──────────────────────────────────────────────
 
 def _upload_xlsx_to_storage(
     sb,
@@ -365,7 +365,7 @@ def _upload_xlsx_to_storage(
         return None
 
 
-# ─── Dispatcher ───────────────────────────────────────────────────────────────────
+# ─── Dispatcher ──────────────────────────────────────────────────────
 
 def _today_iso_date() -> str:
     return datetime.now(timezone.utc).date().isoformat()
@@ -423,7 +423,7 @@ def dispatch_daily_reports() -> None:
         sb = get_supabase()
         now_utc = datetime.now(timezone.utc)
         today_dow = now_utc.isoweekday()
-        today_dom = now_utc.day  # для фильтра monthly: первый day_of_week месяца
+        today_dom = now_utc.day  # для фильтра monthly: первый day_of_week в месяце
 
         all_subs = fetch_all(
             sb.table("notification_subscriptions")
@@ -533,7 +533,10 @@ def dispatch_daily_reports() -> None:
                 if seller.get("email"):
                     try:
                         from app.notifications import send_report_email
-                        success = send_report_email(
+                        # Правка Пункт 1 (25.05.2026): send_report_email теперь
+                        # возвращает (success, error_text). Раньше в базу
+                        # писалось обобщённое "send returned False" без деталей.
+                        success, send_err = send_report_email(
                             to_email=seller["email"],
                             seller_name=seller.get("display_name"),
                             kinds=kinds,
@@ -541,9 +544,11 @@ def dispatch_daily_reports() -> None:
                             xlsx_bytes=xlsx_bytes,
                             filename=filename,
                         )
+                        if not success and send_err:
+                            error_msg = send_err[:200]
                     except Exception as e:
                         logger.exception("send email failed %s", seller_id)
-                        error_msg = str(e)[:200]
+                        error_msg = f"{type(e).__name__}: {str(e)[:180]}"
                 else:
                     error_msg = "no email"
             elif channel == "telegram":
@@ -559,7 +564,7 @@ def dispatch_daily_reports() -> None:
                         )
                     except Exception as e:
                         logger.exception("send telegram failed %s", seller_id)
-                        error_msg = str(e)[:200]
+                        error_msg = f"{type(e).__name__}: {str(e)[:180]}"
                 else:
                     error_msg = "no telegram_chat_id"
 
@@ -574,7 +579,7 @@ def dispatch_daily_reports() -> None:
             else:
                 _record_history(sb, seller_id, today_dow, kinds, channel,
                                 "failed", sku_counts, filename, len(xlsx_bytes),
-                                storage_path, error_msg or "send returned False")
+                                storage_path, error_msg or "send returned False (no details)")
                 failed += 1
 
         logger.info(

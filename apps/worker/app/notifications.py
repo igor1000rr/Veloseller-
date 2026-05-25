@@ -30,6 +30,27 @@ def _app_url() -> str:
     return raw.split(",")[0].strip().rstrip("/")
 
 
+def _extract_resend_msg_id(response) -> Optional[str]:
+    """Извлекает message id из ответа resend.Emails.send.
+
+    Resend SDK 2.x возвращает SendResponse (TypedDict) с полем id.
+    Старшие версии могли возвращать dict или объект с .id.
+    Наличие id — признак что Resend API принял письмо в queue.
+    """
+    if response is None:
+        return None
+    if isinstance(response, dict):
+        return response.get("id") or response.get("message_id")
+    if hasattr(response, "id"):
+        return getattr(response, "id", None)
+    if hasattr(response, "get"):
+        try:
+            return response.get("id")
+        except Exception:
+            return None
+    return None
+
+
 def send_alert_digest(to_email: str, seller_name: Optional[str], alerts: list[dict]) -> bool:
     """Старый digest по real-time alerts. Сохранён для бэкворд-совместимости."""
     api_key = os.getenv("RESEND_API_KEY")
@@ -228,20 +249,30 @@ def send_report_email(
     sku_counts: dict[str, int],
     xlsx_bytes: bytes,
     filename: str,
-) -> bool:
-    """Универсальная отправка Excel-отчёта."""
+) -> tuple[bool, Optional[str]]:
+    """Универсальная отправка Excel-отчёта.
+
+    Правка Пункт 1 (25.05.2026): возвращает (success, error_text) вместо bool.
+    Раньше при любом неудачном результате в report_history записывалось
+    обобщённое "send returned False" без деталей. Сейчас — конкретная причина:
+    "RESEND_API_KEY not configured" / "resend SDK not installed" /
+    "ResendError: ..." / "no message id in response".
+
+    Также логирует resend_id в случае успеха — по нему можно найти
+    письмо в Resend dashboard и увидеть реальный статус delivery.
+    """
     api_key = os.getenv("RESEND_API_KEY")
     from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
     if not api_key:
         logger.info("RESEND_API_KEY не задан — пропускаю report для %s", to_email)
-        return False
+        return False, "RESEND_API_KEY not configured"
 
     try:
         import resend
         resend.api_key = api_key
     except ImportError:
         logger.warning("resend SDK не установлен")
-        return False
+        return False, "resend SDK not installed"
 
     safe_name = html.escape(seller_name) if seller_name else ""
     greeting = f"Привет{', ' + safe_name if safe_name else ''}!"
@@ -271,7 +302,7 @@ def send_report_email(
 </body></html>"""
 
     try:
-        resend.Emails.send({
+        response = resend.Emails.send({
             "from": from_email,
             "to": [to_email],
             "subject": subject,
@@ -281,10 +312,28 @@ def send_report_email(
                 "content": base64.b64encode(xlsx_bytes).decode("ascii"),
             }],
         })
-        logger.info("report email sent", extra={
-            "to": to_email, "size": len(xlsx_bytes), "kinds": kinds,
-        })
-        return True
     except Exception as e:
-        logger.exception(f"Resend report email failed for {to_email}: {e}")
-        return False
+        err_text = f"{type(e).__name__}: {str(e)[:250]}"
+        logger.exception(
+            "Resend report email failed for %s: %s", to_email, err_text
+        )
+        return False, err_text
+
+    msg_id = _extract_resend_msg_id(response)
+    if not msg_id:
+        # Resend не бросил exception, но и id не вернул. Странно —
+        # логируем реальный тип/содержимое ответа для диагностики.
+        # В истории обозначим это как 'no message id', но это подозрение что
+        # письмо могло быть отправлено — проверить стоит в Resend dashboard.
+        resp_repr = repr(response)[:200] if response is not None else "None"
+        logger.warning(
+            "resend returned no message id for %s: type=%s repr=%s",
+            to_email, type(response).__name__, resp_repr,
+        )
+        return False, f"no message id (response: {type(response).__name__})"
+
+    logger.info("report email sent", extra={
+        "to": to_email, "size": len(xlsx_bytes), "kinds": kinds,
+        "resend_id": msg_id,
+    })
+    return True, None
