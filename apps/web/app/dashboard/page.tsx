@@ -59,11 +59,9 @@ export default async function DashboardOverview({ searchParams }: {
   const currency = (seller as any)?.currency ?? "RUB";
   const fmt = (n: number | null | undefined) => formatMoney(n, currency);
 
-  // ПРАВКА 10 (25.05.2026): per-warehouse агрегаты вместо суммарных по магазину.
-  // Раньше брали store_metrics (агрегат по seller_id) — два склада FBO+FBS
-  // суммировались, селлер не мог понять "сколько денег висит на FBO,
-  // сколько на FBS". Теперь — RPC get_warehouse_dashboard_metrics
-  // считает агрегаты на лету для одного connection_id.
+  // ПРАВКА 10 этап 1 (25.05.2026): per-warehouse агрегаты в моменте.
+  // RPC считает на лету для одного connection_id — заменяет старый
+  // запрос store_metrics (агрегат по seller_id).
   const { data: warehouseMetricsRows } = await supabase
     .rpc("get_warehouse_dashboard_metrics", {
       p_seller_id: user.id,
@@ -72,17 +70,35 @@ export default async function DashboardOverview({ searchParams }: {
     });
   const wm = (warehouseMetricsRows as any[] | null)?.[0] ?? null;
 
-  // Графики динамики (Health/LostRevenue/DeadInventory за 14 точек) пока
-  // используют store_metrics (агрегат по магазину). Per-warehouse history
-  // потребует отдельную таблицу warehouse_metrics_history + изменения в
-  // worker'е — это отдельная правка. Сейчас на графиках это указано
-  // в баннере.
-  const { data: storeHistory } = await supabase
-    .from("store_metrics")
-    .select("period_end,warehouse_health_score,lost_revenue,total_inventory_value,store_frozen_inventory_value,dead_inventory_sku_count")
-    .eq("seller_id", user.id)
-    .order("period_end", { ascending: false })
-    .limit(14);
+  // ПРАВКА 10 этап 2 (25.05.2026): per-warehouse история для графиков.
+  // warehouse_metrics — новая таблица, worker пишет туда после каждого
+  // recalc-all (раз в час). Сразу после деплоя она будет пустая —
+  // используем fallback на store_metrics (агрегат по магазину) пока
+  // не накопится первая точка. Через 14 запусков worker'а — полная
+  // history.
+  const [warehouseHistoryRes, storeHistoryRes] = await Promise.all([
+    supabase
+      .from("warehouse_metrics")
+      .select("period_end,warehouse_health_score,lost_revenue,total_inventory_value,store_frozen_inventory_value,dead_inventory_sku_count")
+      .eq("seller_id", user.id)
+      .eq("connection_id", currentWarehouseId)
+      .order("period_end", { ascending: false })
+      .limit(14),
+    supabase
+      .from("store_metrics")
+      .select("period_end,warehouse_health_score,lost_revenue,total_inventory_value,store_frozen_inventory_value,dead_inventory_sku_count")
+      .eq("seller_id", user.id)
+      .order("period_end", { ascending: false })
+      .limit(14),
+  ]);
+  const warehouseHistory = warehouseHistoryRes.data ?? [];
+  const storeHistory = storeHistoryRes.data ?? [];
+
+  // Используем warehouse_metrics если есть данные, иначе fallback на
+  // store_metrics. Флаг usingFallback показывает баннер с пометкой
+  // что графики пока про весь магазин.
+  const usingFallback = warehouseHistory.length === 0;
+  const chartHistory = usingFallback ? storeHistory : warehouseHistory;
 
   // Оптимизация (2026-05-25): get_dashboard_velocities — DISTINCT ON по
   // product_id, ~0.5 сек на 3.7k SKU. Используется для распределения скоростей
@@ -120,8 +136,15 @@ export default async function DashboardOverview({ searchParams }: {
     .limit(5);
 
   const showMultiWarehouseBanner = allWarehouses.length > 1;
+  const showHistoryWarmup = usingFallback && allWarehouses.length > 1;
 
   const skusLink = (filter: string) => `/dashboard/skus?period=${period}&filter=${filter}` as any;
+
+  // Тултип графиков динамики варьируется в зависимости от того, есть ли
+  // уже per-warehouse history или мы пока на fallback.
+  const trendTooltipSuffix = usingFallback
+    ? "Пока показан агрегат по магазину — per-warehouse history накапливается (recalc-all раз в час)."
+    : `Только по складу «${currentWarehouseName}».`;
 
   return (
     <div className="space-y-6">
@@ -150,8 +173,9 @@ export default async function DashboardOverview({ searchParams }: {
             <p className="mt-1 text-ink-muted">
               Счётчики SKU, деньги на остатках, заморожено, потерянная выручка, концентрации
               и здоровье — посчитаны только по выбранному складу.
-              Графики динамики за 14 точек пока показывают агрегат по магазину
-              (per-склад history — следующий этап). Переключайте склад через селектор в правом верхнем углу.
+              {showHistoryWarmup
+                ? " Графики динамики пока показывают агрегат по магазину — per-склад история накапливается, после нескольких пересчётов (recalc-all раз в час) переключатся автоматически."
+                : " Графики динамики тоже per-склад."} Переключайте склад через селектор в правом верхнем углу.
             </p>
           </div>
         </div>
@@ -299,11 +323,17 @@ export default async function DashboardOverview({ searchParams }: {
 
       {/* ===== ПОЛОСА 6: Графики ===== */}
       <div className="grid gap-4 lg:grid-cols-3">
-        <ChartCard title="Здоровье склада за 14 дней" tooltip="Изменение warehouse_health_score за последние 14 пересчётов. Пока агрегат по магазину — per-warehouse history следующая правка.">
-          <HealthTrend history={storeHistory ?? []} />
+        <ChartCard
+          title={`Здоровье склада за ${chartHistory.length || 14} ${pluralize(chartHistory.length || 14, "точку", "точки", "точек")}`}
+          tooltip={`Изменение warehouse_health_score за последние пересчёты. ${trendTooltipSuffix}`}
+        >
+          <HealthTrend history={chartHistory} />
         </ChartCard>
-        <ChartCard title="Потерянная выручка за 14 дней" tooltip="Динамика потерь из-за отсутствия товара. Пока агрегат по магазину.">
-          <LostRevenueTrend history={storeHistory ?? []} currency={currency} />
+        <ChartCard
+          title="Потерянная выручка"
+          tooltip={`Динамика потерь из-за отсутствия товара. ${trendTooltipSuffix}`}
+        >
+          <LostRevenueTrend history={chartHistory} currency={currency} />
         </ChartCard>
         <ChartCard title="Распределение по сегментам" tooltip="Сегментация SKU выбранного склада по паттерну спроса: стабильные, быстрые, медленные, неликвид, мало данных.">
           <SegmentPie distribution={wm?.demand_pattern_distribution as any} />
@@ -314,10 +344,10 @@ export default async function DashboardOverview({ searchParams }: {
       <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
         <h3 className="font-display text-base sm:text-lg font-medium text-ink flex items-center flex-wrap">
           <span>Неликвид (товары &gt; 6 месяцев)</span>
-          <InfoTooltip text="Динамика количества SKU и замороженных денег. Пока агрегат по магазину — per-warehouse history следующая правка." position="bottom" />
+          <InfoTooltip text={`Динамика количества SKU и замороженных денег. ${trendTooltipSuffix}`} position="bottom" />
         </h3>
         <p className="text-xs text-ink-muted mt-1 mb-4">Динамика количества SKU и замороженных денег</p>
-        <DeadInventoryChart history={storeHistory ?? []} currency={currency} />
+        <DeadInventoryChart history={chartHistory} currency={currency} />
       </div>
 
       {alerts && alerts.length > 0 && (
@@ -433,6 +463,14 @@ function ChartCard({ title, children, tooltip }: { title: string; children: Reac
       {children}
     </div>
   );
+}
+
+function pluralize(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
 }
 
 function kindLabel(kind: string): string {
