@@ -222,27 +222,44 @@ export default async function SkusPage({ searchParams }: {
   if (selected) exportParams.set("warehouse_id", selected.id);
   const exportQS = exportParams.toString();
 
-  const buildQs = (overrides: Record<string, string | number | null>) => {
-    const params = new URLSearchParams();
-    if (page !== 1 && overrides.page !== null) params.set("page", String(overrides.page ?? page));
-    if (segmentFilter && overrides.segment !== null) params.set("segment", String(overrides.segment ?? segmentFilter));
-    if (reorderDays !== 30) params.set("reorder_days", String(reorderDays));
-    if (periodDays !== 30) params.set("period", String(periodDays));
-    if (dashFilter && overrides.filter !== null) params.set("filter", overrides.filter ?? dashFilter);
-    if (customThreshold !== null) params.set("threshold", String(customThreshold));
-    if (includeInactive && !dashFilter) params.set("include_inactive", "1");
-    if (search) params.set("q", search);
-    if (stockMin !== null) params.set("stock_min", String(stockMin));
-    if (stockMax !== null) params.set("stock_max", String(stockMax));
-    if (oosMin !== null) params.set("oos_min", String(oosMin));
-    if (oosMax !== null) params.set("oos_max", String(oosMax));
-    if (lostMin !== null) params.set("lost_min", String(lostMin));
-    if (lostMax !== null) params.set("lost_max", String(lostMax));
-    if (dateFrom) params.set("date_from", dateFrom);
-    if (dateTo) params.set("date_to", dateTo);
+  // Строит query string на основе текущих параметров с возможностью переопределить.
+  // Передай null чтобы удалить параметр, undefined — оставить как есть.
+  //
+  // Раньше тут был хитрый блок про page, который не ставил page=2 при переходе
+  // с первой страницы (баг: кнопка "Вперёд" с page=1 не работала).
+  // Сейчас единая логика: сначала собираем текущее состояние, потом применяем overrides.
+  const buildQs = (overrides: Record<string, string | number | null> = {}) => {
+    const current: Record<string, string> = {};
+
+    if (page !== 1) current.page = String(page);
+    if (segmentFilter) current.segment = segmentFilter;
+    if (reorderDays !== 30) current.reorder_days = String(reorderDays);
+    if (periodDays !== 30) current.period = String(periodDays);
+    if (dashFilter) current.filter = dashFilter;
+    if (customThreshold !== null) current.threshold = String(customThreshold);
+    if (includeInactive && !dashFilter) current.include_inactive = "1";
+    if (search) current.q = search;
+    if (stockMin !== null) current.stock_min = String(stockMin);
+    if (stockMax !== null) current.stock_max = String(stockMax);
+    if (oosMin !== null) current.oos_min = String(oosMin);
+    if (oosMax !== null) current.oos_max = String(oosMax);
+    if (lostMin !== null) current.lost_min = String(lostMin);
+    if (lostMax !== null) current.lost_max = String(lostMax);
+    if (dateFrom) current.date_from = dateFrom;
+    if (dateTo) current.date_to = dateTo;
+
+    // Применяем overrides поверх текущего состояния
     for (const [k, v] of Object.entries(overrides)) {
-      if (v === null) params.delete(k);
-      else if (v !== undefined && k !== "page" && k !== "segment" && k !== "filter") params.set(k, String(v));
+      if (v === null) {
+        delete current[k];
+      } else if (v !== undefined) {
+        current[k] = String(v);
+      }
+    }
+
+    const params = new URLSearchParams();
+    for (const [k, v] of Object.entries(current)) {
+      params.set(k, v);
     }
     return params.toString();
   };
