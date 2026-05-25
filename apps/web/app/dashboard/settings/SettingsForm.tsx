@@ -64,10 +64,12 @@ export default function SettingsForm({ initial, telegramDeeplink }: { initial: I
           <input
             value={timezone}
             onChange={(e) => setTimezone(e.target.value)}
-            placeholder="Europe/Warsaw"
+            placeholder="Europe/Moscow"
             className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
           />
-          <span className="text-xs text-slate-500 mt-1 block">IANA tz, например Europe/Warsaw, Europe/Moscow, America/New_York</span>
+          <span className="text-xs text-slate-500 mt-1 block">
+            IANA tz. Примеры: Europe/Moscow (UTC+3, MSK), Europe/Samara (UTC+4, MSK+1), Asia/Yekaterinburg (UTC+5, MSK+2), Asia/Krasnoyarsk (UTC+7, MSK+4), Asia/Vladivostok (UTC+10, MSK+7)
+          </span>
         </label>
       </section>
 
@@ -79,13 +81,13 @@ export default function SettingsForm({ initial, telegramDeeplink }: { initial: I
         <label className="flex items-center gap-3 mb-3 cursor-pointer">
           <input type="checkbox" checked={notifyEmail} onChange={(e) => setNotifyEmail(e.target.checked)}
                  className="w-4 h-4 accent-violet-600" />
-          <span className="text-sm text-slate-700">Email — daily digest по непрочитанным alerts</span>
+          <span className="text-sm text-slate-700">Email — регулярные сводные отчёты</span>
         </label>
 
         <label className="flex items-center gap-3 mb-3 cursor-pointer">
           <input type="checkbox" checked={notifyTelegram} onChange={(e) => setNotifyTelegram(e.target.checked)}
                  className="w-4 h-4 accent-violet-600" />
-          <span className="text-sm text-slate-700">Telegram — daily digest</span>
+          <span className="text-sm text-slate-700">Telegram — регулярные сводные отчёты</span>
         </label>
 
         <label className="block ml-7">
