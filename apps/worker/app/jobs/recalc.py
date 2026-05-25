@@ -371,13 +371,17 @@ def recalc_seller(seller_id, period_days=30, progress=None):
 
     _bump_progress(progress, phase="loading_products", period_days=period_days, processed=0, total=0)
 
+    # ПРАВКА 10 этап 2 (25.05.2026): connection_id нужен для warehouse_metrics
+    # (per-warehouse history графиков). Без него не можем сгруппировать
+    # sku_data по складам.
     products = fetch_all(
-        sb.table("products").select("product_id,sku").eq("seller_id", seller_id)
+        sb.table("products").select("product_id,sku,connection_id").eq("seller_id", seller_id)
     )
     if not products:
         _bump_progress(progress, phase="done")
         return {"products": 0, "metrics_written": 0, "alerts_written": 0,
-                "store_metrics_written": 0, "failed_skus": 0,
+                "store_metrics_written": 0, "warehouse_metrics_written": 0,
+                "failed_skus": 0,
                 "events_written": 0, "changelog_written": 0}
 
     total_skus = len(products)
@@ -386,6 +390,13 @@ def recalc_seller(seller_id, period_days=30, progress=None):
     _bump_progress(progress, phase="fetching_snapshots", total=total_skus, processed=0)
     all_pids = [p["product_id"] for p in products]
     snapshots_by_pid = _fetch_snapshots_batched(sb, all_pids, history_start)
+
+    # ПРАВКА 10 этап 2: маппинг product_id → connection_id, чтобы добавить
+    # в sku_data. Из products уже выбран connection_id; легаси-продукты
+    # без connection_id получают None и не попадают в warehouse_metrics
+    # (только в store_metrics).
+    connection_by_pid = {p["product_id"]: p.get("connection_id") for p in products}
+
     logger.info("recalc batched fetch done", extra={
         "seller_id": seller_id, "period_days": period_days,
         "products": total_skus,
@@ -488,6 +499,9 @@ def recalc_seller(seller_id, period_days=30, progress=None):
                 "current_price": current_price, "availability_now": current_stock > 0,
                 "aggregates": aggregates,
                 "has_movements": has_movements,
+                # ПРАВКА 10 этап 2: connection_id для группировки в warehouse_metrics.
+                # None для легаси-продуктов без привязки к складу.
+                "connection_id": connection_by_pid.get(pid),
             })
             if metric.adjusted_velocity > 0:
                 velocities_for_median.append(metric.adjusted_velocity)
@@ -571,6 +585,17 @@ def recalc_seller(seller_id, period_days=30, progress=None):
         logger.exception("store_metrics write failed", extra={"seller_id": seller_id})
         store_written = 0
 
+    # ПРАВКА 10 этап 2: warehouse_metrics — per-warehouse история для графиков
+    # динамики /dashboard. Пишется ДОПОЛНИТЕЛЬНО к store_metrics.
+    # Группировка sku_data по connection_id, для каждого склада — те же
+    # формулы что в _write_store_metrics через общую _compute_aggregates.
+    _bump_progress(progress, phase="writing_warehouse")
+    try:
+        warehouse_written = _write_warehouse_metrics(sb, seller_id, sku_data, period_start, period_end)
+    except Exception:
+        logger.exception("warehouse_metrics write failed", extra={"seller_id": seller_id})
+        warehouse_written = 0
+
     return {
         "products": len(products),
         "failed_skus": failed_skus,
@@ -579,27 +604,27 @@ def recalc_seller(seller_id, period_days=30, progress=None):
         "events_written": events_written,
         "changelog_written": changelog_written,
         "store_metrics_written": store_written,
+        "warehouse_metrics_written": warehouse_written,
     }
 
 
-def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
-    if not sku_data:
-        return 0
+def _compute_aggregates(sku_data):
+    """Вычисляет агрегаты для группы SKU. Используется и store_metrics, и
+    warehouse_metrics — гарантирует идентичные формулы.
 
-    # Правка 4.1 Александра (Veloseller правки 4):
-    # "Состояние склада не считаем товары SKU без активности"
-    # Также применяется к остальным агрегатам (концентрации, остатки,
-    # заморожено, demand pattern) — Александр в правке 1 написал:
-    # "в остальных расчётах им [inactive] участвовать не нужно".
-    #
-    # Inactive = SKU с нулевым остатком И без движений (sales/replenishment)
-    # за период. Эти товары сняты с продажи (или ещё не появлялись на складе).
-    # Включать их в health/конц/остатки = искажать общую картину магазина.
-    #
-    # ВНИМАНИЕ: счётчики (total/oos/low/dead/inactive/frequently_oos) и
-    # lost_revenue считаются по всем sku_data — это сами по себе
-    # диагностические метрики, без которых пользователь не увидит сколько
-    # неактивных SKU у него вообще есть.
+    Возвращает dict с полями для upsert (без seller_id / period_* /
+    connection_id — их добавляет вызывающий код).
+
+    Логика (правка 4.1 Александра — see _write_store_metrics):
+    - Активные SKU (availability_now OR has_movements) — для health,
+      концентраций, денег, distribution.
+    - Все SKU (включая inactive) — для счётчиков и lost_revenue.
+    - Inactive = ~availability_now AND ~has_movements.
+    - "Нет в наличии" (active_oos) = oos - inactive.
+    """
+    if not sku_data:
+        return None
+
     active_sku_data = [
         item for item in sku_data
         if item["availability_now"] or item.get("has_movements", True)
@@ -680,10 +705,7 @@ def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
         avg_price = average_stockout_price(prices_during_stockout, item["current_price"])
         lost_total += m.adjusted_velocity * m.stockout_days * avg_price
 
-    sb.table("store_metrics").upsert({
-        "seller_id": seller_id,
-        "period_start": period_start.isoformat(),
-        "period_end": period_end.isoformat(),
+    return {
         "total_sku_count": len(sku_data),
         "oos_sku_count": active_oos_count,
         "low_stock_sku_count": low_count,
@@ -697,13 +719,80 @@ def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
         "lost_revenue": float(lost_total),
         "warehouse_health_score": float(wh_score) if wh_score is not None else None,
         "demand_pattern_distribution": seg_distribution,
-    }, on_conflict="seller_id,period_start,period_end").execute()
+    }
+
+
+def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
+    """Записывает store_metrics — агрегат по всему магазину (всем складам)."""
+    aggregates = _compute_aggregates(sku_data)
+    if aggregates is None:
+        return 0
+
+    row = {
+        "seller_id": seller_id,
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
+        **aggregates,
+    }
+    sb.table("store_metrics").upsert(
+        row, on_conflict="seller_id,period_start,period_end"
+    ).execute()
     return 1
+
+
+def _write_warehouse_metrics(sb, seller_id, sku_data, period_start, period_end):
+    """Записывает warehouse_metrics — по одной строке на каждый склад.
+
+    Правка 10 этап 2 (25.05.2026). Группирует sku_data по connection_id
+    и для каждого склада считает те же агрегаты что и store_metrics
+    (через общую _compute_aggregates). Используется для графиков
+    динамики /dashboard (Health/LostRevenue/DeadInventory) выбранного
+    склада.
+
+    Легаси-продукты без connection_id (если есть) пропускаются — попадают
+    только в store_metrics.
+    """
+    if not sku_data:
+        return 0
+
+    by_connection = {}
+    for item in sku_data:
+        conn_id = item.get("connection_id")
+        if not conn_id:
+            continue
+        by_connection.setdefault(conn_id, []).append(item)
+
+    written = 0
+    for conn_id, items in by_connection.items():
+        try:
+            aggregates = _compute_aggregates(items)
+            if aggregates is None:
+                continue
+            row = {
+                "seller_id": seller_id,
+                "connection_id": conn_id,
+                "period_start": period_start.isoformat(),
+                "period_end": period_end.isoformat(),
+                **aggregates,
+            }
+            sb.table("warehouse_metrics").upsert(
+                row, on_conflict="seller_id,connection_id,period_start,period_end"
+            ).execute()
+            written += 1
+        except Exception:
+            # Не падаем на одном складе — пишем остальные. Ошибка
+            # фиксируется в логе для диагностики.
+            logger.exception("warehouse_metrics row failed", extra={
+                "seller_id": seller_id, "connection_id": conn_id,
+                "period_start": period_start.isoformat(),
+            })
+    return written
 
 
 def recalc_seller_all_periods(seller_id, progress=None):
     result = {"products": 0, "metrics_written": 0, "alerts_written": 0,
-              "store_metrics_written": 0, "events_written": 0, "changelog_written": 0,
+              "store_metrics_written": 0, "warehouse_metrics_written": 0,
+              "events_written": 0, "changelog_written": 0,
               "failed_skus": 0, "periods": []}
     periods_list = (7, 30, 90)
     _bump_progress(progress, total_periods=len(periods_list), current_period_index=0)
@@ -717,11 +806,12 @@ def recalc_seller_all_periods(seller_id, progress=None):
             })
             r = {"products": 0, "failed_skus": 0, "metrics_written": 0, "alerts_written": 0,
                  "events_written": 0, "changelog_written": 0, "store_metrics_written": 0,
-                 "error": "period failed"}
+                 "warehouse_metrics_written": 0, "error": "period failed"}
         result["periods"].append({"period_days": period_days, **r})
         if period_days == 30:
             for k in ("products", "metrics_written", "alerts_written",
-                      "store_metrics_written", "events_written", "changelog_written",
+                      "store_metrics_written", "warehouse_metrics_written",
+                      "events_written", "changelog_written",
                       "failed_skus"):
                 result[k] = r.get(k, 0)
     _bump_progress(progress, phase="done")
@@ -733,7 +823,8 @@ def recalc_all_sellers():
     sb = get_supabase()
     sellers = fetch_all(sb.table("sellers").select("id"))
     summary = {"sellers": 0, "skipped_concurrent": 0, "metrics_written": 0,
-               "alerts_written": 0, "store_metrics_written": 0, "failed_skus": 0}
+               "alerts_written": 0, "store_metrics_written": 0,
+               "warehouse_metrics_written": 0, "failed_skus": 0}
 
     try:
         from app.main import _running_recalcs
@@ -754,6 +845,7 @@ def recalc_all_sellers():
             summary["metrics_written"] += r.get("metrics_written", 0)
             summary["alerts_written"] += r.get("alerts_written", 0)
             summary["store_metrics_written"] += r.get("store_metrics_written", 0)
+            summary["warehouse_metrics_written"] += r.get("warehouse_metrics_written", 0)
             summary["failed_skus"] += r.get("failed_skus", 0)
         except Exception as e:
             logger.exception("recalc failed for seller %s: %s", seller_id, e)
