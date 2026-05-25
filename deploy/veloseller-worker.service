@@ -8,7 +8,14 @@ User=veloseller
 Group=veloseller
 WorkingDirectory=/opt/veloseller/apps/worker
 EnvironmentFile=/opt/veloseller/apps/worker/.env
-ExecStart=/opt/veloseller/apps/worker/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 2
+# ВНИМАНИЕ: --workers 1 обязательно. APScheduler стартует в FastAPI lifespan,
+# и при N workers получим N инстансов scheduler → N дублей каждого cron-задания
+# (recalc-all каждый час, daily-reports в 09:00 UTC, sync_active_connections итд).
+# 25.05.2026: было --workers 2 → пользователи получали по 2 одинаковых email
+# с отчётами в одну минуту. Дополнительная DB-защита — UNIQUE индекс
+# report_history (seller_id, channel, sent_date) в миграции
+# dedupe_report_history_and_unique_index.
+ExecStart=/opt/veloseller/apps/worker/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 --workers 1
 Restart=always
 RestartSec=5
 StandardOutput=journal
