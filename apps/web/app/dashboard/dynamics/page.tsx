@@ -3,22 +3,10 @@ import Link from "next/link";
 import { Icons } from "../../_components/Icons";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 import DynamicsSearch from "./DynamicsSearch";
+import { getSelectedWarehouse, listWarehouses, warehouseKindLabel } from "@/lib/warehouse";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-async function fetchAll<T>(buildQuery: (from: number, to: number) => any, pageSize = 1000): Promise<T[]> {
-  const all: T[] = [];
-  let offset = 0;
-  while (offset < 50_000) {
-    const { data } = await buildQuery(offset, offset + pageSize - 1);
-    if (!data || data.length === 0) break;
-    all.push(...data);
-    if (data.length < pageSize) break;
-    offset += pageSize;
-  }
-  return all;
-}
 
 type TveloRow = {
   product_id: string;
@@ -39,10 +27,10 @@ type SkuTrend = {
 
 // Период агрегации (правка 12 Александра)
 type Period = "day" | "week" | "month";
-const PERIODS: { value: Period; label: string; pointsLimit: number; hint: string }[] = [
-  { value: "day",   label: "День",   pointsLimit: 14, hint: "последние 14 дней" },
-  { value: "week",  label: "Неделя", pointsLimit: 12, hint: "последние 12 недель" },
-  { value: "month", label: "Месяц",  pointsLimit: 6,  hint: "последние 6 месяцев" },
+const PERIODS: { value: Period; label: string; pointsLimit: number; hint: string; lookbackDays: number }[] = [
+  { value: "day",   label: "День",   pointsLimit: 14, hint: "последние 14 дней",   lookbackDays: 30 },
+  { value: "week",  label: "Неделя", pointsLimit: 12, hint: "последние 12 недель", lookbackDays: 100 },
+  { value: "month", label: "Месяц",  pointsLimit: 6,  hint: "последние 6 месяцев", lookbackDays: 210 },
 ];
 
 function isPeriod(s: string | undefined): s is Period {
@@ -79,48 +67,89 @@ export default async function DynamicsPage({ searchParams }: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const rows = await fetchAll<TveloRow>(
-    async (from, to) => await supabase
-      .from("tvelo_metrics")
-      .select("product_id,period_end,adjusted_velocity,products!inner(sku,product_name,seller_id)")
-      .eq("products.seller_id", user.id)
-      .order("period_end", { ascending: true })
-      .range(from, to),
-  );
+  // КРИТИЧНО: фильтр по выбранному складу — иначе данные FBO+FBS смешиваются.
+  const [selected, allWarehouses] = await Promise.all([
+    getSelectedWarehouse(supabase, user.id),
+    listWarehouses(supabase, user.id),
+  ]);
 
-  // Группируем по SKU и собираем все точки
-  const byProduct = new Map<string, { sku: string; name: string; entries: Array<{ period: string; vel: number }> }>();
+  // Empty state — нет складов вообще.
+  if (allWarehouses.length === 0) {
+    return (
+      <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center">
+        <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Подключите первый склад</h1>
+        <p className="mx-auto mt-3 max-w-xl text-ink-muted leading-relaxed">
+          Динамика скоростей требует подключённого склада и хотя бы 7 дней истории.
+        </p>
+        <div className="mt-6 flex gap-3 justify-center flex-wrap">
+          <Link href={"/connections/new" as any} className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition">Добавить склад</Link>
+        </div>
+      </div>
+    );
+  }
+
+  const currentWarehouseId = selected?.id ?? allWarehouses[0].id;
+  const currentWarehouseName = selected?.name ?? allWarehouses[0].name;
+  const currentWarehouseKind = selected?.warehouse_kind ?? allWarehouses[0].warehouse_kind;
+  const showMultiWarehouseBanner = allWarehouses.length > 1;
+
+  // Ограничиваем выборку датой — для day берём ~30 дней, для week ~100, для month ~210.
+  // Это убирает 90% строк (вся история не нужна) и даёт ~10× ускорение vs предыдущий fetchAll.
+  const lookbackIso = new Date(Date.now() - periodMeta.lookbackDays * 86400_000)
+    .toISOString().slice(0, 10);
+
+  // Один запрос с фильтром по складу + по дате. БЕЗ пагинации — после фильтра данных немного.
+  const { data: rowsData, error: rowsErr } = await supabase
+    .from("tvelo_metrics")
+    .select("product_id,period_end,adjusted_velocity,products!inner(sku,product_name,seller_id,connection_id)")
+    .eq("products.seller_id", user.id)
+    .eq("products.connection_id", currentWarehouseId)
+    .gte("period_end", lookbackIso)
+    .order("period_end", { ascending: true });
+
+  const rows = (rowsData ?? []) as TveloRow[];
+  if (rowsErr) {
+    console.error("dynamics: query failed", rowsErr);
+  }
+
+  // Группировка по SKU. Сразу бакетизируем при вставке — экономит O(N×M) операций.
+  type ProductData = {
+    sku: string;
+    name: string;
+    byBucket: Map<string, number[]>;
+  };
+  const byProduct = new Map<string, ProductData>();
+  const allBuckets = new Set<string>();
+
   for (const r of rows) {
     const product = Array.isArray(r.products) ? r.products[0] : r.products;
     if (!product) continue;
-    if (!byProduct.has(r.product_id)) {
-      byProduct.set(r.product_id, { sku: product.sku, name: product.product_name, entries: [] });
+    const bucket = bucketize(r.period_end, period);
+    allBuckets.add(bucket);
+
+    let entry = byProduct.get(r.product_id);
+    if (!entry) {
+      entry = { sku: product.sku, name: product.product_name, byBucket: new Map() };
+      byProduct.set(r.product_id, entry);
     }
-    byProduct.get(r.product_id)!.entries.push({
-      period: r.period_end,
-      vel: Number(r.adjusted_velocity),
-    });
+    const vels = entry.byBucket.get(bucket);
+    if (vels) vels.push(Number(r.adjusted_velocity));
+    else entry.byBucket.set(bucket, [Number(r.adjusted_velocity)]);
   }
 
-  // Бакетинг по выбранному периоду — для каждой пары (SKU × bucket) считаем avg
-  // Списки всех бакетов сортируем и берём только последние pointsLimit
-  const allBuckets = new Set<string>();
-  for (const r of rows) allBuckets.add(bucketize(r.period_end, period));
   const sortedBuckets = Array.from(allBuckets).sort();
   const recentBuckets = sortedBuckets.slice(-periodMeta.pointsLimit);
 
+  // Для каждого SKU: avg velocity по каждому recent bucket.
+  // Один проход — без вложенного fold по entries.
   const trends: SkuTrend[] = [];
   for (const [pid, data] of byProduct) {
-    // Для каждого bucket — avg velocity
     const cells: number[] = [];
     let activeCells = 0;
     for (const key of recentBuckets) {
-      const pointsInBucket: number[] = [];
-      for (const e of data.entries) {
-        if (bucketize(e.period, period) === key) pointsInBucket.push(e.vel);
-      }
-      const avg = pointsInBucket.length > 0
-        ? pointsInBucket.reduce((a, b) => a + b, 0) / pointsInBucket.length
+      const vels = data.byBucket.get(key);
+      const avg = vels && vels.length > 0
+        ? vels.reduce((a, b) => a + b, 0) / vels.length
         : 0;
       cells.push(avg);
       if (avg > 0) activeCells += 1;
@@ -152,21 +181,19 @@ export default async function DynamicsPage({ searchParams }: {
     .sort((a, b) => Math.abs(b.deltaPct) - Math.abs(a.deltaPct));
   const allLimited = all.slice(0, 50);
 
-  // Тренд магазина — avg velocity по всем SKU за каждый bucket
+  // Тренд магазина — avg velocity по всем SKU за каждый bucket.
+  // Тоже один проход вместо вложенного цикла.
   const storeTrend: { period: string; avg: number }[] = [];
   for (const key of recentBuckets) {
-    const allVels: number[] = [];
+    const skuAvgs: number[] = [];
     for (const [, data] of byProduct) {
-      const pointsInBucket: number[] = [];
-      for (const e of data.entries) {
-        if (bucketize(e.period, period) === key) pointsInBucket.push(e.vel);
-      }
-      if (pointsInBucket.length > 0) {
-        allVels.push(pointsInBucket.reduce((a, b) => a + b, 0) / pointsInBucket.length);
+      const vels = data.byBucket.get(key);
+      if (vels && vels.length > 0) {
+        skuAvgs.push(vels.reduce((a, b) => a + b, 0) / vels.length);
       }
     }
-    if (allVels.length > 0) {
-      storeTrend.push({ period: key, avg: allVels.reduce((a, b) => a + b, 0) / allVels.length });
+    if (skuAvgs.length > 0) {
+      storeTrend.push({ period: key, avg: skuAvgs.reduce((a, b) => a + b, 0) / skuAvgs.length });
     }
   }
 
@@ -182,11 +209,12 @@ export default async function DynamicsPage({ searchParams }: {
 
   const exportQs = new URLSearchParams();
   exportQs.set("period", period);
+  if (currentWarehouseId) exportQs.set("warehouse_id", currentWarehouseId);
 
   return (
     <div className="space-y-6">
       <header className="flex items-end justify-between flex-wrap gap-3">
-        <div>
+        <div className="min-w-0">
           <div className="inline-flex items-center gap-2 mb-2">
             <span className="size-1 rounded-full bg-lime-deep" />
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Dynamics</span>
@@ -195,6 +223,13 @@ export default async function DynamicsPage({ searchParams }: {
           <p className="text-sm text-ink-muted mt-1">
             Какие SKU ускорились, какие просели — и что делать. Сравнение последних двух периодов агрегации.
           </p>
+          <div className="mt-2 flex items-center gap-2 flex-wrap text-sm text-ink-muted">
+            <span className="size-1.5 rounded-full bg-lime-deep shrink-0" />
+            <span className="font-medium text-ink truncate max-w-[200px] sm:max-w-none">{currentWarehouseName}</span>
+            <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
+              {warehouseKindLabel(currentWarehouseKind)}
+            </span>
+          </div>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {/* Фильтр периода День/Неделя/Месяц (правка 12) */}
@@ -236,6 +271,19 @@ export default async function DynamicsPage({ searchParams }: {
           </div>
         </div>
       </header>
+
+      {showMultiWarehouseBanner && (
+        <div className="rounded-xl border border-azure/30 bg-azure/5 p-4 flex items-start gap-3">
+          <span className="text-azure mt-0.5 shrink-0"><InfoTooltip text="" /></span>
+          <div className="flex-1 text-sm">
+            <div className="font-medium text-ink">У вас несколько складов</div>
+            <p className="mt-1 text-ink-muted">
+              Динамика показана для выбранного склада <b>{currentWarehouseName}</b>.
+              Переключитесь на другой склад через селектор в правом верхнем углу.
+            </p>
+          </div>
+        </div>
+      )}
 
       {noData ? (
         <div className="rounded-2xl border border-line bg-paper p-10 md:p-14 text-center">
@@ -304,7 +352,7 @@ export default async function DynamicsPage({ searchParams }: {
                   <InfoTooltip text="Топ-50 SKU отсортированы по абсолютной величине изменения скорости. SKU без активности скрыты по умолчанию." />
                 </h2>
                 <p className="text-xs text-ink-muted mt-1">
-                  Отсортировано по силе изменения · {all.length} SKU всего, показано 50
+                  Отсортировано по силе изменения · {all.length} SKU всего, показано {allLimited.length}
                 </p>
               </div>
               <DynamicsSearch initial={search} />

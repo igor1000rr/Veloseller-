@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { getSelectedWarehouse } from "@/lib/warehouse";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/export/dynamics?period=day|week|month&format=csv|excel
+ * GET /api/export/dynamics?period=day|week|month&format=csv|excel&warehouse_id=uuid
  *
  * Экспорт динамики скоростей продаж по SKU за разные периоды агрегации.
  *
@@ -17,6 +18,9 @@ export const dynamic = "force-dynamic";
  * Формат:
  *   csv   — UTF-8 без BOM, разделитель запятая
  *   excel — UTF-8 с BOM + точка-с-запятой (Excel сразу открывает как таблицу)
+ *
+ * Склад: если warehouse_id передан в query — фильтруем по нему, иначе берём
+ * выбранный из cookie vs-warehouse, иначе — первый склад пользователя.
  *
  * По умолчанию SKU без активности (velocity = 0 во всех точках) скрываются —
  * Александр явно просил это в правке 12.
@@ -33,11 +37,32 @@ export async function GET(req: NextRequest) {
 
   const url = new URL(req.url);
   const periodParam = (url.searchParams.get("period") ?? "day").toLowerCase();
-  const period = ["day", "week", "month"].includes(periodParam) ? periodParam : "day";
+  const period = (["day", "week", "month"].includes(periodParam) ? periodParam : "day") as "day" | "week" | "month";
   const format = (url.searchParams.get("format") ?? "csv").toLowerCase();
   const isExcel = format === "excel" || format === "xlsx";
 
-  // Грузим всю историю tvelo_metrics для селлера
+  // Определяем склад: query > cookie > первый.
+  const warehouseIdParam = url.searchParams.get("warehouse_id");
+  let connectionId: string | null = null;
+  if (warehouseIdParam) {
+    // Валидируем что склад принадлежит пользователю.
+    const { data: dc } = await supabase
+      .from("data_connections")
+      .select("id")
+      .eq("id", warehouseIdParam)
+      .eq("seller_id", user.id)
+      .maybeSingle();
+    connectionId = dc?.id ?? null;
+  }
+  if (!connectionId) {
+    const selected = await getSelectedWarehouse(supabase, user.id);
+    connectionId = selected?.id ?? null;
+  }
+
+  // Lookback по дням — соответствует UI page.tsx (day=30, week=100, month=210).
+  const lookbackDays = period === "day" ? 30 : period === "week" ? 100 : 210;
+  const lookbackIso = new Date(Date.now() - lookbackDays * 86400_000).toISOString().slice(0, 10);
+
   type Row = {
     product_id: string;
     period_end: string;
@@ -45,42 +70,27 @@ export async function GET(req: NextRequest) {
     products: { sku: string; product_name: string } | { sku: string; product_name: string }[] | null;
   };
 
-  const PAGE = 1000;
-  const rows: Row[] = [];
-  let from = 0;
-  while (true) {
-    const { data, error } = await supabase
-      .from("tvelo_metrics")
-      .select("product_id,period_end,adjusted_velocity,products!inner(sku,product_name,seller_id)")
-      .eq("products.seller_id", user.id)
-      .order("period_end", { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) return new Response(`DB error: ${error.message}`, { status: 500 });
-    if (!data || data.length === 0) break;
-    rows.push(...(data as any));
-    if (data.length < PAGE) break;
-    from += PAGE;
+  // Один запрос с фильтром по складу + дате. БЕЗ пагинации.
+  let query = supabase
+    .from("tvelo_metrics")
+    .select("product_id,period_end,adjusted_velocity,products!inner(sku,product_name,seller_id,connection_id)")
+    .eq("products.seller_id", user.id)
+    .gte("period_end", lookbackIso)
+    .order("period_end", { ascending: true });
+
+  if (connectionId) {
+    query = query.eq("products.connection_id", connectionId);
   }
 
-  // Группируем точки по SKU
-  type Bucket = { sku: string; name: string; points: Map<string, number> };
-  const bySku = new Map<string, Bucket>();
-  for (const r of rows) {
-    const product = Array.isArray(r.products) ? r.products[0] : r.products;
-    if (!product) continue;
-    if (!bySku.has(r.product_id)) {
-      bySku.set(r.product_id, { sku: product.sku, name: product.product_name, points: new Map() });
-    }
-    bySku.get(r.product_id)!.points.set(r.period_end, Number(r.adjusted_velocity));
-  }
+  const { data: rowsData, error } = await query;
+  if (error) return new Response(`DB error: ${error.message}`, { status: 500 });
+  const rows = (rowsData ?? []) as Row[];
 
-  // Бакетинг под period: формируем список ключей (колонок) и значение для каждой пары SKU × bucket
-  const bucketKeys: string[] = [];
+  // bucketize
   const bucketize = (period_end: string): string => {
-    const d = new Date(period_end);
     if (period === "day") return period_end.slice(0, 10);
     if (period === "week") {
-      // ISO неделя YYYY-Www
+      const d = new Date(period_end);
       const tmp = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
       const dayNum = tmp.getUTCDay() || 7;
       tmp.setUTCDate(tmp.getUTCDate() + 4 - dayNum);
@@ -88,35 +98,47 @@ export async function GET(req: NextRequest) {
       const weekNum = Math.ceil(((tmp.getTime() - yearStart.getTime()) / 86400_000 + 1) / 7);
       return `${tmp.getUTCFullYear()}-W${String(weekNum).padStart(2, "0")}`;
     }
-    // month YYYY-MM
     return period_end.slice(0, 7);
   };
   const limit = period === "day" ? 14 : period === "week" ? 12 : 6;
 
-  // Сначала собираем все встречающиеся бакеты и сортируем по убыванию (свежие первые)
+  // Группировка с одновременной бакетизацией — экономит O(N×M) операций bucketize.
+  type Bucket = { sku: string; name: string; byBucket: Map<string, number[]> };
+  const bySku = new Map<string, Bucket>();
   const allBuckets = new Set<string>();
-  for (const r of rows) allBuckets.add(bucketize(r.period_end));
-  const sortedBuckets = Array.from(allBuckets).sort().reverse().slice(0, limit).reverse();
-  bucketKeys.push(...sortedBuckets);
+  for (const r of rows) {
+    const product = Array.isArray(r.products) ? r.products[0] : r.products;
+    if (!product) continue;
+    const key = bucketize(r.period_end);
+    allBuckets.add(key);
 
-  // Для каждой пары SKU × bucket — avg velocity по точкам внутри
+    let entry = bySku.get(r.product_id);
+    if (!entry) {
+      entry = { sku: product.sku, name: product.product_name, byBucket: new Map() };
+      bySku.set(r.product_id, entry);
+    }
+    const arr = entry.byBucket.get(key);
+    if (arr) arr.push(Number(r.adjusted_velocity));
+    else entry.byBucket.set(key, [Number(r.adjusted_velocity)]);
+  }
+
+  const sortedBuckets = Array.from(allBuckets).sort();
+  const bucketKeys = sortedBuckets.slice(-limit);
+
+  // Для каждого SKU — avg per bucket, один проход.
   type Aggregated = { sku: string; name: string; cells: number[]; total: number };
   const aggregated: Aggregated[] = [];
   for (const [, bucket] of bySku) {
     const cells: number[] = [];
     let activeCells = 0;
     for (const key of bucketKeys) {
-      const pointsInBucket: number[] = [];
-      for (const [period_end, vel] of bucket.points) {
-        if (bucketize(period_end) === key) pointsInBucket.push(vel);
-      }
-      const avg = pointsInBucket.length > 0
-        ? pointsInBucket.reduce((a, b) => a + b, 0) / pointsInBucket.length
+      const vels = bucket.byBucket.get(key);
+      const avg = vels && vels.length > 0
+        ? vels.reduce((a, b) => a + b, 0) / vels.length
         : 0;
       cells.push(avg);
       if (avg > 0) activeCells += 1;
     }
-    // Скрываем SKU без активности (правка 12 Александра)
     if (activeCells === 0) continue;
     const total = cells.reduce((a, b) => a + b, 0);
     aggregated.push({ sku: bucket.sku, name: bucket.name, cells, total });
