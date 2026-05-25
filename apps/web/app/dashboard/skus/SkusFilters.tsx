@@ -26,6 +26,11 @@ export type FilterRanges = {
  *
  * State в URL. Попап рендерится через React Portal в document.body чтобы не
  * обрезался overflow таблицы (тот же приём что у InfoTooltip).
+ *
+ * Правка 7 (25.05.2026): «Дней без продаж» → «Дней без наличия» — точнее по
+ * смыслу. Поле считает stockout_days (out-of-stock дни), т.е. сколько дней
+ * товара не было на складе. URL-параметры oos_min/oos_max не меняем — не
+ * ломаем букмарки и внешние ссылки.
  */
 export function SkusFilters({
   warehouseCreatedAt,
@@ -118,7 +123,7 @@ export function SkusFilters({
   if (oosMin || oosMax) {
     chips.push({
       key: "oos",
-      label: `Дней без продаж: ${oosMin || "0"} – ${oosMax || "∞"}`,
+      label: `Дней без наличия: ${oosMin || "0"} – ${oosMax || "∞"}`,
       onClear: () => pushUpdate({ oos_min: "", oos_max: "" }),
     });
   }
@@ -344,8 +349,8 @@ export function SkusFilters({
             />
 
             <RangeField
-              label="Дней без продаж (OOS)"
-              hint="дни out-of-stock за период"
+              label="Дней без наличия (OOS)"
+              hint="сколько дней товар отсутствовал на складе за период"
               minPlaceholder={String(ranges.oosMin)}
               maxPlaceholder={String(ranges.oosMax)}
               minVal={oosMin}
