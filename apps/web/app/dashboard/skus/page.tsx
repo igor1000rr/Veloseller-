@@ -19,11 +19,31 @@ const SEGMENTS = [
   { value: "dead_inventory_risk", label: "Неликвид" },
 ];
 
-type DashboardFilter = "low_stock" | "lost_revenue" | "dead_inventory" | "oos" | "inactive";
+// Расширено (правка 4 — кликабельные блоки полосы 4 на /dashboard):
+// frequently_oos, inventory_concentration, demand_concentration.
+type DashboardFilter =
+  | "low_stock"
+  | "lost_revenue"
+  | "dead_inventory"
+  | "oos"
+  | "inactive"
+  | "frequently_oos"
+  | "inventory_concentration"
+  | "demand_concentration";
+
+const DASHBOARD_FILTERS: ReadonlySet<DashboardFilter> = new Set([
+  "low_stock",
+  "lost_revenue",
+  "dead_inventory",
+  "oos",
+  "inactive",
+  "frequently_oos",
+  "inventory_concentration",
+  "demand_concentration",
+]);
 
 function isDashboardFilter(s: string | undefined): s is DashboardFilter {
-  return s === "low_stock" || s === "lost_revenue" || s === "dead_inventory"
-      || s === "oos" || s === "inactive";
+  return s !== undefined && DASHBOARD_FILTERS.has(s as DashboardFilter);
 }
 
 function parseIntOrNull(s: string | undefined): number | null {
@@ -41,6 +61,7 @@ function parseDateOrNull(s: string | undefined): string | null {
 function defaultThresholdFor(filter: DashboardFilter): number | null {
   if (filter === "low_stock") return 7;
   if (filter === "dead_inventory") return 180;
+  if (filter === "frequently_oos") return 15; // дней OOS за период
   return null;
 }
 
@@ -114,6 +135,21 @@ export default async function SkusPage({ searchParams }: {
     lostMax: Number(rangesRaw?.lost_max ?? 0),
   };
 
+  // ===== Концентрационные фильтры — отдельная RPC, возвращающая product_ids =====
+  // RPC применена ранее: get_concentration_product_ids(seller_id, connection_id, kind).
+  // kind ∈ {'inventory','demand'}. Возвращает топ-N SKU, которые держат >=50%
+  // соответствующей величины (стоимость остатков или demand_weight).
+  let concentrationIds: string[] | null = null;
+  if (dashFilter === "inventory_concentration" || dashFilter === "demand_concentration") {
+    const kind = dashFilter === "inventory_concentration" ? "inventory" : "demand";
+    const { data: idsRows } = await supabase.rpc("get_concentration_product_ids", {
+      p_seller_id: user.id,
+      p_connection_id: selected?.id ?? null,
+      p_kind: kind,
+    });
+    concentrationIds = ((idsRows as any[] | null) ?? []).map((r: any) => r.product_id);
+  }
+
   let productsQuery = supabase
     .from("products")
     .select(`
@@ -149,6 +185,19 @@ export default async function SkusPage({ searchParams }: {
     productsQuery = productsQuery
       .eq("tvelo_metrics.current_stock", 0)
       .eq("tvelo_metrics.adjusted_velocity", 0);
+  } else if (dashFilter === "frequently_oos") {
+    // OOS > N дней за период (по умолчанию 15)
+    productsQuery = productsQuery.gt("tvelo_metrics.stockout_days", effectiveThreshold!);
+  } else if (dashFilter === "inventory_concentration" || dashFilter === "demand_concentration") {
+    // Фильтр по списку product_ids из RPC. Защита от пустого списка —
+    // .in([]) в supabase-js возвращает все строки, поэтому при пустом массиве
+    // подставляем заведомо несуществующий UUID, чтобы вернулся пустой результат.
+    const ids = concentrationIds ?? [];
+    if (ids.length === 0) {
+      productsQuery = productsQuery.in("product_id", ["00000000-0000-0000-0000-000000000000"]);
+    } else {
+      productsQuery = productsQuery.in("product_id", ids);
+    }
   } else if (!includeInactive) {
     productsQuery = productsQuery.or("current_stock.gt.0,adjusted_velocity.gt.0", { foreignTable: "tvelo_metrics" });
   }
@@ -224,10 +273,6 @@ export default async function SkusPage({ searchParams }: {
 
   // Строит query string на основе текущих параметров с возможностью переопределить.
   // Передай null чтобы удалить параметр, undefined — оставить как есть.
-  //
-  // Раньше тут был хитрый блок про page, который не ставил page=2 при переходе
-  // с первой страницы (баг: кнопка "Вперёд" с page=1 не работала).
-  // Сейчас единая логика: сначала собираем текущее состояние, потом применяем overrides.
   const buildQs = (overrides: Record<string, string | number | null> = {}) => {
     const current: Record<string, string> = {};
 
@@ -248,7 +293,6 @@ export default async function SkusPage({ searchParams }: {
     if (dateFrom) current.date_from = dateFrom;
     if (dateTo) current.date_to = dateTo;
 
-    // Применяем overrides поверх текущего состояния
     for (const [k, v] of Object.entries(overrides)) {
       if (v === null) {
         delete current[k];

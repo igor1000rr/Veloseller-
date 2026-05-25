@@ -4,31 +4,49 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 
-type DashFilter = "low_stock" | "lost_revenue" | "dead_inventory" | "oos" | "inactive";
+// Расширено (правка 4): добавлены frequently_oos / inventory_concentration /
+// demand_concentration для трёх блоков полосы 4 на /dashboard.
+type DashFilter =
+  | "low_stock"
+  | "lost_revenue"
+  | "dead_inventory"
+  | "oos"
+  | "inactive"
+  | "frequently_oos"
+  | "inventory_concentration"
+  | "demand_concentration";
 
 const FILTER_LABELS: Record<DashFilter, string> = {
-  low_stock:      "Низкий остаток",
-  lost_revenue:   "Потерянная выручка",
-  dead_inventory: "Неликвид",
-  oos:            "Нет в наличии",
-  inactive:       "SKU без активности",
+  low_stock:               "Низкий остаток",
+  lost_revenue:            "Потерянная выручка",
+  dead_inventory:          "Неликвид",
+  oos:                     "Нет в наличии",
+  inactive:                "SKU без активности",
+  frequently_oos:          "Часто отсутствуют",
+  inventory_concentration: "Концентрация остатков",
+  demand_concentration:    "Концентрация спроса",
 };
 
 const FILTER_DESCRIPTIONS: Record<DashFilter, (threshold: number) => string> = {
-  low_stock:      (t) => `покрытие ≤ ${t} дней`,
-  lost_revenue:   () => "была недополучка из-за OOS",
-  dead_inventory: (t) => `покрытие > ${t} дней`,
-  oos:            () => "активные SKU (с движением за 30 дней)",
-  inactive:       () => "0 остаток + нет движений",
+  low_stock:               (t) => `покрытие ≤ ${t} дней`,
+  lost_revenue:            () => "была недополучка из-за OOS",
+  dead_inventory:          (t) => `покрытие > ${t} дней`,
+  oos:                     () => "активные SKU (с движением за 30 дней)",
+  inactive:                () => "0 остаток + нет движений",
+  frequently_oos:          (t) => `OOS > ${t} дней за период`,
+  inventory_concentration: () => "топ-N держат 50% денег в остатках",
+  demand_concentration:    () => "топ-N дают 50% спроса",
 };
 
 function hasThreshold(filter: DashFilter): boolean {
-  return filter === "low_stock" || filter === "dead_inventory";
+  // Концентрационные фильтры порога не имеют (топ-N определяется RPC).
+  return filter === "low_stock" || filter === "dead_inventory" || filter === "frequently_oos";
 }
 
 function defaultThreshold(filter: DashFilter): number {
   if (filter === "low_stock") return 7;
   if (filter === "dead_inventory") return 180;
+  if (filter === "frequently_oos") return 15;
   return 0;
 }
 
@@ -72,6 +90,16 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
   const currentThreshold = threshold ?? defaultThreshold(filter);
   const description = FILTER_DESCRIPTIONS[filter](currentThreshold);
 
+  // Префикс для подписи рядом с input — зависит от фильтра.
+  const thresholdPrefix =
+    filter === "low_stock" ? "покрытие ≤" :
+    filter === "dead_inventory" ? "покрытие >" :
+    filter === "frequently_oos" ? "OOS >" :
+    "";
+
+  const thresholdSuffix =
+    filter === "frequently_oos" ? "дней за период" : "дней";
+
   return (
     <div className="rounded-xl border border-lime-deep/30 bg-lime-soft p-3">
       {/* Верхняя строка: метка фильтра */}
@@ -88,7 +116,7 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
       <div className="flex items-center gap-2 flex-wrap">
         {hasThreshold(filter) ? (
           <span className="inline-flex items-center gap-2 text-sm text-ink-soft">
-            {filter === "low_stock" ? "покрытие ≤" : "покрытие >"}
+            {thresholdPrefix}
             <input
               type="number"
               inputMode="numeric"
@@ -106,7 +134,7 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
               }}
               className="w-20 px-2 py-1.5 border border-line rounded bg-paper text-center font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
             />
-            дней
+            {thresholdSuffix}
             <InfoTooltip text="Измените порог чтобы пересчитать список. Нажмите Enter или кликните вне поля для применения." />
           </span>
         ) : (

@@ -241,9 +241,9 @@ export default async function DashboardOverview({ searchParams }: {
         />
       </div>
 
-      {/* ===== ПОЛОСА 4: 3 средних ===== */}
+      {/* ===== ПОЛОСА 4: 3 средних — теперь кликабельные (правка 4) ===== */}
       <div className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-2xl border border-line bg-paper p-4 sm:p-5">
+        <Link href={skusLink("inventory_concentration")} className="group rounded-2xl border border-line bg-paper p-4 sm:p-5 hover:border-lime-deep/40 hover:shadow-sm transition cursor-pointer">
           <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
             Концентрация остатков
             <InfoTooltip text="Сколько топ-SKU держат 50% всех денег в остатках. Малое число (например 5-10 из 1000) = большая концентрация: потерять 1-2 ключевых SKU = потерять половину склада." />
@@ -252,8 +252,11 @@ export default async function DashboardOverview({ searchParams }: {
             {storeMetrics?.inventory_concentration_50 ?? "—"} <span className="text-base text-ink-muted">SKU</span>
           </div>
           <div className="mt-1 text-xs text-ink-muted">дают 50% остатков по деньгам</div>
-        </div>
-        <div className="rounded-2xl border border-line bg-paper p-4 sm:p-5">
+          <div className="mt-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush opacity-0 group-hover:opacity-100 transition">
+            посмотреть →
+          </div>
+        </Link>
+        <Link href={skusLink("demand_concentration")} className="group rounded-2xl border border-line bg-paper p-4 sm:p-5 hover:border-lime-deep/40 hover:shadow-sm transition cursor-pointer">
           <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
             Концентрация спроса
             <InfoTooltip text="Сколько SKU создают 50% всего спроса (скорость × цена). Маленькое число = узкое горлышко: эти SKU критичны для выручки, дефицит по ним = крупные потери." />
@@ -262,8 +265,11 @@ export default async function DashboardOverview({ searchParams }: {
             {storeMetrics?.demand_concentration_50 ?? "—"} <span className="text-base text-ink-muted">SKU</span>
           </div>
           <div className="mt-1 text-xs text-ink-muted">дают 50% спроса</div>
-        </div>
-        <div className="rounded-2xl border border-orange/30 bg-orange/5 p-4 sm:p-5">
+          <div className="mt-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush opacity-0 group-hover:opacity-100 transition">
+            посмотреть →
+          </div>
+        </Link>
+        <Link href={skusLink("frequently_oos")} className="group rounded-2xl border border-orange/30 bg-orange/5 p-4 sm:p-5 hover:border-orange/50 hover:shadow-sm transition cursor-pointer">
           <div className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold flex items-center">
             Часто отсутствуют на складе
             <InfoTooltip text="Товары, которые более 15 дней за последний месяц отсутствовали на складе. Регулярный дефицит — повод проверить логистику или закупку." />
@@ -272,7 +278,10 @@ export default async function DashboardOverview({ searchParams }: {
             {storeMetrics?.frequently_oos_sku_count ?? "—"} <span className="text-base text-orange/70">SKU</span>
           </div>
           <div className="mt-1 text-xs text-orange/80">отсутствовали на складе более 15 дней за месяц</div>
-        </div>
+          <div className="mt-3 font-mono text-[10px] uppercase tracking-widest text-orange opacity-0 group-hover:opacity-100 transition">
+            посмотреть →
+          </div>
+        </Link>
       </div>
 
       {/* ===== ПОЛОСА 5: 3 скорости продаж ===== */}
