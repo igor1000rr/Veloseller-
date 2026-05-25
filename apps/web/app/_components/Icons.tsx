@@ -1,11 +1,32 @@
 // Все SVG иконки приложения — без unicode-символов, currentColor для наследования.
 export const Icons = {
+  // Лого Veloseller (правка 8, 25.05.2026): две зелёные горы образующие M.
+  // Раньше был чёрный квадрат с лаймовой ломаной — Александр прислал новый логотип
+  // в zip-архиве (исходный 1100×1100 PNG лежит в /public/logo.png для OG/email).
+  // Здесь чистый SVG-ремэйк — резкий на любом размере, мало байт, без сетевого запроса.
+  // Левая/правая горы — светло-зелёный градиент; их перекрытие нарисовано отдельным
+  // тёмным треугольником (имитирует прозрачное наложение оригинала).
+  // ID градиентов с префиксом vs-logo чтобы не конфликтовали с другими SVG в DOM;
+  // при множественном рендере браузер использует первый найденный <defs> с этим ID —
+  // содержимое идентичное, поэтому коллизий быть не может.
   Logo: ({ size = 28 }: { size?: number }) => (
-    <svg width={size} height={size} viewBox="0 0 28 28" fill="none">
-      <rect x="2" y="2" width="24" height="24" rx="7" fill="#0a0a08" />
-      <path d="M7 18 L11 10 L14 16 L17 9 L21 18" stroke="#84cc16" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" fill="none" />
-      <circle cx="11" cy="10" r="1.4" fill="#a3e635" />
-      <circle cx="17" cy="9" r="1.4" fill="#a3e635" />
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" aria-label="Veloseller">
+      <defs>
+        <linearGradient id="vs-logo-light" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#65a30d" />
+          <stop offset="1" stopColor="#bef264" />
+        </linearGradient>
+        <linearGradient id="vs-logo-dark" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stopColor="#365314" />
+          <stop offset="1" stopColor="#4d7c0f" />
+        </linearGradient>
+      </defs>
+      {/* Левая гора */}
+      <path d="M0 24 L10 5 L19 24 Z" fill="url(#vs-logo-light)" />
+      {/* Правая гора */}
+      <path d="M8 24 L18 5 L27 24 Z" fill="url(#vs-logo-light)" />
+      {/* Перекрытие — тёмный треугольник между вершинами */}
+      <path d="M8 24 L14 13 L19 24 Z" fill="url(#vs-logo-dark)" />
     </svg>
   ),
 
