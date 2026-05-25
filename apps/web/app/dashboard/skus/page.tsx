@@ -19,8 +19,6 @@ const SEGMENTS = [
   { value: "dead_inventory_risk", label: "Неликвид" },
 ];
 
-// Расширено (правка 4 — кликабельные блоки полосы 4 на /dashboard):
-// frequently_oos, inventory_concentration, demand_concentration.
 type DashboardFilter =
   | "low_stock"
   | "lost_revenue"
@@ -61,7 +59,7 @@ function parseDateOrNull(s: string | undefined): string | null {
 function defaultThresholdFor(filter: DashboardFilter): number | null {
   if (filter === "low_stock") return 7;
   if (filter === "dead_inventory") return 180;
-  if (filter === "frequently_oos") return 15; // дней OOS за период
+  if (filter === "frequently_oos") return 15;
   return null;
 }
 
@@ -118,8 +116,6 @@ export default async function SkusPage({ searchParams }: {
   const selected = await getSelectedWarehouse(supabase, user.id);
   const warehouseCreatedAt = selected?.created_at ?? null;
 
-  // RPC для min/max в placeholder'ах фильтров.
-  // Отдельный запрос — агрегация на PG вместо тяжёлого SELECT всех SKU в JS.
   const { data: rangesRows } = await supabase.rpc("get_skus_filter_ranges", {
     p_seller_id: user.id,
     p_connection_id: selected?.id ?? null,
@@ -135,10 +131,7 @@ export default async function SkusPage({ searchParams }: {
     lostMax: Number(rangesRaw?.lost_max ?? 0),
   };
 
-  // ===== Концентрационные фильтры — отдельная RPC, возвращающая product_ids =====
-  // RPC применена ранее: get_concentration_product_ids(seller_id, connection_id, kind).
-  // kind ∈ {'inventory','demand'}. Возвращает топ-N SKU, которые держат >=50%
-  // соответствующей величины (стоимость остатков или demand_weight).
+  // Концентрационные фильтры — RPC возвращает топ-N product_ids держащих 50% value.
   let concentrationIds: string[] | null = null;
   if (dashFilter === "inventory_concentration" || dashFilter === "demand_concentration") {
     const kind = dashFilter === "inventory_concentration" ? "inventory" : "demand";
@@ -186,12 +179,8 @@ export default async function SkusPage({ searchParams }: {
       .eq("tvelo_metrics.current_stock", 0)
       .eq("tvelo_metrics.adjusted_velocity", 0);
   } else if (dashFilter === "frequently_oos") {
-    // OOS > N дней за период (по умолчанию 15)
     productsQuery = productsQuery.gt("tvelo_metrics.stockout_days", effectiveThreshold!);
   } else if (dashFilter === "inventory_concentration" || dashFilter === "demand_concentration") {
-    // Фильтр по списку product_ids из RPC. Защита от пустого списка —
-    // .in([]) в supabase-js возвращает все строки, поэтому при пустом массиве
-    // подставляем заведомо несуществующий UUID, чтобы вернулся пустой результат.
     const ids = concentrationIds ?? [];
     if (ids.length === 0) {
       productsQuery = productsQuery.in("product_id", ["00000000-0000-0000-0000-000000000000"]);
@@ -266,13 +255,39 @@ export default async function SkusPage({ searchParams }: {
 
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
 
+  // Экспорт — передаём ВСЕ текущие фильтры в endpoint (правка 6).
+  // Раньше экспорт выгружал весь магазин — Александр верно заметил что это
+  // делало отчёт бесполезным для работы — тысячи строк, нужные теряются.
+  // Теперь: что видишь в таблице — то в файле (без пагинации 50/стр).
   const exportParams = new URLSearchParams();
   exportParams.set("period", String(periodDays));
   if (selected) exportParams.set("warehouse_id", selected.id);
+  if (segmentFilter) exportParams.set("segment", segmentFilter);
+  if (dashFilter) exportParams.set("filter", dashFilter);
+  if (customThreshold !== null) exportParams.set("threshold", String(customThreshold));
+  if (includeInactive && !dashFilter) exportParams.set("include_inactive", "1");
+  if (search) exportParams.set("q", search);
+  if (stockMin !== null) exportParams.set("stock_min", String(stockMin));
+  if (stockMax !== null) exportParams.set("stock_max", String(stockMax));
+  if (oosMin !== null) exportParams.set("oos_min", String(oosMin));
+  if (oosMax !== null) exportParams.set("oos_max", String(oosMax));
+  if (lostMin !== null) exportParams.set("lost_min", String(lostMin));
+  if (lostMax !== null) exportParams.set("lost_max", String(lostMax));
+  if (dateFrom) exportParams.set("date_from", dateFrom);
+  if (dateTo) exportParams.set("date_to", dateTo);
   const exportQS = exportParams.toString();
 
-  // Строит query string на основе текущих параметров с возможностью переопределить.
-  // Передай null чтобы удалить параметр, undefined — оставить как есть.
+  // Подсчёт активных фильтров для hint'а в кнопках экспорта.
+  const activeFilterCount =
+    (dashFilter ? 1 : 0) +
+    (segmentFilter ? 1 : 0) +
+    (search ? 1 : 0) +
+    ((stockMin !== null || stockMax !== null) ? 1 : 0) +
+    ((oosMin !== null || oosMax !== null) ? 1 : 0) +
+    ((lostMin !== null || lostMax !== null) ? 1 : 0) +
+    ((dateFrom || dateTo) ? 1 : 0) +
+    (includeInactive && !dashFilter ? 1 : 0);
+
   const buildQs = (overrides: Record<string, string | number | null> = {}) => {
     const current: Record<string, string> = {};
 
@@ -308,6 +323,10 @@ export default async function SkusPage({ searchParams }: {
     return params.toString();
   };
 
+  const exportTitleSuffix = activeFilterCount > 0
+    ? ` (с фильтрами: ${activeFilterCount})`
+    : "";
+
   return (
     <div className="space-y-6">
       <header className="flex items-end justify-between gap-3 sm:gap-4 flex-wrap">
@@ -329,12 +348,14 @@ export default async function SkusPage({ searchParams }: {
         </div>
         <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
           <ColumnsPicker />
-          <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1">
+          <div className={`inline-flex gap-1 rounded-lg border bg-paper p-1 ${
+            activeFilterCount > 0 ? "border-lime-deep/40" : "border-line"
+          }`}>
             <a
               href={`/api/export/metrics?${exportQS}&format=excel`}
               download
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition min-h-[32px]"
-              title="Скачать метрики в Excel"
+              title={`Скачать метрики в Excel${exportTitleSuffix}`}
             >
               <Icons.ArrowRight size={11} /> Excel
             </a>
@@ -342,11 +363,16 @@ export default async function SkusPage({ searchParams }: {
               href={`/api/export/metrics?${exportQS}&format=csv`}
               download
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition border-l border-line min-h-[32px]"
-              title="Скачать метрики в CSV"
+              title={`Скачать метрики в CSV${exportTitleSuffix}`}
             >
               CSV
             </a>
           </div>
+          {activeFilterCount > 0 && (
+            <span className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold" title="Экспорт уважает выбранные фильтры">
+              с фильтрами
+            </span>
+          )}
           <form className="flex items-center gap-2 text-sm">
             <label className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Закупка на</label>
             <input
@@ -399,8 +425,6 @@ export default async function SkusPage({ searchParams }: {
         />
       )}
 
-      {/* Чекбокс «Включить SKU без активности» переехал внутрь SkusFilters
-          (как на paint-скрине Александра — рядом с полем «Период»). */}
       <SkusFilters
         warehouseCreatedAt={warehouseCreatedAt}
         ranges={filterRanges}
@@ -445,7 +469,6 @@ export default async function SkusPage({ searchParams }: {
                 </span>
               </Th>
               <Th col="health" align="right">Health</Th>
-              {/* ПОТЕРЯННАЯ ВЫРУЧКА → ПВ (правка Александра): освобождает место под заметки. */}
               <Th col="lost_revenue" align="right">
                 <span className="inline-flex items-center">
                   ПВ
