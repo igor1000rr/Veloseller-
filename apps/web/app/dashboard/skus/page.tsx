@@ -75,6 +75,19 @@ function daysAgo(n: number): string {
   return isoDate(d);
 }
 
+/** Строка из RPC get_skus_period_metrics — реальные метрики за предпраздничный период. */
+type PreHolidayRow = {
+  product_id: string;
+  velocity: number;
+  in_stock_days: number;
+  stockout_days: number;
+  sales_units: number;
+  current_stock: number;
+  current_price: number | null;
+  coverage_days: number | null;
+  lost_revenue: number;
+};
+
 export default async function SkusPage({ searchParams }: {
   searchParams: Promise<{
     page?: string;
@@ -119,14 +132,16 @@ export default async function SkusPage({ searchParams }: {
   const dateFrom = parseDateOrNull(sp.date_from);
   const dateTo = parseDateOrNull(sp.date_to);
 
-  // Дефолты дат в фильтре (Игорь 27.05.2026):
+  // Дефолты дат в фильтре + предпраздничный режим (Игорь 27.05.2026):
   //   1. Если юзер явно выбрал ?period=N в URL — используем его (today - N .. today).
+  //      Предпраздничный режим выключен.
   //   2. Иначе проверяем предпраздничное окно (18.12-31.12 — НГ, 07.02-13.02 — 14.02,
-  //      16.02-22.02 — 23.02, 01.03-07.03 — 8.03). Если сегодня внутри —
-  //      проставляем предпраздничный диапазон [holiday-N, today].
-  //   3. Иначе — обычные 30 дней.
-  // Расчёт velocity всё равно по periodDays (в БД метрики только 7/30/90), дефолты
-  // — визуальная подсказка для селлера.
+  //      16.02-22.02 — 23.02, 01.03-07.03 — 8.03). Если today внутри:
+  //        - дефолты в фильтре = [windowStart, today]
+  //        - реальный расчёт velocity/stockout/sales/coverage/lost_revenue идёт
+  //          через RPC get_skus_period_metrics за этот же диапазон (override)
+  //        - OOS-колонка показывает daysBefore (14 или 7) вместо periodDays
+  //   3. Иначе — обычные today-30..today, расчёт по tvelo_metrics.
   const today = new Date();
   const preHoliday = userExplicitPeriod ? null : getPreHolidayWindow(today);
   let defaultDateTo: string;
@@ -270,8 +285,38 @@ export default async function SkusPage({ searchParams }: {
     return { ...p, tvelo_metrics: matchedMetric ? [matchedMetric] : [] };
   });
 
+  // ПРЕДПРАЗДНИЧНЫЙ OVERRIDE: реальный расчёт за preHoliday.windowStart..today
+  // через RPC get_skus_period_metrics. Перезаписываем velocity/stockout/sales/
+  // coverage/lost_revenue/current_stock/current_price для видимых SKU.
+  let preHolidayMetrics: Map<string, PreHolidayRow> | null = null;
+  if (preHoliday && filtered.length > 0) {
+    const { data: rpcRows } = await supabase.rpc("get_skus_period_metrics", {
+      p_seller_id: user.id,
+      p_connection_id: selected?.id ?? null,
+      p_period_start: preHoliday.windowStart,
+      p_period_end: defaultDateTo,
+      p_product_ids: filtered.map((p: any) => p.product_id),
+    });
+    preHolidayMetrics = new Map();
+    for (const r of (rpcRows ?? []) as any[]) {
+      preHolidayMetrics.set(r.product_id, {
+        product_id: r.product_id,
+        velocity: Number(r.velocity ?? 0),
+        in_stock_days: Number(r.in_stock_days ?? 0),
+        stockout_days: Number(r.stockout_days ?? 0),
+        sales_units: Number(r.sales_units ?? 0),
+        current_stock: Number(r.current_stock ?? 0),
+        current_price: r.current_price != null ? Number(r.current_price) : null,
+        coverage_days: r.coverage_days != null ? Number(r.coverage_days) : null,
+        lost_revenue: Number(r.lost_revenue ?? 0),
+      });
+    }
+  }
+
+  // salesByProduct — для НЕ-предпраздничного режима (обычный расчёт по tvelo_metrics
+  // period). В preHoliday режиме salesUnits берётся из preHolidayMetrics.
   const salesByProduct: Record<string, number> = {};
-  if (filtered.length > 0) {
+  if (!preHolidayMetrics && filtered.length > 0) {
     const firstM = filtered[0].tvelo_metrics?.[0];
     if (firstM?.period_start && firstM?.period_end) {
       const { data: salesEvents } = await supabase
@@ -290,13 +335,18 @@ export default async function SkusPage({ searchParams }: {
     }
   }
 
+  // lostByProduct — с учётом override для preHoliday режима.
   const lostByProduct: Record<string, number> = {};
   for (const p of filtered) {
-    const m = p.tvelo_metrics?.[0];
-    const lost = m
-      ? Number(m.adjusted_velocity ?? 0) * Number(m.stockout_days ?? 0) * Number(m.current_price ?? 0)
-      : 0;
-    lostByProduct[p.product_id] = lost;
+    const override = preHolidayMetrics?.get(p.product_id);
+    if (override) {
+      lostByProduct[p.product_id] = override.lost_revenue;
+    } else {
+      const m = p.tvelo_metrics?.[0];
+      lostByProduct[p.product_id] = m
+        ? Number(m.adjusted_velocity ?? 0) * Number(m.stockout_days ?? 0) * Number(m.current_price ?? 0)
+        : 0;
+    }
   }
   if (lostFilterActiveButPostProcess) {
     filtered = filtered.filter((p: any) => {
@@ -371,6 +421,10 @@ export default async function SkusPage({ searchParams }: {
     }
     return params.toString();
   };
+
+  // Эффективная длина периода для UI колонки OOS — в preHoliday показываем
+  // daysBefore (14 или 7), иначе обычный periodDays.
+  const displayPeriodDays = preHoliday ? preHoliday.daysBefore : periodDays;
 
   return (
     <div className="space-y-6">
@@ -505,7 +559,7 @@ export default async function SkusPage({ searchParams }: {
               <Th col="tvelo" align="right">TVelo</Th>
               <Th col="trend" align="center">Тренд</Th>
               <Th col="coverage" align="right">Покрытие</Th>
-              <Th col="oos" align="right">OOS ({periodDays}д)</Th>
+              <Th col="oos" align="right">OOS ({displayPeriodDays}д)</Th>
               <Th col="sales" align="right">
                 <span className="inline-flex items-center">
                   Продажи
@@ -532,9 +586,27 @@ export default async function SkusPage({ searchParams }: {
           <tbody className="divide-y divide-line">
             {filtered.map((p: any) => {
               const m = (p.tvelo_metrics?.[0] ?? null) as any;
-              const adjVel = m?.adjusted_velocity != null ? Number(m.adjusted_velocity) : 0;
-              const stockoutDays = m?.stockout_days != null ? Number(m.stockout_days) : 0;
-              const salesUnits = salesByProduct[p.product_id] ?? 0;
+              const override = preHolidayMetrics?.get(p.product_id) ?? null;
+
+              // Эффективные значения: override (preHoliday) > tvelo_metrics > 0
+              const adjVel = override
+                ? override.velocity
+                : (m?.adjusted_velocity != null ? Number(m.adjusted_velocity) : 0);
+              const stockoutDays = override
+                ? override.stockout_days
+                : (m?.stockout_days != null ? Number(m.stockout_days) : 0);
+              const salesUnits = override
+                ? override.sales_units
+                : (salesByProduct[p.product_id] ?? 0);
+              const currentStock = override
+                ? override.current_stock
+                : (m?.current_stock ?? null);
+              const currentPrice = override
+                ? override.current_price
+                : (m?.current_price ?? null);
+              const coverageDays = override
+                ? override.coverage_days
+                : (m?.coverage_days != null ? Number(m.coverage_days) : null);
               const lostRev = lostByProduct[p.product_id] ?? 0;
               const reorderQty = Math.round(adjVel * reorderDays);
               const isUnderestimated = m?.underestimated_sku;
@@ -552,14 +624,14 @@ export default async function SkusPage({ searchParams }: {
                       <span className="font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">недооценён</span>
                     )}
                   </td>
-                  <td className="col-skucol-stock px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{m?.current_stock ?? "—"}</td>
-                  <td className="col-skucol-price px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{m?.current_price ?? "—"}</td>
+                  <td className="col-skucol-stock px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{currentStock ?? "—"}</td>
+                  <td className="col-skucol-price px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{currentPrice ?? "—"}</td>
                   <td className="col-skucol-tvelo px-3 sm:px-4 py-3 text-right font-semibold tabular text-ink">
                     {adjVel > 0 ? adjVel.toFixed(2) : "—"}
                   </td>
                   <td className="col-skucol-trend px-3 sm:px-4 py-3"><VelocitySparkline points={sparkData[p.product_id] ?? []} /></td>
                   <td className="col-skucol-coverage px-3 sm:px-4 py-3 text-right tabular text-ink-soft">
-                    {m?.coverage_days != null ? `${Number(m.coverage_days).toFixed(0)} д.` : "—"}
+                    {coverageDays != null ? `${coverageDays.toFixed(0)} д.` : "—"}
                   </td>
                   <td className="col-skucol-oos px-3 sm:px-4 py-3 text-right tabular" title="Дни out-of-stock за выбранный период">
                     {stockoutDays > 0 ? (
