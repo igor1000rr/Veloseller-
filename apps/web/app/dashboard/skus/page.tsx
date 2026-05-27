@@ -5,6 +5,7 @@ import { Icons } from "../../_components/Icons";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 import { getSelectedWarehouse, warehouseKindLabel } from "@/lib/warehouse";
 import { SkusFilters, type FilterRanges } from "./SkusFilters";
+import { SearchInput } from "./SearchInput";
 import { NotesCell } from "./NotesCell";
 import { DashFilterChip } from "./DashFilterChip";
 import { ColumnsPicker } from "./ColumnsPicker";
@@ -131,7 +132,6 @@ export default async function SkusPage({ searchParams }: {
     lostMax: Number(rangesRaw?.lost_max ?? 0),
   };
 
-  // Концентрационные фильтры — RPC возвращает топ-N product_ids держащих 50% value.
   let concentrationIds: string[] | null = null;
   if (dashFilter === "inventory_concentration" || dashFilter === "demand_concentration") {
     const kind = dashFilter === "inventory_concentration" ? "inventory" : "demand";
@@ -236,8 +236,7 @@ export default async function SkusPage({ searchParams }: {
     return { ...p, tvelo_metrics: matchedMetric ? [matchedMetric] : [] };
   });
 
-  // Реальные продажи за период (Александр 27.05.2026) — sum sales_like deltas.
-  // НЕ adjusted_velocity × in_stock_days (была реконструкция с virtual единицами).
+  // Реальные продажи за период — sum sales_like deltas (Александр 27.05.2026).
   const salesByProduct: Record<string, number> = {};
   if (filtered.length > 0) {
     const firstM = filtered[0].tvelo_metrics?.[0];
@@ -340,12 +339,9 @@ export default async function SkusPage({ searchParams }: {
     return params.toString();
   };
 
-  const exportTitleSuffix = activeFilterCount > 0
-    ? ` (с фильтрами: ${activeFilterCount})`
-    : "";
-
   return (
     <div className="space-y-6">
+      {/* Header: только title + название склада + «Закупка на N дней» форма справа */}
       <header className="flex items-end justify-between gap-3 sm:gap-4 flex-wrap">
         <div className="min-w-0">
           <div className="inline-flex items-center gap-2 mb-2">
@@ -363,74 +359,21 @@ export default async function SkusPage({ searchParams }: {
             </div>
           )}
         </div>
-        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          <ColumnsPicker />
-          <div className={`inline-flex gap-1 rounded-lg border bg-paper p-1 ${
-            activeFilterCount > 0 ? "border-lime-deep/40" : "border-line"
-          }`}>
-            <a
-              href={`/api/export/metrics?${exportQS}&format=excel`}
-              download
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition min-h-[32px]"
-              title={`Скачать метрики в Excel${exportTitleSuffix}`}
-            >
-              <Icons.ArrowRight size={11} /> Excel
-            </a>
-            <a
-              href={`/api/export/metrics?${exportQS}&format=csv`}
-              download
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition border-l border-line min-h-[32px]"
-              title={`Скачать метрики в CSV${exportTitleSuffix}`}
-            >
-              CSV
-            </a>
-          </div>
-          {activeFilterCount > 0 && (
-            <span className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold" title="Экспорт уважает выбранные фильтры">
-              с фильтрами
-            </span>
-          )}
-          <form className="flex items-center gap-2 text-sm">
-            <label className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Закупка на</label>
-            <input
-              type="number" name="reorder_days" defaultValue={reorderDays} min={1} max={365}
-              inputMode="numeric"
-              className="w-16 sm:w-20 px-2 py-1.5 border border-line rounded-lg text-center bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
-            />
-            <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">дней</span>
-            {segmentFilter && <input type="hidden" name="segment" value={segmentFilter} />}
-            {dashFilter && <input type="hidden" name="filter" value={dashFilter} />}
-            {customThreshold !== null && <input type="hidden" name="threshold" value={customThreshold} />}
-            {periodDays !== 30 && <input type="hidden" name="period" value={periodDays} />}
-            {search && <input type="hidden" name="q" value={search} />}
-            <button type="submit" className="px-3 py-1.5 text-xs bg-ink text-paper rounded-lg hover:bg-ink-soft transition min-h-[36px]">→</button>
-          </form>
-          <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1 overflow-x-auto max-w-full">
-            {SEGMENTS.map(s => {
-              const params = new URLSearchParams();
-              if (s.value) params.set("segment", s.value);
-              if (reorderDays !== 30) params.set("reorder_days", String(reorderDays));
-              if (periodDays !== 30) params.set("period", String(periodDays));
-              if (dashFilter) params.set("filter", dashFilter);
-              if (customThreshold !== null) params.set("threshold", String(customThreshold));
-              if (includeInactive && !dashFilter) params.set("include_inactive", "1");
-              if (search) params.set("q", search);
-              const qs = params.toString();
-              const isActive = segmentFilter === s.value;
-              return (
-                <Link
-                  key={s.value}
-                  href={`/dashboard/skus${qs ? `?${qs}` : ""}` as any}
-                  className={`text-xs px-3 py-1.5 rounded-md font-medium transition whitespace-nowrap shrink-0 ${
-                    isActive ? "bg-ink text-paper" : "text-ink-muted hover:text-ink hover:bg-bg-soft"
-                  }`}
-                >
-                  {s.label}
-                </Link>
-              );
-            })}
-          </div>
-        </div>
+        <form className="flex items-center gap-2 text-sm">
+          <label className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Закупка на</label>
+          <input
+            type="number" name="reorder_days" defaultValue={reorderDays} min={1} max={365}
+            inputMode="numeric"
+            className="w-16 sm:w-20 px-2 py-1.5 border border-line rounded-lg text-center bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
+          />
+          <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">дней</span>
+          {segmentFilter && <input type="hidden" name="segment" value={segmentFilter} />}
+          {dashFilter && <input type="hidden" name="filter" value={dashFilter} />}
+          {customThreshold !== null && <input type="hidden" name="threshold" value={customThreshold} />}
+          {periodDays !== 30 && <input type="hidden" name="period" value={periodDays} />}
+          {search && <input type="hidden" name="q" value={search} />}
+          <button type="submit" className="px-3 py-1.5 text-xs bg-ink text-paper rounded-lg hover:bg-ink-soft transition min-h-[36px]">→</button>
+        </form>
       </header>
 
       {dashFilter && (
@@ -442,12 +385,66 @@ export default async function SkusPage({ searchParams }: {
         />
       )}
 
+      {/* Серая плашка фильтров: Период + чекбокс + 3 ranges */}
       <SkusFilters
         warehouseCreatedAt={warehouseCreatedAt}
         ranges={filterRanges}
         includeInactive={includeInactive}
         showInactiveToggle={!dashFilter}
       />
+
+      {/* Строка под фильтрами: поиск + сегменты + ColumnsPicker + Excel/CSV (paint-скрин 27.05.2026) */}
+      <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+        <SearchInput />
+        <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1 overflow-x-auto max-w-full">
+          {SEGMENTS.map(s => {
+            const params = new URLSearchParams();
+            if (s.value) params.set("segment", s.value);
+            if (reorderDays !== 30) params.set("reorder_days", String(reorderDays));
+            if (periodDays !== 30) params.set("period", String(periodDays));
+            if (dashFilter) params.set("filter", dashFilter);
+            if (customThreshold !== null) params.set("threshold", String(customThreshold));
+            if (includeInactive && !dashFilter) params.set("include_inactive", "1");
+            if (search) params.set("q", search);
+            const qs = params.toString();
+            const isActive = segmentFilter === s.value;
+            return (
+              <Link
+                key={s.value}
+                href={`/dashboard/skus${qs ? `?${qs}` : ""}` as any}
+                className={`text-xs px-3 py-1.5 rounded-md font-medium transition whitespace-nowrap shrink-0 ${
+                  isActive ? "bg-ink text-paper" : "text-ink-muted hover:text-ink hover:bg-bg-soft"
+                }`}
+              >
+                {s.label}
+              </Link>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-2 ml-auto">
+          <ColumnsPicker />
+          <div className={`inline-flex gap-1 rounded-lg border bg-paper p-1 ${
+            activeFilterCount > 0 ? "border-lime-deep/40" : "border-line"
+          }`}>
+            <a
+              href={`/api/export/metrics?${exportQS}&format=excel`}
+              download
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition min-h-[32px]"
+              title={activeFilterCount > 0 ? `Скачать метрики в Excel (с фильтрами: ${activeFilterCount})` : "Скачать метрики в Excel"}
+            >
+              <Icons.ArrowRight size={11} /> Excel
+            </a>
+            <a
+              href={`/api/export/metrics?${exportQS}&format=csv`}
+              download
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition border-l border-line min-h-[32px]"
+              title={activeFilterCount > 0 ? `Скачать метрики в CSV (с фильтрами: ${activeFilterCount})` : "Скачать метрики в CSV"}
+            >
+              CSV
+            </a>
+          </div>
+        </div>
+      </div>
 
       {!selected && (
         <div className="rounded-xl border border-orange/30 bg-orange/5 p-4 flex items-start gap-3">
