@@ -19,22 +19,32 @@ export type FilterRanges = {
  *   Подсказки: «данные с DD.MM.YYYY» + «Произвольный диапазон поверх периода...»
  *   Строка 2: 3 RangeField в линию — Наличие / Дней OOS / Потерянная выручка, ₽
  *
- * Поиск вынесен в SearchInput — теперь отдельный компонент в строке с
- * сегментами/экспортом (порядок элементов по скрину Александра).
+ * Поля «Период» ВСЕГДА заполнены датами (Игорь 27.05.2026 вечер):
+ *   - Если в URL есть date_from/date_to — берём их (юзер сам выбрал)
+ *   - Иначе — defaultDateFrom/defaultDateTo (вычислены на сервере из periodDays:
+ *     date_to = today, date_from = today - periodDays)
+ *   - Селлер сразу видит за какой период считается velocity
+ *   - При переходе с /dashboard?period=7 — defaults будут today-7 .. today
  *
- * Чекбокс скрывается при активном дашборд-фильтре (showInactiveToggle=false) —
- * там своя логика отображения inactive SKU.
+ * Когда юзер вручную меняет дату — пушим в URL (это уже фильтр на period_end).
+ * Когда стирает поле — возвращаемся к defaults (по useEffect).
  */
 export function SkusFilters({
   warehouseCreatedAt,
   ranges,
   includeInactive,
   showInactiveToggle,
+  defaultDateFrom,
+  defaultDateTo,
 }: {
   warehouseCreatedAt: string | null;
   ranges: FilterRanges;
   includeInactive: boolean;
   showInactiveToggle: boolean;
+  /** YYYY-MM-DD — fallback если в URL нет date_from. */
+  defaultDateFrom: string;
+  /** YYYY-MM-DD — fallback если в URL нет date_to. */
+  defaultDateTo: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -46,8 +56,8 @@ export function SkusFilters({
   const [oosMax, setOosMax] = useState(sp.get("oos_max") ?? "");
   const [lostMin, setLostMin] = useState(sp.get("lost_min") ?? "");
   const [lostMax, setLostMax] = useState(sp.get("lost_max") ?? "");
-  const [dateFrom, setDateFrom] = useState(sp.get("date_from") ?? "");
-  const [dateTo, setDateTo] = useState(sp.get("date_to") ?? "");
+  const [dateFrom, setDateFrom] = useState(sp.get("date_from") || defaultDateFrom);
+  const [dateTo, setDateTo] = useState(sp.get("date_to") || defaultDateTo);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -74,6 +84,9 @@ export function SkusFilters({
     if (debounceRef.current) clearTimeout(debounceRef.current);
   }, []);
 
+  // Синхронизация при back/forward или внешнем сбросе URL.
+  // Для date_from/date_to — если URL пустой, возвращаемся к defaults
+  // (а не к ""). Так инпуты всегда заполнены датами.
   useEffect(() => {
     setStockMin(sp.get("stock_min") ?? "");
     setStockMax(sp.get("stock_max") ?? "");
@@ -81,9 +94,9 @@ export function SkusFilters({
     setOosMax(sp.get("oos_max") ?? "");
     setLostMin(sp.get("lost_min") ?? "");
     setLostMax(sp.get("lost_max") ?? "");
-    setDateFrom(sp.get("date_from") ?? "");
-    setDateTo(sp.get("date_to") ?? "");
-  }, [sp]);
+    setDateFrom(sp.get("date_from") || defaultDateFrom);
+    setDateTo(sp.get("date_to") || defaultDateTo);
+  }, [sp, defaultDateFrom, defaultDateTo]);
 
   const minDate = warehouseCreatedAt ? warehouseCreatedAt.slice(0, 10) : undefined;
   const today = new Date().toISOString().slice(0, 10);
@@ -140,7 +153,7 @@ export function SkusFilters({
         </p>
       )}
       <p className="text-[11px] text-ink-hush leading-relaxed">
-        Произвольный диапазон поверх периода 7/30/90 дней — фильтрует SKU по дате последнего пересчёта.
+        Период расчёта скорости продаж. По умолчанию — последние 30 дней. Меняй период в /Обзор (7/30/90 дней) или выбери произвольный диапазон вручную.
       </p>
 
       {/* Строка 2: 3 range-фильтра в одну линию */}
