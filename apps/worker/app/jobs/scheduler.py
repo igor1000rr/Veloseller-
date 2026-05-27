@@ -6,6 +6,7 @@
 - daily-reports в 09:00 UTC (этап 2 алерты→отчёты — диспетчер по day_of_week)
 - snapshots retention в 04:00 UTC (БАГ 89)
 - reset stuck syncing каждые 10 минут (БАГ 90)
+- radar-poll в 06:00 UTC ежедневно (Wordstat poll для approved брендов + suggest)
 
 Старые джобы daily-digest и weekly-report удалены — их функциял
 выполняет универсальный daily-reports через notification_subscriptions.
@@ -141,6 +142,25 @@ def _job_daily_reports() -> None:
         logger.exception("daily-reports scheduler job failed")
 
 
+def _job_radar_poll() -> None:
+    """Каждый день 06:00 UTC (= 09:00 МСК) — опрос Wordstat + suggest для Radar.
+
+    Cвоё расписание (не вместе с recalc-all чтобы не блокировать пересчёт
+    метрик селлеров на ~10-30 минут при опросе нескольких сотен брендов).
+
+    Конкретный бренд опрашивается не чаще раза в 3 дня (см. _WORDSTAT_POLL_INTERVAL_HOURS
+    в jobs/radar.py) — даже если scheduler сработает 3 раза за 3 дня, только
+    каждый третий вызов реально дёрнет Wordstat. Это умышленно: даёт buffer
+    на случай если cron пропустит запуск.
+    """
+    try:
+        from app.jobs.radar import poll_all_sellers
+        result = poll_all_sellers()
+        logger.info("Cron radar-poll done: %s", result)
+    except Exception:
+        logger.exception("radar-poll scheduler job failed")
+
+
 def _job_snapshots_retention() -> None:
     """БАГ 89: удаляем inventory_snapshots старше 180 дней."""
     try:
@@ -217,6 +237,16 @@ def start_scheduler() -> None:
         _job_snapshots_retention,
         CronTrigger(hour=4, minute=0),
         id="snapshots-retention",
+        replace_existing=True,
+    )
+    # Radar: каждый день 06:00 UTC (= 09:00 МСК). Конкретные бренды дёргают
+    # Wordstat не чаще раза в 3 дня (логика в jobs/radar.py). Если опрос
+    # одного селлера занимает несколько минут — это не блокирует параллельно
+    # работающий recalc-all (он раз в час, разные интервалы).
+    _scheduler.add_job(
+        _job_radar_poll,
+        CronTrigger(hour=6, minute=0),
+        id="radar-poll",
         replace_existing=True,
     )
     # Этап 2 «алерты → отчёты»: ежедневный диспетчер. Отбирает подписки
