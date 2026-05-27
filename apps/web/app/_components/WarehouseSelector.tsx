@@ -23,7 +23,6 @@ export default function WarehouseSelector({
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
 
-  // Базовые классы видимости: либо всегда, либо на sm+.
   const visibilityCls = forceVisible ? "inline-flex w-full" : "hidden sm:inline-flex";
 
   if (warehouses.length === 0) {
@@ -55,7 +54,7 @@ export default function WarehouseSelector({
           router.refresh();
         }
       } catch {
-        // тихий fail; пользователь увидит что не переключилось
+        // тихий fail
       }
     });
   }
@@ -65,7 +64,7 @@ export default function WarehouseSelector({
       <button
         onClick={() => hasMultiple && setOpen(!open)}
         disabled={!hasMultiple || pending}
-        className={`${visibilityCls} ${forceVisible ? "justify-between" : ""} items-center gap-1.5 px-2.5 py-1.5 rounded-md border transition min-h-[32px] ${
+        className={`${visibilityCls} ${forceVisible ? "justify-between" : ""} items-center gap-1.5 px-2 py-1.5 rounded-md border transition min-h-[32px] ${
           hasMultiple
             ? "border-line bg-paper text-ink hover:border-lime-deep/40 cursor-pointer"
             : "border-line bg-paper text-ink cursor-default"
@@ -74,7 +73,9 @@ export default function WarehouseSelector({
       >
         <span className="flex items-center gap-1.5 min-w-0">
           <span className="size-1.5 rounded-full bg-lime-deep shrink-0" />
-          <span className={`${forceVisible ? "" : "max-w-[160px]"} truncate text-xs font-medium`}>{selected.name}</span>
+          {/* Имя склада: на узких экранах max-w больше чтобы не обрезалось до "T...".
+              На xl+ (где появляется навигация) сжимаем чтобы не отвлекать. */}
+          <span className={`${forceVisible ? "" : "max-w-[200px] xl:max-w-[140px]"} truncate text-xs font-medium`}>{selected.name}</span>
           <span className="font-mono text-[9px] text-ink-hush uppercase shrink-0">
             {warehouseKindLabel(selected.warehouse_kind)}
           </span>

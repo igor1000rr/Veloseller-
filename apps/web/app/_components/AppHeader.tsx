@@ -48,11 +48,10 @@ export default function AppHeader({
 
   useEffect(() => { setOpen(false); }, [pathname]);
 
-  // "Отчёты" (было "Уведомления"): переход на модель weekly Excel-отчётов.
-  // URL /dashboard/alerts оставлен — это технический адрес из базы alerts.
-  // "Radar" (25.05.2026): новый модуль мониторинга появления новинок в
-  // ассортименте брендов. Wordstat + WB/OZON suggest. С badge "new"
-  // первые 30 дней после релиза чтобы привлечь внимание существующих юзеров.
+  // Breakpoint navigation:
+  // - <xl (1280px): бургер меню. На MacBook 13"/14" (1280-1440) navigation из 9 ссылок +
+  //   правый блок (selector + PRO + email + ADMIN + logout) не помещаются, всё сжимается и
+  //   имя склада обрезается до "T...". С xl+ показываем развёрнутую навигацию.
   const links = variant === "dashboard"
     ? [
         { href: "/dashboard",           label: "Обзор" },
@@ -79,8 +78,8 @@ export default function AppHeader({
 
   return (
     <header className="sticky top-0 z-30 backdrop-blur-md bg-paper/90 border-b border-line" style={{ backgroundColor: "rgba(255,255,255,0.9)" }}>
-      <div className="w-full px-4 md:px-8 lg:px-12 py-3 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-6 min-w-0">
+      <div className="w-full px-4 md:px-6 lg:px-8 py-3 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-4 xl:gap-5 min-w-0">
           <Link href={variant === "admin" ? "/admin" : "/dashboard"} className="flex items-center gap-2.5 shrink-0">
             <Icons.Logo size={26} />
             <span className="font-display text-base font-medium tracking-tight">
@@ -92,14 +91,15 @@ export default function AppHeader({
               </span>
             )}
           </Link>
-          <nav className="hidden lg:flex items-center gap-1 text-sm">
+          {/* Навигация: xl+ (≥1280px). Ниже — бургер чтобы всё не сжималось. */}
+          <nav className="hidden xl:flex items-center gap-0.5 text-sm">
             {links.map((l: any) => {
               const active = pathname === l.href || (l.href !== "/dashboard" && l.href !== "/admin" && pathname?.startsWith(l.href));
               return (
                 <Link
                   key={l.href}
                   href={l.href as any}
-                  className={`relative px-3 py-1.5 rounded-md transition ${
+                  className={`relative px-2.5 py-1.5 rounded-md transition ${
                     active
                       ? "text-ink bg-bg-soft"
                       : "text-ink-muted hover:text-ink hover:bg-bg-soft"
@@ -122,7 +122,7 @@ export default function AppHeader({
           </nav>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           {variant === "dashboard" && warehouses && (
             <div className="hidden sm:block">
               <WarehouseSelector warehouses={warehouses} selectedId={selectedWarehouseId ?? null} />
@@ -133,37 +133,39 @@ export default function AppHeader({
             <Link
               href={"/billing" as any}
               title={`Текущий тариф: ${planLabel}`}
-              className={`hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border ${planClass} hover:opacity-80 transition`}
+              className={`hidden xl:inline-flex items-center gap-1.5 px-2 py-1 rounded-md border ${planClass} hover:opacity-80 transition`}
             >
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] font-semibold">{planLabel}</span>
+              <span className="font-mono text-[10px] uppercase tracking-[0.15em] font-semibold">{planLabel}</span>
             </Link>
           )}
 
-          <span className="hidden md:inline font-mono text-xs text-ink-hush truncate max-w-[180px]">{email}</span>
+          {/* Email — показываем только на 2xl+ (≥1536px). Для MacBook 13/14" нет места. */}
+          <span className="hidden 2xl:inline font-mono text-xs text-ink-hush truncate max-w-[160px]">{email}</span>
 
           {isAdmin && variant === "dashboard" && (
             <Link
               href={"/admin" as any}
-              className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-orange/30 bg-orange/10 text-orange hover:bg-orange/15 transition"
+              className="hidden xl:inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange/30 bg-orange/10 text-orange hover:bg-orange/15 transition"
             >
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em] font-semibold">admin</span>
+              <span className="font-mono text-[10px] uppercase tracking-[0.15em] font-semibold">admin</span>
               <Icons.ArrowRight size={11} />
             </Link>
           )}
           {variant === "admin" && (
             <Link
               href={"/dashboard" as any}
-              className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-line bg-paper text-ink-muted hover:text-ink hover:bg-bg-soft transition"
+              className="hidden xl:inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-line bg-paper text-ink-muted hover:text-ink hover:bg-bg-soft transition"
             >
-              <span className="font-mono text-[10px] uppercase tracking-[0.18em]">личный</span>
+              <span className="font-mono text-[10px] uppercase tracking-[0.15em]">личный</span>
             </Link>
           )}
 
           {variant === "dashboard" && <LogoutButton />}
 
+          {/* Бургер — на <xl (Ц1280) показвывается. */}
           <button
             onClick={() => setOpen(true)}
-            className="lg:hidden inline-flex items-center justify-center size-9 rounded-lg border border-line bg-paper text-ink hover:bg-bg-soft transition"
+            className="xl:hidden inline-flex items-center justify-center size-9 rounded-lg border border-line bg-paper text-ink hover:bg-bg-soft transition"
             aria-label="Меню"
           >
             <Icons.Menu size={20} />
@@ -173,7 +175,7 @@ export default function AppHeader({
 
       {open && (
         <div
-          className="fixed inset-0 z-50 lg:hidden bg-paper flex flex-col slide-down"
+          className="fixed inset-0 z-50 xl:hidden bg-paper flex flex-col slide-down"
           style={{ backgroundColor: "#ffffff" }}
         >
           <div className="flex items-center justify-between px-4 md:px-8 py-3 border-b border-line bg-paper" style={{ backgroundColor: "#ffffff" }}>
