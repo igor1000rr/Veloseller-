@@ -1,6 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import RecalcButton from "./RecalcButton";
 import { HealthTrend, LostRevenueTrend, SegmentPie } from "./StoreCharts";
 import { DayProgress } from "./DayProgress";
 import { PeriodSelector } from "./PeriodSelector";
@@ -159,10 +158,12 @@ export default async function DashboardOverview({ searchParams }: {
             </span>
           </div>
         </div>
-        <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-          <PeriodSelector current={period} />
-          <RecalcButton />
-        </div>
+        {/* RecalcButton убран (Игорь 27.05.2026): юзер мог "задрочить" кнопку
+            и создать кучу пустых HTTP-запросов с прогресс-индикатором. Расчёт
+            автоматически идёт каждый час через scheduler recalc-all (apps/worker
+            cron минута=5). Кнопка остаётся в RecalcButton.tsx + /api/jobs/recalc
+            на случай если потребуется для админ-нужд. */}
+        <PeriodSelector current={period} />
       </div>
 
       {showMultiWarehouseBanner && (
