@@ -236,27 +236,10 @@ export default async function SkusPage({ searchParams }: {
     return { ...p, tvelo_metrics: matchedMetric ? [matchedMetric] : [] };
   });
 
-  // ============================================================
-  // Реальные продажи за период — sum of sales_like deltas (Александр 27.05.2026).
-  //
-  // БЫЛО: salesUnits = Math.round(adjusted_velocity * in_stock_days). Это
-  //   реконструкция через velocity — даёт виртуальные единицы за repl/anomaly
-  //   дни. Александр верно заметил: для двух одинаковых "2/5=0.4" один SKU
-  //   показывает 2, второй — 3, потому что один в реальности продал 1 раз
-  //   а median × repl_days добавила оценочные +1.
-  //
-  // СТАЛО: тянем реальные sales_like deltas из inventory_events за период
-  //   matched metric. Это число равно тому что показывает OZON Seller / WB
-  //   и тому что юзер интуитивно ожидает.
-  //
-  // Velocity (TVelo столбец) остаётся прежней — она учитывает median × repl
-  // и НЕ обязана равняться продажи/in_stock_days. Tooltip объяснит когда
-  // расхождение.
-  // ============================================================
+  // Реальные продажи за период (Александр 27.05.2026) — sum sales_like deltas.
+  // НЕ adjusted_velocity × in_stock_days (была реконструкция с virtual единицами).
   const salesByProduct: Record<string, number> = {};
   if (filtered.length > 0) {
-    // У всех SKU на странице обычно одинаковый период (один периодный фильтр).
-    // Берём period_start/end из первого matched metric для границ запроса.
     const firstM = filtered[0].tvelo_metrics?.[0];
     if (firstM?.period_start && firstM?.period_end) {
       const { data: salesEvents } = await supabase
@@ -510,8 +493,8 @@ export default async function SkusPage({ searchParams }: {
               <Th col="health" align="right">Health</Th>
               <Th col="lost_revenue" align="right">
                 <span className="inline-flex items-center">
-                  ПВ
-                  <InfoTooltip text="Потерянная выручка из-за отсутствия товара на складе." />
+                  Потерянная выручка
+                  <InfoTooltip text="Потерянная выручка из-за отсутствия товара на складе. Формула: velocity × дни OOS × цена." />
                 </span>
               </Th>
               <Th col="notes">Заметки</Th>
@@ -523,8 +506,6 @@ export default async function SkusPage({ searchParams }: {
               const adjVel = m?.adjusted_velocity != null ? Number(m.adjusted_velocity) : 0;
               const medVel = m?.median_30d_velocity != null ? Number(m.median_30d_velocity) : 0;
               const stockoutDays = m?.stockout_days != null ? Number(m.stockout_days) : 0;
-              // ФАКТИЧЕСКИЕ продажи = сумма sales_like дельт за период.
-              // Берём из salesByProduct (заполнен выше из inventory_events).
               const salesUnits = salesByProduct[p.product_id] ?? 0;
               const lostRev = lostByProduct[p.product_id] ?? 0;
               const reorderQty = Math.round(adjVel * reorderDays);
