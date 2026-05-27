@@ -1,7 +1,9 @@
 /**
  * Robokassa helpers — генерация URL оплаты и проверка подписей.
  *
- * Дока: https://docs.robokassa.ru/pay-interface/
+ * Поддерживает две оси биллинга:
+ *  - Veloseller: starter (2500₽) / growth (6900₽) / pro (14900₽)
+ *  - Radar:      radar_start (900₽) / radar_seller (2500₽) / radar_pro (5000₽) / radar_expert (10000₽)
  *
  * Подписи (MD5 hex лоуэркейс):
  *  - При создании URL: md5(`${MerchantLogin}:${OutSum}:${InvId}:${Password1}`)
@@ -20,20 +22,74 @@
  */
 import { createHash } from "node:crypto";
 
-export type Plan = "starter" | "growth" | "pro";
+export type VeloseLLerPlan = "starter" | "growth" | "pro";
+export type RadarPlan = "radar_start" | "radar_seller" | "radar_pro" | "radar_expert";
+export type Plan = VeloseLLerPlan | RadarPlan;
+export type ProductKind = "veloseller" | "radar";
 
 /**
- * Цены в рублях (месячная стоимость по решению Александра).
- * Совпадают с plan_warehouses_limit в sellers.
+ * Цены в рублях.
+ * Veloseller: тарифы Александра — multi-warehouse SaaS.
+ * Radar: тарифы из ТЗ — отслеживание новинок брендов.
  */
 export const PLAN_PRICES: Record<Plan, number> = {
+  // Veloseller
   starter: 2500,
   growth:  6900,
   pro:     14900,
+  // Radar (исправлены лимиты Trial: 3 бренда, а не 30 — иначе никто Start не купит)
+  radar_start:  900,    // 3 бренда
+  radar_seller: 2500,   // 10 брендов
+  radar_pro:    5000,   // 30 брендов
+  radar_expert: 10000,  // 100 брендов
+};
+
+/**
+ * Лимит брендов на тариф Radar — используется при активации подписки в webhook.
+ */
+export const RADAR_BRANDS_LIMITS: Record<RadarPlan, number> = {
+  radar_start:  3,
+  radar_seller: 10,
+  radar_pro:    30,
+  radar_expert: 100,
+};
+
+/**
+ * Лимит складов на тариф Veloseller — используется при активации в webhook.
+ */
+export const VELOSELLER_WAREHOUSES_LIMITS: Record<VeloseLLerPlan, number> = {
+  starter: 2,
+  growth:  6,
+  pro:     15,
+};
+
+/**
+ * Человекочитаемые названия для UI и description в Robokassa.
+ */
+export const PLAN_LABELS: Record<Plan, string> = {
+  starter:      "Старт",
+  growth:       "Рост",
+  pro:          "Про",
+  radar_start:  "Radar Старт",
+  radar_seller: "Radar Селлер",
+  radar_pro:    "Radar Про",
+  radar_expert: "Radar Эксперт",
 };
 
 export function isValidPlan(plan: string): plan is Plan {
+  return plan in PLAN_PRICES;
+}
+
+export function isVeloseLLerPlan(plan: Plan): plan is VeloseLLerPlan {
   return plan === "starter" || plan === "growth" || plan === "pro";
+}
+
+export function isRadarPlan(plan: Plan): plan is RadarPlan {
+  return plan.startsWith("radar_");
+}
+
+export function productKindOf(plan: Plan): ProductKind {
+  return isRadarPlan(plan) ? "radar" : "veloseller";
 }
 
 function isTestMode(): boolean {
@@ -72,17 +128,12 @@ export function checkRobokassaConfig(): { ok: true } | { ok: false; error: strin
   return { ok: true };
 }
 
-/**
- * MD5 hex в lowercase — формат в котором Робокасса ожидает SignatureValue.
- */
 function md5Hex(input: string): string {
   return createHash("md5").update(input, "utf8").digest("hex");
 }
 
 /**
  * Генерирует URL на Robokassa для оплаты.
- *
- * Пример URL: https://auth.robokassa.ru/Merchant/Index.aspx?MerchantLogin=...&OutSum=2500.00&InvId=1&Description=...&SignatureValue=...
  */
 export function buildPaymentUrl(args: {
   invId: number;
@@ -96,11 +147,8 @@ export function buildPaymentUrl(args: {
     throw new Error("Robokassa not configured");
   }
 
-  // Сумма всегда с 2 знаками после запятой (иначе подпись не совпадёт)
   const outSum = args.amount.toFixed(2);
   const invId = String(args.invId);
-
-  // Подпись формируется из 4 полей, разделённых двоеточием
   const signature = md5Hex(`${merchantLogin}:${outSum}:${invId}:${password1}`);
 
   const params = new URLSearchParams({
@@ -125,11 +173,6 @@ export function buildPaymentUrl(args: {
 
 /**
  * Проверяет подпись Result URL от Robokassa.
- *
- * Подпись в Result URL формируется из 3 полей — без MerchantLogin,
- * и с использованием Password2.
- *
- * Сравнение case-insensitive (Робокасса может прислать uppercase).
  */
 export function verifyResultSignature(args: {
   outSum: string;
