@@ -64,6 +64,21 @@ function defaultThresholdFor(filter: DashboardFilter): number | null {
   return null;
 }
 
+/**
+ * Вернуть YYYY-MM-DD для UTC даты. UTC чтобы избежать TZ-перескоков
+ * на проде (VPS обычно UTC, юзер на МСК — но date-input работает в YYYY-MM-DD).
+ */
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
+/** today минус N дней в YYYY-MM-DD UTC. */
+function daysAgo(n: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - n);
+  return isoDate(d);
+}
+
 export default async function SkusPage({ searchParams }: {
   searchParams: Promise<{
     page?: string;
@@ -106,6 +121,13 @@ export default async function SkusPage({ searchParams }: {
   const lostMax = parseIntOrNull(sp.lost_max);
   const dateFrom = parseDateOrNull(sp.date_from);
   const dateTo = parseDateOrNull(sp.date_to);
+
+  // Дефолтные даты для отображения в фильтре (Игорь 27.05.2026):
+  // селлер должен ВИДЕТЬ за какой период считается velocity, даже если он
+  // не выбрал даты руками. При переходе с /dashboard?period=N — дефолты
+  // подстраиваются под выбранный период.
+  const defaultDateTo = isoDate(new Date());
+  const defaultDateFrom = daysAgo(periodDays);
 
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -385,12 +407,16 @@ export default async function SkusPage({ searchParams }: {
         />
       )}
 
-      {/* Серая плашка фильтров: Период + чекбокс + 3 ranges */}
+      {/* Серая плашка фильтров: Период + чекбокс + 3 ranges.
+          defaultDateFrom/defaultDateTo — чтобы поле «Период» всегда было
+          заполнено (по умолчанию = последние periodDays дней). */}
       <SkusFilters
         warehouseCreatedAt={warehouseCreatedAt}
         ranges={filterRanges}
         includeInactive={includeInactive}
         showInactiveToggle={!dashFilter}
+        defaultDateFrom={defaultDateFrom}
+        defaultDateTo={defaultDateTo}
       />
 
       {/* Строка под фильтрами: поиск + сегменты + ColumnsPicker + Excel/CSV (paint-скрин 27.05.2026) */}
