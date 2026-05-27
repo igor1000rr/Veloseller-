@@ -236,6 +236,45 @@ export default async function SkusPage({ searchParams }: {
     return { ...p, tvelo_metrics: matchedMetric ? [matchedMetric] : [] };
   });
 
+  // ============================================================
+  // Реальные продажи за период — sum of sales_like deltas (Александр 27.05.2026).
+  //
+  // БЫЛО: salesUnits = Math.round(adjusted_velocity * in_stock_days). Это
+  //   реконструкция через velocity — даёт виртуальные единицы за repl/anomaly
+  //   дни. Александр верно заметил: для двух одинаковых "2/5=0.4" один SKU
+  //   показывает 2, второй — 3, потому что один в реальности продал 1 раз
+  //   а median × repl_days добавила оценочные +1.
+  //
+  // СТАЛО: тянем реальные sales_like deltas из inventory_events за период
+  //   matched metric. Это число равно тому что показывает OZON Seller / WB
+  //   и тому что юзер интуитивно ожидает.
+  //
+  // Velocity (TVelo столбец) остаётся прежней — она учитывает median × repl
+  // и НЕ обязана равняться продажи/in_stock_days. Tooltip объяснит когда
+  // расхождение.
+  // ============================================================
+  const salesByProduct: Record<string, number> = {};
+  if (filtered.length > 0) {
+    // У всех SKU на странице обычно одинаковый период (один периодный фильтр).
+    // Берём period_start/end из первого matched metric для границ запроса.
+    const firstM = filtered[0].tvelo_metrics?.[0];
+    if (firstM?.period_start && firstM?.period_end) {
+      const { data: salesEvents } = await supabase
+        .from("inventory_events")
+        .select("product_id, delta_stock")
+        .in("product_id", filtered.map((p: any) => p.product_id))
+        .eq("event_type", "sales_like")
+        .gte("event_date", firstM.period_start)
+        .lte("event_date", firstM.period_end);
+
+      for (const ev of (salesEvents ?? []) as any[]) {
+        const pid = ev.product_id;
+        const delta = Math.abs(Number(ev.delta_stock ?? 0));
+        salesByProduct[pid] = (salesByProduct[pid] ?? 0) + delta;
+      }
+    }
+  }
+
   const lostByProduct: Record<string, number> = {};
   for (const p of filtered) {
     const m = p.tvelo_metrics?.[0];
@@ -255,10 +294,6 @@ export default async function SkusPage({ searchParams }: {
 
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
 
-  // Экспорт — передаём ВСЕ текущие фильтры в endpoint (правка 6).
-  // Раньше экспорт выгружал весь магазин — Александр верно заметил что это
-  // делало отчёт бесполезным для работы — тысячи строк, нужные теряются.
-  // Теперь: что видишь в таблице — то в файле (без пагинации 50/стр).
   const exportParams = new URLSearchParams();
   exportParams.set("period", String(periodDays));
   if (selected) exportParams.set("warehouse_id", selected.id);
@@ -277,7 +312,6 @@ export default async function SkusPage({ searchParams }: {
   if (dateTo) exportParams.set("date_to", dateTo);
   const exportQS = exportParams.toString();
 
-  // Подсчёт активных фильтров для hint'а в кнопках экспорта.
   const activeFilterCount =
     (dashFilter ? 1 : 0) +
     (segmentFilter ? 1 : 0) +
@@ -460,7 +494,12 @@ export default async function SkusPage({ searchParams }: {
               <Th col="trend" align="center">Тренд</Th>
               <Th col="coverage" align="right">Покрытие</Th>
               <Th col="oos" align="right">OOS ({periodDays}д)</Th>
-              <Th col="sales" align="right">Продажи</Th>
+              <Th col="sales" align="right">
+                <span className="inline-flex items-center">
+                  Продажи
+                  <InfoTooltip text="Фактические продажи за период — сумма дельт снижения остатка (sales_like события). Может НЕ равняться TVelo × дни в наличии: TVelo добавляет оценочные продажи за дни пополнений и аномалий чтобы не занижать скорость." />
+                </span>
+              </Th>
               <Th col="reorder" align="right">Закупка ({reorderDays}д)</Th>
               <Th col="confidence" align="right" accent>
                 <span className="inline-flex items-center">
@@ -484,8 +523,9 @@ export default async function SkusPage({ searchParams }: {
               const adjVel = m?.adjusted_velocity != null ? Number(m.adjusted_velocity) : 0;
               const medVel = m?.median_30d_velocity != null ? Number(m.median_30d_velocity) : 0;
               const stockoutDays = m?.stockout_days != null ? Number(m.stockout_days) : 0;
-              const inStockDays = m?.in_stock_days != null ? Number(m.in_stock_days) : 0;
-              const salesUnits = Math.round(adjVel * inStockDays);
+              // ФАКТИЧЕСКИЕ продажи = сумма sales_like дельт за период.
+              // Берём из salesByProduct (заполнен выше из inventory_events).
+              const salesUnits = salesByProduct[p.product_id] ?? 0;
               const lostRev = lostByProduct[p.product_id] ?? 0;
               const reorderQty = Math.round(adjVel * reorderDays);
               const isUnderestimated = m?.underestimated_sku;
@@ -522,7 +562,7 @@ export default async function SkusPage({ searchParams }: {
                       <span className="text-ink-soft">0</span>
                     )}
                   </td>
-                  <td className="col-skucol-sales px-3 sm:px-4 py-3 text-right tabular text-ink-soft" title="Число единиц, которые мы записали в продажи за период">
+                  <td className="col-skucol-sales px-3 sm:px-4 py-3 text-right tabular text-ink-soft" title="Фактические продажи за период (sum sales_like deltas)">
                     {salesUnits > 0 ? salesUnits : "—"}
                   </td>
                   <td className="col-skucol-reorder px-3 sm:px-4 py-3 text-right font-semibold tabular text-lime-deep">
