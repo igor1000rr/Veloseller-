@@ -16,6 +16,7 @@ from app.db import fetch_all, get_supabase
 from app.jobs.recalc import recalc_all_sellers, recalc_seller, recalc_seller_all_periods
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.logger import JsonFormatter, setup_logger
+from app.radar.api import router as radar_router
 from app.schemas import SnapshotInput, SourceType
 from app.sources import csv_upload, feed as feed_src, google_sheet, ozon, wildberries
 
@@ -239,6 +240,11 @@ def require_worker_secret(x_worker_secret: Optional[str] = Header(None)) -> None
 
     if not x_worker_secret or not hmac.compare_digest(x_worker_secret, secret):
         raise HTTPException(401, "Invalid worker secret")
+
+
+# Подключаем Radar роутер. /radar/* endpoints защищены через
+# require_worker_secret на уровне роутера (передаём dependency).
+app.include_router(radar_router, dependencies=[Depends(require_worker_secret)])
 
 
 @app.get("/health")
