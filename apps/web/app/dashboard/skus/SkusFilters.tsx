@@ -14,20 +14,10 @@ export type FilterRanges = {
 };
 
 /**
- * Серая плашка раскрытых фильтров (paint-скрин Александра 27.05.2026):
- *   Строка 1: Период (2 даты) + чекбокс «Включить SKU без активности»
- *   Подсказки: «данные с DD.MM.YYYY» + «Произвольный диапазон поверх периода...»
- *   Строка 2: 3 RangeField в линию — Наличие / Дней OOS / Потерянная выручка, ₽
+ * Серая плашка раскрытых фильтров.
  *
- * Поля «Период» ВСЕГДА заполнены датами (Игорь 27.05.2026 вечер):
- *   - Если в URL есть date_from/date_to — берём их (юзер сам выбрал)
- *   - Иначе — defaultDateFrom/defaultDateTo (вычислены на сервере из periodDays:
- *     date_to = today, date_from = today - periodDays)
- *   - Селлер сразу видит за какой период считается velocity
- *   - При переходе с /dashboard?period=7 — defaults будут today-7 .. today
- *
- * Когда юзер вручную меняет дату — пушим в URL (это уже фильтр на period_end).
- * Когда стирает поле — возвращаемся к defaults (по useEffect).
+ * Поля «Период» всегда заполнены датами (defaultDateFrom/defaultDateTo).
+ * Если передан preHolidayLabel — показываем ярлык предпраздничного периода.
  */
 export function SkusFilters({
   warehouseCreatedAt,
@@ -36,15 +26,16 @@ export function SkusFilters({
   showInactiveToggle,
   defaultDateFrom,
   defaultDateTo,
+  preHolidayLabel,
 }: {
   warehouseCreatedAt: string | null;
   ranges: FilterRanges;
   includeInactive: boolean;
   showInactiveToggle: boolean;
-  /** YYYY-MM-DD — fallback если в URL нет date_from. */
   defaultDateFrom: string;
-  /** YYYY-MM-DD — fallback если в URL нет date_to. */
   defaultDateTo: string;
+  /** Напр. «🎁 Предпраздничный: 14 дней до Нового года». Не показываем если null. */
+  preHolidayLabel?: string | null;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -84,9 +75,6 @@ export function SkusFilters({
     if (debounceRef.current) clearTimeout(debounceRef.current);
   }, []);
 
-  // Синхронизация при back/forward или внешнем сбросе URL.
-  // Для date_from/date_to — если URL пустой, возвращаемся к defaults
-  // (а не к ""). Так инпуты всегда заполнены датами.
   useEffect(() => {
     setStockMin(sp.get("stock_min") ?? "");
     setStockMax(sp.get("stock_max") ?? "");
@@ -103,12 +91,18 @@ export function SkusFilters({
 
   return (
     <div className="space-y-3 p-3 sm:p-4 rounded-xl border border-line bg-bg-soft">
-      {/* Строка 1: Период + чекбокс «Включить SKU без активности» */}
       <div className="flex items-start gap-x-6 gap-y-3 flex-wrap">
         <div className="min-w-0">
-          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
-            Период
-          </label>
+          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+            <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
+              Период
+            </label>
+            {preHolidayLabel && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-orange/40 bg-orange/10 text-orange font-mono text-[10px] uppercase tracking-wider font-semibold">
+                {preHolidayLabel}
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2 flex-wrap">
             <input
               type="date"
@@ -153,10 +147,9 @@ export function SkusFilters({
         </p>
       )}
       <p className="text-[11px] text-ink-hush leading-relaxed">
-        Период расчёта скорости продаж. По умолчанию — последние 30 дней. Меняй период в /Обзор (7/30/90 дней) или выбери произвольный диапазон вручную.
+        Период расчёта скорости продаж. По умолчанию — последние 30 дней. Перед праздниками автоматически сужается до предпраздничного окна.
       </p>
 
-      {/* Строка 2: 3 range-фильтра в одну линию */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
         <RangeField
           label="Наличие"

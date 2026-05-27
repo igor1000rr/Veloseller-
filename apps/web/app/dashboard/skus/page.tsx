@@ -4,6 +4,7 @@ import { VelocitySparkline } from "./VelocitySparkline";
 import { Icons } from "../../_components/Icons";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 import { getSelectedWarehouse, warehouseKindLabel } from "@/lib/warehouse";
+import { getPreHolidayWindow } from "@/lib/holidays";
 import { SkusFilters, type FilterRanges } from "./SkusFilters";
 import { SearchInput } from "./SearchInput";
 import { NotesCell } from "./NotesCell";
@@ -98,7 +99,8 @@ export default async function SkusPage({ searchParams }: {
   const page = Math.max(1, parseInt(sp.page ?? "1", 10) || 1);
   const segmentFilter = sp.segment ?? "";
   const reorderDays = Math.max(1, parseInt(sp.reorder_days ?? "30", 10) || 30);
-  const periodDays = (sp.period === "7" || sp.period === "90") ? parseInt(sp.period) : 30;
+  const userExplicitPeriod = sp.period === "7" || sp.period === "30" || sp.period === "90";
+  const periodDays = userExplicitPeriod ? parseInt(sp.period!) : 30;
   const dashFilter: DashboardFilter | null = isDashboardFilter(sp.filter) ? sp.filter : null;
   const includeInactive = sp.include_inactive === "1" || dashFilter === "inactive";
 
@@ -117,8 +119,27 @@ export default async function SkusPage({ searchParams }: {
   const dateFrom = parseDateOrNull(sp.date_from);
   const dateTo = parseDateOrNull(sp.date_to);
 
-  const defaultDateTo = isoDate(new Date());
-  const defaultDateFrom = daysAgo(periodDays);
+  // Дефолты дат в фильтре (Игорь 27.05.2026):
+  //   1. Если юзер явно выбрал ?period=N в URL — используем его (today - N .. today).
+  //   2. Иначе проверяем предпраздничное окно (18.12-31.12 — НГ, 07.02-13.02 — 14.02,
+  //      16.02-22.02 — 23.02, 01.03-07.03 — 8.03). Если сегодня внутри —
+  //      проставляем предпраздничный диапазон [holiday-N, today].
+  //   3. Иначе — обычные 30 дней.
+  // Расчёт velocity всё равно по periodDays (в БД метрики только 7/30/90), дефолты
+  // — визуальная подсказка для селлера.
+  const today = new Date();
+  const preHoliday = userExplicitPeriod ? null : getPreHolidayWindow(today);
+  let defaultDateTo: string;
+  let defaultDateFrom: string;
+  let preHolidayLabel: string | null = null;
+  if (preHoliday) {
+    defaultDateTo = isoDate(today);
+    defaultDateFrom = preHoliday.windowStart;
+    preHolidayLabel = `🎁 Предпраздничный: ${preHoliday.daysBefore} дней до ${preHoliday.holidayName}`;
+  } else {
+    defaultDateTo = isoDate(today);
+    defaultDateFrom = daysAgo(periodDays);
+  }
 
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -249,7 +270,6 @@ export default async function SkusPage({ searchParams }: {
     return { ...p, tvelo_metrics: matchedMetric ? [matchedMetric] : [] };
   });
 
-  // Реальные продажи за период — sum sales_like deltas (Александр 27.05.2026).
   const salesByProduct: Record<string, number> = {};
   if (filtered.length > 0) {
     const firstM = filtered[0].tvelo_metrics?.[0];
@@ -404,6 +424,7 @@ export default async function SkusPage({ searchParams }: {
         showInactiveToggle={!dashFilter}
         defaultDateFrom={defaultDateFrom}
         defaultDateTo={defaultDateTo}
+        preHolidayLabel={preHolidayLabel}
       />
 
       <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
