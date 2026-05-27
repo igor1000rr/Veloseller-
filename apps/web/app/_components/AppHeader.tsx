@@ -50,6 +50,9 @@ export default function AppHeader({
 
   // "Отчёты" (было "Уведомления"): переход на модель weekly Excel-отчётов.
   // URL /dashboard/alerts оставлен — это технический адрес из базы alerts.
+  // "Radar" (25.05.2026): новый модуль мониторинга появления новинок в
+  // ассортименте брендов. Wordstat + WB/OZON suggest. С badge "new"
+  // первые 30 дней после релиза чтобы привлечь внимание существующих юзеров.
   const links = variant === "dashboard"
     ? [
         { href: "/dashboard",           label: "Обзор" },
@@ -57,6 +60,7 @@ export default function AppHeader({
         { href: "/dashboard/alerts",    label: "Отчёты", badge: unreadAlerts },
         { href: "/dashboard/dynamics",  label: "Динамика" },
         { href: "/dashboard/changelog", label: "Журнал" },
+        { href: "/dashboard/radar",     label: "Radar", isNew: true },
         { href: "/connections",         label: "Склады" },
         { href: "/dashboard/settings",  label: "Настройки" },
         { href: "/billing",             label: "Тариф" },
@@ -89,7 +93,7 @@ export default function AppHeader({
             )}
           </Link>
           <nav className="hidden lg:flex items-center gap-1 text-sm">
-            {links.map((l) => {
+            {links.map((l: any) => {
               const active = pathname === l.href || (l.href !== "/dashboard" && l.href !== "/admin" && pathname?.startsWith(l.href));
               return (
                 <Link
@@ -107,6 +111,11 @@ export default function AppHeader({
                       {l.badge}
                     </span>
                   ) : null}
+                  {l.isNew && (
+                    <span className="ml-1.5 inline-flex items-center justify-center px-1.5 h-[16px] text-[9px] font-mono font-semibold bg-lime-deep text-paper rounded uppercase tracking-wider">
+                      new
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -197,7 +206,7 @@ export default function AppHeader({
                 <Icons.ArrowRight size={14} />
               </Link>
             )}
-            {links.map((l) => (
+            {links.map((l: any) => (
               <Link
                 key={l.href}
                 href={l.href as any}
@@ -209,6 +218,11 @@ export default function AppHeader({
                   {l.badge && l.badge > 0 ? (
                     <span className="inline-flex items-center justify-center min-w-[20px] h-[20px] px-1.5 text-[10px] font-mono font-semibold bg-rose text-paper rounded">{l.badge}</span>
                   ) : null}
+                  {l.isNew && (
+                    <span className="inline-flex items-center justify-center px-2 h-[18px] text-[10px] font-mono font-semibold bg-lime-deep text-paper rounded uppercase tracking-wider">
+                      new
+                    </span>
+                  )}
                 </span>
                 <Icons.ArrowRight size={16} />
               </Link>
