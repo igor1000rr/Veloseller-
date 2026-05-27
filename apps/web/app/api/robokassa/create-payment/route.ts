@@ -6,13 +6,15 @@ import {
   checkRobokassaConfig,
   isValidPlan,
   PLAN_PRICES,
+  PLAN_LABELS,
+  productKindOf,
 } from "@/lib/robokassa";
 
 /**
  * POST /api/robokassa/create-payment — создаёт invoice в БД + URL для оплаты на Robokassa.
  *
- * Body: { plan: "starter" | "growth" | "pro" }
- * Response: { url: string }
+ * Body: { plan: "starter" | "growth" | "pro" | "radar_start" | "radar_seller" | "radar_pro" | "radar_expert" }
+ * Response: { url: string, inv_id: number }
  *
  * Frontend делает window.location.href = url — юзер переходит на Robokassa,
  * оплачивает, возвращается по Success/Fail URL.
@@ -26,7 +28,6 @@ export async function POST(req: NextRequest) {
   const limited = enforceRateLimit(req, RATE_LIMITS.WRITE, user.id);
   if (limited) return limited;
 
-  // Проверяем что Robokassa настроена (ENV variables заданы)
   const cfg = checkRobokassaConfig();
   if (!cfg.ok) {
     return NextResponse.json(
@@ -45,24 +46,27 @@ export async function POST(req: NextRequest) {
   const plan = body?.plan;
   if (!plan || typeof plan !== "string" || !isValidPlan(plan)) {
     return NextResponse.json(
-      { error: "Неизвестный тариф. Допустимые значения: starter, growth, pro" },
+      { error: "Неизвестный тариф" },
       { status: 400 },
     );
   }
 
   const amount = PLAN_PRICES[plan];
-  const description = `Veloseller — тариф ${plan.charAt(0).toUpperCase() + plan.slice(1)} (месяц)`;
+  const productKind = productKindOf(plan);
+  const planLabel = PLAN_LABELS[plan];
+  const description = productKind === "radar"
+    ? `Veloseller Radar — тариф ${planLabel} (месяц)`
+    : `Veloseller — тариф ${planLabel} (месяц)`;
 
-  // Получаем email селлера для предварительного заполнения на Robokassa
   const { data: seller } = await supabase
     .from("sellers").select("email").eq("id", user.id).maybeSingle();
 
-  // Создаём invoice. inv_id сгенерируется BIGSERIALью базы.
   const { data: invoice, error: insertErr } = await supabase
     .from("robokassa_invoices")
     .insert({
       seller_id: user.id,
       plan,
+      product_kind: productKind,
       amount,
       currency: "RUB",
       status: "pending",
@@ -75,7 +79,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Не удалось создать заявку на оплату" }, { status: 500 });
   }
 
-  // Генерируем URL на Robokassa
   let url: string;
   try {
     url = buildPaymentUrl({

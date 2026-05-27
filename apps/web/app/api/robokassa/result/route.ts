@@ -1,33 +1,30 @@
 import { NextRequest } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { verifyResultSignature } from "@/lib/robokassa";
+import {
+  verifyResultSignature,
+  isVeloseLLerPlan,
+  isRadarPlan,
+  VELOSELLER_WAREHOUSES_LIMITS,
+  RADAR_BRANDS_LIMITS,
+  type VeloseLLerPlan,
+  type RadarPlan,
+} from "@/lib/robokassa";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 /**
  * Result URL для Robokassa — webhook о успешной оплате.
  *
- * Робокасса вызывает этот endpoint ПОСЛЕ успешной оплаты в фоне (параллельно
- * редиректу юзера на SuccessURL). Надо:
- *  1. Проверить подпись через Password2
- *  2. Проверить совпадение test/prod-режима сервера с IsTest флагом
- *  3. Обновить invoice → paid
- *  4. Обновить seller.plan + subscription_expires_at = now() + 30 дней
- *  5. Ответить ровно "OK{InvId}" plain text — без этого Robokassa будет ретраить.
- *
- * Дока: https://docs.robokassa.ru/pay-interface/#resulturl
- *
- * Поддерживает и POST (form-data) и GET (query string).
- *
- * SECURITY FIX (test/prod mismatch): раньше IsTest=1 принимался и на prod-сервере —
- * то есть кто угодно с test_password мог активировать платную подписку. Теперь
- * сервер отклоняет callback если режим IsTest не совпадает с ROBOKASSA_TEST_MODE.
- *
- * SECURITY FIX (signature flood DDoS): добавлен IP-based rate-limit. Без password
- * подписать запрос нельзя, но cheap-флуд проверок подписи теперь ограничен.
+ * После успешной оплаты Robokassa вызывает этот endpoint:
+ *  1. Проверяем подпись через Password2
+ *  2. Проверяем совпадение test/prod-режима сервера с IsTest флагом
+ *  3. Обновляем invoice → paid
+ *  4. Активируем подписку — в зависимости от product_kind:
+ *     - veloseller: seller.plan + plan_warehouses_limit + subscription_expires_at
+ *     - radar:      seller.radar_plan + radar_brands_limit + radar_active_until
+ *  5. Отвечаем ровно "OK{InvId}" plain text — без этого Robokassa будет ретраить.
  */
 
 async function handle(req: NextRequest): Promise<Response> {
-  // Rate-limit IP-based (WEBHOOK = 60/min) — защита от signature-флуда
   const limited = enforceRateLimit(req, RATE_LIMITS.WEBHOOK);
   if (limited) return new Response("FAIL: rate limit", { status: 429 });
 
@@ -56,8 +53,6 @@ async function handle(req: NextRequest): Promise<Response> {
     return new Response("FAIL: missing params", { status: 400 });
   }
 
-  // Проверка совпадения режима: prod-сервер не принимает test-callback и наоборот.
-  // Защищает от ситуации, когда злоумышленник с test_password атакует prod-сервер.
   const serverIsTest = process.env.ROBOKASSA_TEST_MODE === "1";
   if (isTest !== serverIsTest) {
     console.warn("[robokassa-result] test/prod mode mismatch", {
@@ -66,16 +61,14 @@ async function handle(req: NextRequest): Promise<Response> {
     return new Response("FAIL: test/prod mode mismatch", { status: 400 });
   }
 
-  // Проверяем подпись (защита от поддельных вызовов endpoint'а)
   if (!verifyResultSignature({ outSum, invId, signatureValue })) {
     return new Response("FAIL: bad signature", { status: 400 });
   }
 
-  // Находим invoice (используем admin client — юзера в этом запросе нет из-за server-to-server)
   const sb = createSupabaseAdminClient();
   const { data: invoice, error: getErr } = await sb
     .from("robokassa_invoices")
-    .select("id, seller_id, plan, amount, status, created_at")
+    .select("id, seller_id, plan, product_kind, amount, status, created_at")
     .eq("inv_id", Number(invId))
     .maybeSingle();
 
@@ -83,18 +76,16 @@ async function handle(req: NextRequest): Promise<Response> {
     return new Response("FAIL: invoice not found", { status: 404 });
   }
 
-  // Сумма должна совпадать (защита от подмены суммы)
   const expectedSum = Number(invoice.amount).toFixed(2);
   if (expectedSum !== outSum) {
     return new Response("FAIL: amount mismatch", { status: 400 });
   }
 
-  // Идемпотентность — если уже paid, просто отвечаем OK (Robokassa может вызвать дважды)
+  // Идемпотентность — если уже paid, просто отвечаем OK
   if (invoice.status === "paid") {
     return new Response(`OK${invId}`, { headers: { "Content-Type": "text/plain" } });
   }
 
-  // Обновляем invoice
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // +30 дней
 
@@ -111,22 +102,45 @@ async function handle(req: NextRequest): Promise<Response> {
     return new Response("FAIL: db update failed", { status: 500 });
   }
 
-  // Активируем подписку (и в test mode — чтобы можно было проверить flow)
-  const planLimits: Record<string, number> = {
-    starter: 2, growth: 6, pro: 15,
-  };
-  const limit = planLimits[invoice.plan] ?? 15;
+  // Активируем подписку — в зависимости от product_kind.
+  // Legacy invoices без product_kind (до этой миграции) имеют DEFAULT 'veloseller'.
+  const productKind = invoice.product_kind || "veloseller";
 
-  await sb
-    .from("sellers")
-    .update({
-      plan: invoice.plan,
-      plan_warehouses_limit: limit,
-      subscription_expires_at: expiresAt.toISOString(),
-    })
-    .eq("id", invoice.seller_id);
+  if (productKind === "radar" && isRadarPlan(invoice.plan)) {
+    // Radar подписка — обновляем radar_* поля sellers.
+    // Старый radar_plan → новый (с увеличенным лимитом). Если юзер был на
+    // trial — более продвинутый тариф перепишет его на платный.
+    // Префикс 'radar_' в биллинге но в sellers.radar_plan без префикса.
+    const radarPlanShort = invoice.plan.replace(/^radar_/, "") as "start" | "seller" | "pro" | "expert";
+    const brandsLimit = RADAR_BRANDS_LIMITS[invoice.plan as RadarPlan];
 
-  // Robokassa ждёт именно "OK{InvId}" в ответ — иначе будет ретраить
+    await sb
+      .from("sellers")
+      .update({
+        radar_plan: radarPlanShort,
+        radar_brands_limit: brandsLimit,
+        radar_active_until: expiresAt.toISOString(),
+      })
+      .eq("id", invoice.seller_id);
+  } else if (isVeloseLLerPlan(invoice.plan)) {
+    // Veloseller подписка — обновляем plan + plan_warehouses_limit + expires.
+    const warehousesLimit = VELOSELLER_WAREHOUSES_LIMITS[invoice.plan as VeloseLLerPlan];
+
+    await sb
+      .from("sellers")
+      .update({
+        plan: invoice.plan,
+        plan_warehouses_limit: warehousesLimit,
+        subscription_expires_at: expiresAt.toISOString(),
+      })
+      .eq("id", invoice.seller_id);
+  } else {
+    // Невозможно сопоставить plan с product_kind — лог и не активируем.
+    console.error("[robokassa-result] cannot activate: plan/product_kind mismatch", {
+      invId, plan: invoice.plan, productKind,
+    });
+  }
+
   return new Response(`OK${invId}`, {
     headers: { "Content-Type": "text/plain" },
   });
