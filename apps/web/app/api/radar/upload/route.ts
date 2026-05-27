@@ -1,24 +1,39 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { extractBrandsFromFile, normalizeBrandName } from "@/lib/radar/extract-brands";
 import crypto from "crypto";
 
-// 50MB лимит на загрузку. Если файл больше — обычно это не прайс, а
-// архив. Реальный прайс OZON/WB на 5000 SKU занимает ~2-5 МБ.
+// 50MB лимит на загрузку. Прайс 5000 SKU в OZON/WB обычно ~2-5 МБ.
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60; // ИИ-запрос ~10-30 сек.
+export const maxDuration = 60; // Ожидание worker'а ~10-30 сек.
 
+/**
+ * POST /api/radar/upload — прокси к worker'у для извлечения брендов ИИ.
+ *
+ * Почему через worker, а не в Next.js:
+ *   1. У worker'а (Python/FastAPI) уже есть openpyxl/pandas — не нужно
+ *      тащить xlsx в Node.js (было проблемой с CDN tarball).
+ *   2. Worker держит OPENROUTER_API_KEY (это secret, хранится в .env в
+ *      одном месте вместе с остальными ключами worker'а).
+ *   3. Био-обработка (15-30 сек) блокирует Next.js function — лучше
+ *      вынести на worker где это нормальный процесс.
+ *
+ * Flow:
+ *   1. Auth + проверка тарифа.
+ *   2. Создаём radar_price_uploads (status=processing) через admin client.
+ *   3. Проксим FormData в worker POST /radar/extract-brands с X-Worker-Secret.
+ *   4. Worker сам обновит radar_price_uploads + вставит radar_brands.
+ *   5. Редиректим юзера на /dashboard/radar/brands.
+ */
 export async function POST(req: NextRequest) {
-  // 1. Auth.
   const sb = await createSupabaseServerClient();
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  // 2. Проверка тарифа.
+  // Проверка тарифа.
   const { data: seller } = await sb
     .from("sellers")
     .select("radar_plan, radar_brands_limit, radar_active_until")
@@ -30,7 +45,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Подключите Radar в /billing" }, { status: 403 });
   }
 
-  // 3. Файл.
+  // Файл.
   const form = await req.formData();
   const file = form.get("file");
   if (!(file instanceof File)) {
@@ -47,7 +62,8 @@ export async function POST(req: NextRequest) {
     .update(Buffer.from(buffer))
     .digest("hex");
 
-  // 4. Создаём запись upload (status=processing) ДО вызова ИИ.
+  // Создаём запись upload (status=processing) ДО вызова worker'а,
+  // чтобы иметь uploadId для worker'а и отображать сразу в истории.
   const admin = createSupabaseAdminClient();
   const { data: uploadRow, error: uploadErr } = await admin
     .from("radar_price_uploads")
@@ -69,65 +85,65 @@ export async function POST(req: NextRequest) {
 
   const uploadId = uploadRow.id;
 
+  // Проксим в worker.
+  const workerUrl = process.env.WORKER_URL || "http://127.0.0.1:8001";
+  const workerSecret = process.env.WORKER_SECRET;
+  if (!workerSecret) {
+    await admin.from("radar_price_uploads")
+      .update({ status: "failed", error_message: "WORKER_SECRET not configured" })
+      .eq("id", uploadId);
+    return NextResponse.json({ error: "Сервис временно недоступен" }, { status: 500 });
+  }
+
+  // Пересобираем FormData для worker'а — он ожидает seller_id + upload_id + file.
+  const workerForm = new FormData();
+  workerForm.append("seller_id", user.id);
+  workerForm.append("upload_id", uploadId);
+  // Передаём файл из входящего буфера (экономим память — не читаем файл дважды).
+  const blob = new Blob([buffer]);
+  workerForm.append("file", blob, file.name);
+
   try {
-    // 5. Парсим прайс + ИИ.
-    const result = await extractBrandsFromFile(buffer, file.name);
+    const res = await fetch(`${workerUrl}/radar/extract-brands`, {
+      method: "POST",
+      headers: { "X-Worker-Secret": workerSecret },
+      body: workerForm,
+      // 90 сек timeout — AI обычно 10-30 сек, но бывают retry и медленные провайдеры.
+      signal: AbortSignal.timeout(90_000),
+    });
 
-    // 6. Вставляем бренды (pending — ждут approve от юзера).
-    // Если бренд уже есть в БД (повторная загрузка) — обновляем sku_count/avg_price.
-    const brandsToInsert = result.brands.map(b => ({
-      seller_id: user.id,
-      name: b.name,
-      name_normalized: normalizeBrandName(b.name),
-      source: "ai" as const,
-      status: "approved" as const,  // approved сразу — юзер на странице /brands может исключить
-      sku_count: b.sku_count,
-      avg_price: b.avg_price,
-    }));
-
-    if (brandsToInsert.length > 0) {
-      await admin
-        .from("radar_brands")
-        .upsert(brandsToInsert, { onConflict: "seller_id,name_normalized" });
+    if (!res.ok) {
+      const errBody = await res.text();
+      // worker уже пометил upload как failed — просто передаём ошибку в UI.
+      return NextResponse.json(
+        { error: errBody.slice(0, 500) || `Worker ${res.status}`, upload_id: uploadId },
+        { status: 500 }
+      );
     }
 
-    // 7. Обновляем запись upload.
-    await admin
-      .from("radar_price_uploads")
-      .update({
-        status: "completed",
-        rows_total: result.rows_processed,
-        ai_provider: result.provider,
-        ai_model: result.model,
-        ai_input_tokens: result.tokens_input,
-        ai_output_tokens: result.tokens_output,
-        ai_cost_usd: result.cost_usd,
-        ai_response: result.raw_response,
-        brands_extracted: result.brands.length,
-        brands_approved: result.brands.length,
-        completed_at: new Date().toISOString(),
-      })
-      .eq("id", uploadId);
-
+    const data: any = await res.json();
     return NextResponse.json({
       success: true,
       upload_id: uploadId,
-      brands_count: result.brands.length,
-      cost_usd: result.cost_usd,
+      brands_extracted: data.brandsExtracted,
+      brands_approved: data.brandsApproved,
+      brands_excluded: data.brandsExcluded ?? 0,
+      ai_cost_usd: data.aiCostUsd,
     });
   } catch (e: any) {
-    // Ошибка ИИ / парсинга — фиксируем в upload и возвращаем 500.
-    await admin
-      .from("radar_price_uploads")
+    // Network/timeout — помечаем upload как failed (worker мог не успеть).
+    await admin.from("radar_price_uploads")
       .update({
         status: "failed",
-        error_message: String(e?.message ?? e).slice(0, 1000),
+        error_message: `Web→Worker: ${String(e?.message ?? e).slice(0, 400)}`,
         completed_at: new Date().toISOString(),
       })
-      .eq("id", uploadId);
+      .eq("id", uploadId)
+      // Обновляем только если status всё ещё processing (не перезаписываем completed/failed от worker'а).
+      .eq("status", "processing");
     return NextResponse.json(
-      { error: e?.message ?? "Ошибка обработки" },
-      { status: 500 }
+      { error: "Ошибка связи с worker'ом: " + (e?.message ?? ""), upload_id: uploadId },
+      { status: 502 }
     );
   }
 }
