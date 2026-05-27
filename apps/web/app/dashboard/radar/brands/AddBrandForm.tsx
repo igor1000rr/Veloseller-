@@ -1,72 +1,54 @@
 "use client";
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { actionAddBrandManual } from "../actions";
 
-export function AddBrandForm({ canAdd, brandsLeft }: { canAdd: boolean; brandsLeft: number }) {
-  const [name, setName] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+export default function AddBrandForm({ limitReached }: { limitReached: boolean }) {
+  const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setSubmitting(true);
+  const submit = () => {
+    if (!value.trim()) return;
     setError(null);
-    try {
-      const res = await fetch("/api/radar/brands", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() }),
-      });
-      if (res.ok) {
-        window.location.reload();
-      } else {
-        const data = await res.json().catch(() => ({}));
-        setError(data.error ?? "Не удалось добавить бренд");
+    startTransition(async () => {
+      try {
+        await actionAddBrandManual(value);
+        setValue("");
+      } catch (e: any) {
+        setError(e.message ?? "Ошибка");
       }
-    } catch (e) {
-      setError("Ошибка соединения");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  if (!canAdd) {
-    return (
-      <div className="rounded-xl border border-orange/30 bg-orange/5 p-4 flex items-center justify-between flex-wrap gap-3">
-        <div className="text-sm text-ink">
-          <span className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold">Лимит достигнут</span>
-          <p className="mt-1 text-ink-muted">Чтобы добавить больше брендов, обновите тариф Radar.</p>
-        </div>
-        <a href="/billing#radar" className="inline-flex items-center rounded-lg bg-ink text-paper px-4 py-2 text-sm font-medium hover:bg-ink-soft transition">
-          Обновить тариф
-        </a>
-      </div>
-    );
-  }
+    });
+  };
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-xl border border-line bg-paper p-4">
-      <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-2">
-        Добавить бренд вручную · осталось {brandsLeft}
-      </label>
-      <div className="flex gap-2 flex-wrap">
+    <div className="rounded-2xl border border-line bg-paper p-4">
+      <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-2">
+        Добавить бренд руками
+      </div>
+      <div className="flex items-center gap-2 flex-wrap">
         <input
           type="text"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
+          value={value}
+          onChange={e => setValue(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") submit(); }}
           placeholder="Например: Dyson"
-          className="flex-1 min-w-[200px] px-3 py-2 rounded-lg border border-line bg-paper text-sm focus:border-lime-deep/40 outline-none transition"
-          disabled={submitting}
+          disabled={limitReached || pending}
+          className="flex-1 min-w-[200px] px-3 py-2 rounded-lg border border-line bg-paper text-sm focus:outline-none focus:border-lime-deep/60"
         />
         <button
-          type="submit"
-          disabled={submitting || !name.trim()}
-          className="px-4 py-2 rounded-lg bg-ink text-paper text-sm font-medium hover:bg-ink-soft disabled:opacity-50 transition"
+          onClick={submit}
+          disabled={!value.trim() || limitReached || pending}
+          className="px-4 py-2 rounded-lg bg-ink text-paper text-sm font-mono uppercase tracking-wider font-semibold hover:bg-ink-soft disabled:opacity-40 transition"
         >
-          {submitting ? "Добавляю..." : "Добавить"}
+          Добавить
         </button>
       </div>
+      {limitReached && (
+        <p className="mt-2 text-xs text-orange">
+          Достигнут лимит брендов тарифа. Перейдите на старший тариф или исключите часть брендов.
+        </p>
+      )}
       {error && <p className="mt-2 text-xs text-rose">{error}</p>}
-    </form>
+    </div>
   );
 }

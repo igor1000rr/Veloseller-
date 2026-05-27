@@ -1,223 +1,150 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { redirect } from "next/navigation";
 import Link from "next/link";
-import { RadarTabs } from "./RadarTabs";
-import { QueriesTable } from "./QueriesTable";
-import { RadarFilters } from "./RadarFilters";
-import { OnboardingBlock } from "./OnboardingBlock";
+import { redirect } from "next/navigation";
+import RadarTabs from "./RadarTabs";
+import RadarTable from "./RadarTable";
+import RadarEmpty from "./RadarEmpty";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-type Tab = "early" | "new" | "watching" | "archived";
+// 4 вкладки Radar — соответствуют status в radar_queries.
+// early    — Wordstat нашёл частоту, но WB/OZON suggest пусто. "Ранние сигналы".
+// new      — впервые появилось в любом suggest за последние 7 дней. "Новые".
+// watching — пользователь добавил в избранное. "Наблюдение".
+// archived — отклонено или закуплено. "Архив".
+export type RadarTab = "early" | "new" | "watching" | "archived";
+
+const TAB_TITLES: Record<RadarTab, string> = {
+  early:    "Ранние сигналы",
+  new:      "Новые",
+  watching: "Наблюдение",
+  archived: "Архив",
+};
 
 export default async function RadarPage({ searchParams }: {
-  searchParams: Promise<{ tab?: string; brand?: string; q?: string }>;
+  searchParams: Promise<{ tab?: string; brand?: string }>;
 }) {
   const sp = await searchParams;
-  const tab: Tab = (["early", "new", "watching", "archived"].includes(sp.tab ?? "") ? sp.tab : "new") as Tab;
-  const brandFilter = sp.brand ?? "";
-  const search = sp.q ?? "";
+  const tab: RadarTab = (["early", "new", "watching", "archived"].includes(sp.tab ?? "") ? sp.tab : "early") as RadarTab;
+  const brandFilter = sp.brand || null;
 
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Проверка тарифа Radar. Если none — показываем CTA.
+  // Проверяем доступ к Radar — radar_plan != 'none' OR active trial.
   const { data: seller } = await supabase
     .from("sellers")
-    .select("radar_plan,radar_brands_limit,radar_active_until,radar_trial_started_at")
+    .select("radar_plan, radar_brands_limit, radar_active_until, radar_trial_started_at")
     .eq("id", user.id)
     .maybeSingle();
 
-  const radarPlan = (seller as any)?.radar_plan ?? "none";
-  const brandsLimit = (seller as any)?.radar_brands_limit ?? 0;
-  const activeUntil = (seller as any)?.radar_active_until as string | null;
-  const trialStarted = (seller as any)?.radar_trial_started_at as string | null;
+  const hasAccess = seller && seller.radar_plan && seller.radar_plan !== "none"
+    && (!seller.radar_active_until || new Date(seller.radar_active_until) > new Date());
 
-  if (radarPlan === "none") {
-    return <RadarUnavailable hasUsedTrial={!!trialStarted} />;
-  }
-
-  // Подгружаем бренды (для фильтра и онбординга) и текущие запросы
-  const [{ data: brands }, { count: queriesCount }] = await Promise.all([
+  // Считаем количество брендов и запросов в каждом статусе для бейджей вкладок.
+  const [brandsRes, countsRes] = await Promise.all([
     supabase
       .from("radar_brands")
-      .select("id,name,status,sku_count")
+      .select("id, name, status, sku_count")
       .eq("seller_id", user.id)
-      .order("sku_count", { ascending: false }),
+      .order("name"),
     supabase
       .from("radar_queries")
-      .select("id", { count: "exact", head: true })
+      .select("status", { count: "exact" })
       .eq("seller_id", user.id),
   ]);
+  const brands = brandsRes.data ?? [];
+  const approvedBrands = brands.filter(b => b.status === "approved");
 
-  const approvedBrands = (brands ?? []).filter((b: any) => b.status === "approved");
-  const brandsCount = approvedBrands.length;
-
-  // Если брендов нет — показываем онбординг (загрузить прайс / добавить руками)
-  if (brandsCount === 0) {
-    return (
-      <OnboardingBlock
-        plan={radarPlan}
-        brandsLimit={brandsLimit}
-      />
-    );
+  // Группируем counts по status одним проходом.
+  const tabCounts: Record<RadarTab, number> = { early: 0, new: 0, watching: 0, archived: 0 };
+  for (const row of (countsRes.data ?? []) as any[]) {
+    if (row.status in tabCounts) tabCounts[row.status as RadarTab]++;
   }
 
-  // Считаем количество в каждой вкладке для бейджей
-  const tabCounts = await getTabCounts(supabase, user.id);
-
-  // Запросы для текущей вкладки
-  let queryBuilder = supabase
-    .from("radar_queries")
-    .select(`
-      id, query_text, current_frequency, trend_pct,
-      present_in_wb, present_in_ozon, is_favorite,
-      status, first_seen_at, last_updated_at,
-      brand_id, radar_brands(name)
-    `)
-    .eq("seller_id", user.id)
-    .eq("status", tab)
-    .order("current_frequency", { ascending: false })
-    .limit(200);
-
-  if (brandFilter) {
-    queryBuilder = queryBuilder.eq("brand_id", brandFilter);
+  // Selected tab → запрос рядов через view radar_queries_view (с brand_name + derived).
+  let queries: any[] = [];
+  if (hasAccess && approvedBrands.length > 0) {
+    let query = supabase
+      .from("radar_queries_view")
+      .select("*")
+      .eq("seller_id", user.id)
+      .eq("status", tab)
+      .order("current_frequency", { ascending: false, nullsFirst: false })
+      .limit(500);
+    if (brandFilter) query = query.eq("brand_id", brandFilter);
+    const { data } = await query;
+    queries = data ?? [];
   }
-  if (search) {
-    queryBuilder = queryBuilder.ilike("query_text", `%${search}%`);
-  }
-
-  const { data: queries } = await queryBuilder;
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div className="min-w-0">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
           <h1 className="font-display text-2xl sm:text-3xl md:text-4xl font-medium tracking-tight text-ink">
             Radar
           </h1>
-          <p className="mt-1.5 text-sm text-ink-muted leading-relaxed max-w-2xl">
-            Мониторим появление новинок в ассортименте ваших брендов через Wordstat и подсказки маркетплейсов.
-            Совпадение спроса в Wordstat + наличия в WB/OZON = реальный сигнал на закупку.
+          <p className="mt-1.5 text-sm text-ink-muted max-w-2xl">
+            Wordstat + WB/OZON suggest. Ловит новинки в ассортименте брендов
+            <span className="text-ink"> раньше</span> чем они начнут собирать отзывы.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 flex-wrap">
           <Link
             href={"/dashboard/radar/brands" as any}
-            className="inline-flex items-center rounded-lg border border-line bg-paper hover:border-lime-deep/40 px-3 py-2 text-sm font-medium text-ink transition"
+            className="inline-flex items-center rounded-lg border border-line bg-paper text-ink-muted hover:text-ink hover:border-lime-deep/40 px-3 py-2 text-sm font-mono uppercase tracking-wider transition"
           >
-            Бренды ({brandsCount}/{brandsLimit})
+            Бренды ({approvedBrands.length})
           </Link>
           <Link
             href={"/dashboard/radar/upload" as any}
-            className="inline-flex items-center rounded-lg bg-ink hover:bg-ink-soft text-paper px-3 py-2 text-sm font-medium transition"
+            className="inline-flex items-center rounded-lg bg-lime-deep text-paper hover:bg-lime-deep/90 px-4 py-2 text-sm font-mono uppercase tracking-wider font-semibold transition"
           >
             Загрузить прайс
           </Link>
         </div>
       </div>
 
-      {/* Активная подписка */}
-      {activeUntil && (
-        <div className="rounded-xl border border-lime-deep/30 bg-lime-soft/40 p-3 flex items-center justify-between gap-3 flex-wrap text-sm">
-          <div>
-            <span className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold">
-              Тариф {radarPlan}
-            </span>
-            <span className="ml-2 text-ink-muted">
-              активен до {new Date(activeUntil).toLocaleDateString("ru-RU")}
-            </span>
-          </div>
-          <Link href={"/billing" as any} className="font-mono text-[11px] uppercase tracking-wider text-lime-deep hover:underline">
-            Управлять →
-          </Link>
-        </div>
+      {!hasAccess ? (
+        <RadarNoAccess plan={seller?.radar_plan ?? "none"} />
+      ) : approvedBrands.length === 0 ? (
+        <RadarEmpty />
+      ) : (
+        <>
+          <RadarTabs tab={tab} counts={tabCounts} brandFilter={brandFilter} />
+          <RadarTable
+            queries={queries}
+            tab={tab}
+            brands={approvedBrands}
+            brandFilter={brandFilter}
+            currentTabTitle={TAB_TITLES[tab]}
+          />
+        </>
       )}
-
-      <RadarTabs currentTab={tab} counts={tabCounts} />
-
-      <RadarFilters
-        currentBrand={brandFilter}
-        currentSearch={search}
-        brands={approvedBrands}
-      />
-
-      <QueriesTable queries={queries ?? []} tab={tab} />
     </div>
   );
 }
 
-async function getTabCounts(supabase: any, sellerId: string) {
-  const tabs: Tab[] = ["early", "new", "watching", "archived"];
-  const counts: Record<Tab, number> = { early: 0, new: 0, watching: 0, archived: 0 };
-
-  // Параллельные запросы count по каждой вкладке
-  await Promise.all(
-    tabs.map(async (t) => {
-      const { count } = await supabase
-        .from("radar_queries")
-        .select("id", { count: "exact", head: true })
-        .eq("seller_id", sellerId)
-        .eq("status", t);
-      counts[t] = count ?? 0;
-    })
-  );
-
-  return counts;
-}
-
-function RadarUnavailable({ hasUsedTrial }: { hasUsedTrial: boolean }) {
+function RadarNoAccess({ plan }: { plan: string }) {
   return (
-    <div className="rounded-2xl border border-line bg-paper p-8 md:p-12 text-center max-w-3xl mx-auto">
-      <div className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold mb-3">
-        Radar · Новый модуль
+    <div className="rounded-2xl border-2 border-dashed border-line bg-paper p-8 md:p-12 text-center">
+      <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-lime-deep/30 bg-lime-soft/40 mb-4">
+        <span className="size-1.5 rounded-full bg-lime-deep" />
+        <span className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold">new module</span>
       </div>
-      <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">
-        Мониторинг новинок в ассортименте ваших брендов
-      </h1>
-      <p className="mx-auto mt-4 max-w-2xl text-ink-muted leading-relaxed">
-        Подключите Radar, чтобы получать сигналы о новых популярных запросах в Wordstat,
-        подтверждённых наличием в WB и OZON. Это позволит первыми удовлетворять спрос
-        и снимать сливки прибыли, пока конкуренты только начинают анализировать рынок.
+      <h2 className="font-display text-2xl md:text-3xl font-medium text-ink">Подключите Radar</h2>
+      <p className="mx-auto mt-3 max-w-2xl text-ink-muted leading-relaxed">
+        Radar отдельный модуль Veloseller для отслеживания появления новинок
+        в ассортименте брендов через Wordstat + WB/OZON suggest. Trial 14 дней — бесплатно.
       </p>
-
-      <div className="mt-8 grid sm:grid-cols-3 gap-3 max-w-2xl mx-auto text-left">
-        <div className="rounded-xl border border-line bg-bg-soft p-4">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1">Шаг 1</div>
-          <div className="font-medium text-ink text-sm">Загружаете прайс</div>
-          <div className="text-xs text-ink-muted mt-1">ИИ извлекает список брендов</div>
-        </div>
-        <div className="rounded-xl border border-line bg-bg-soft p-4">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1">Шаг 2</div>
-          <div className="font-medium text-ink text-sm">Подтверждаете бренды</div>
-          <div className="text-xs text-ink-muted mt-1">Лишние убираете в один клик</div>
-        </div>
-        <div className="rounded-xl border border-line bg-bg-soft p-4">
-          <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1">Шаг 3</div>
-          <div className="font-medium text-ink text-sm">Получаете сигналы</div>
-          <div className="text-xs text-ink-muted mt-1">Email + Telegram дайджест</div>
-        </div>
-      </div>
-
-      <div className="mt-8 flex gap-3 justify-center flex-wrap">
-        <Link
-          href={"/billing#radar" as any}
-          className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition"
-        >
-          Выбрать тариф
-        </Link>
-        {!hasUsedTrial && (
-          <Link
-            href={"/billing#radar-trial" as any}
-            className="inline-flex items-center rounded-lg border border-line bg-paper text-ink px-5 py-3 font-semibold hover:border-lime-deep/40 transition"
-          >
-            Начать пробный период (14 дн)
-          </Link>
-        )}
-      </div>
+      <Link
+        href={"/billing" as any}
+        className="inline-flex items-center mt-6 rounded-lg bg-ink text-paper px-5 py-3 font-mono uppercase tracking-wider text-sm font-semibold hover:bg-ink-soft transition"
+      >
+        Активировать Trial
+      </Link>
     </div>
   );
 }

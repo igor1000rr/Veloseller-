@@ -1,97 +1,79 @@
+import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import Link from "next/link";
-import { UploadForm } from "./UploadForm";
+import UploadForm from "./UploadForm";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-export default async function UploadPage() {
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
+export default async function RadarUploadPage() {
+  const sb = await createSupabaseServerClient();
+  const { data: { user } } = await sb.auth.getUser();
   if (!user) redirect("/login");
 
-  const { data: seller } = await supabase
-    .from("sellers")
-    .select("radar_plan,radar_brands_limit")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  const radarPlan = (seller as any)?.radar_plan ?? "none";
-  if (radarPlan === "none") redirect("/dashboard/radar");
-
-  const brandsLimit = (seller as any)?.radar_brands_limit ?? 0;
-
-  // История последних загрузок (для UX — пользователь видит что повторно тот же файл грузить не надо)
-  const { data: uploads } = await supabase
+  // Последние 5 загрузок — для истории на странице.
+  const { data: uploads } = await sb
     .from("radar_price_uploads")
-    .select("id,file_name,rows_total,brands_extracted,brands_approved,status,error_message,created_at,completed_at")
+    .select("id, file_name, rows_total, brands_extracted, brands_approved, status, ai_cost_usd, created_at, completed_at, error_message")
     .eq("seller_id", user.id)
     .order("created_at", { ascending: false })
-    .limit(10);
+    .limit(5);
 
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
-        <Link
-          href={"/dashboard/radar" as any}
-          className="font-mono text-[11px] uppercase tracking-wider text-ink-hush hover:text-ink transition mb-2 inline-block"
-        >
-          ← Назад в Radar
+        <Link href={"/dashboard/radar" as any} className="text-xs font-mono uppercase tracking-wider text-ink-hush hover:text-ink transition mb-2 inline-block">
+          ← К Radar
         </Link>
-        <h1 className="font-display text-2xl sm:text-3xl font-medium tracking-tight text-ink">
-          Загрузка прайса
-        </h1>
-        <p className="mt-1.5 text-sm text-ink-muted">
-          ИИ извлечёт бренды из вашего прайса. Лимит тарифа — {brandsLimit} брендов.
+        <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Загрузка прайса</h1>
+        <p className="mt-1 text-sm text-ink-muted max-w-xl">
+          Загрузите CSV или XLSX прайс поставщика — ИИ извлечёт список брендов.
+          После загрузки откроется страница подтверждения списка.
         </p>
       </div>
 
-      <UploadForm brandsLimit={brandsLimit} />
+      <UploadForm />
 
-      {uploads && uploads.length > 0 && (
-        <div className="rounded-2xl border border-line bg-paper overflow-hidden">
-          <div className="px-4 py-3 border-b border-line bg-bg-soft">
-            <h3 className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
-              История загрузок
-            </h3>
+      {(uploads ?? []).length > 0 && (
+        <div>
+          <h3 className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-3">
+            История загрузок
+          </h3>
+          <div className="rounded-2xl border border-line bg-paper overflow-hidden">
+            {(uploads ?? []).map((u, i, arr) => (
+              <div key={u.id} className={`px-4 py-3 ${i < arr.length - 1 ? "border-b border-line" : ""} flex items-center justify-between flex-wrap gap-2`}>
+                <div className="min-w-0">
+                  <div className="font-medium text-ink truncate">{u.file_name}</div>
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-ink-hush mt-1 flex gap-3 flex-wrap">
+                    <span>{new Date(u.created_at).toLocaleString("ru")}</span>
+                    <span>строк: {u.rows_total ?? "—"}</span>
+                    <span>брендов: {u.brands_extracted ?? "—"}</span>
+                    {u.ai_cost_usd != null && <span>${Number(u.ai_cost_usd).toFixed(4)}</span>}
+                  </div>
+                </div>
+                <StatusBadge status={u.status} error={u.error_message} />
+              </div>
+            ))}
           </div>
-          <table className="w-full text-sm">
-            <thead className="border-b border-line">
-              <tr>
-                <th className="text-left px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Файл</th>
-                <th className="text-right px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Строк</th>
-                <th className="text-right px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Брендов</th>
-                <th className="text-left px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Статус</th>
-                <th className="text-left px-4 py-2 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Дата</th>
-              </tr>
-            </thead>
-            <tbody>
-              {uploads.map((u: any) => (
-                <tr key={u.id} className="border-b border-line last:border-0">
-                  <td className="px-4 py-2 text-ink truncate max-w-[300px]">{u.file_name}</td>
-                  <td className="px-4 py-2 text-right tabular text-ink-muted">{u.rows_total}</td>
-                  <td className="px-4 py-2 text-right tabular text-ink-muted">
-                    {u.brands_approved}/{u.brands_extracted}
-                  </td>
-                  <td className="px-4 py-2">
-                    {u.status === "completed" && <span className="text-lime-deep text-xs font-mono uppercase">готово</span>}
-                    {u.status === "processing" && <span className="text-orange text-xs font-mono uppercase">обработка</span>}
-                    {u.status === "failed" && (
-                      <span className="text-rose text-xs font-mono uppercase" title={u.error_message ?? ""}>
-                        ошибка
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-ink-muted text-xs">
-                    {new Date(u.created_at).toLocaleDateString("ru-RU")}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       )}
     </div>
+  );
+}
+
+function StatusBadge({ status, error }: { status: string; error?: string | null }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    processing: { label: "обработка", cls: "text-azure border-azure/40 bg-azure/10" },
+    completed:  { label: "готово",    cls: "text-lime-deep border-lime-deep/40 bg-lime-soft" },
+    failed:     { label: "ошибка",    cls: "text-rose border-rose/40 bg-rose/10" },
+  };
+  const s = map[status] ?? map.processing;
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-1 rounded border text-[10px] font-mono uppercase tracking-wider font-semibold ${s.cls}`}
+      title={error ?? undefined}
+    >
+      {s.label}
+    </span>
   );
 }
