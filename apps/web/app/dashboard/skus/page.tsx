@@ -64,15 +64,10 @@ function defaultThresholdFor(filter: DashboardFilter): number | null {
   return null;
 }
 
-/**
- * Вернуть YYYY-MM-DD для UTC даты. UTC чтобы избежать TZ-перескоков
- * на проде (VPS обычно UTC, юзер на МСК — но date-input работает в YYYY-MM-DD).
- */
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-/** today минус N дней в YYYY-MM-DD UTC. */
 function daysAgo(n: number): string {
   const d = new Date();
   d.setUTCDate(d.getUTCDate() - n);
@@ -122,10 +117,6 @@ export default async function SkusPage({ searchParams }: {
   const dateFrom = parseDateOrNull(sp.date_from);
   const dateTo = parseDateOrNull(sp.date_to);
 
-  // Дефолтные даты для отображения в фильтре (Игорь 27.05.2026):
-  // селлер должен ВИДЕТЬ за какой период считается velocity, даже если он
-  // не выбрал даты руками. При переходе с /dashboard?period=N — дефолты
-  // подстраиваются под выбранный период.
   const defaultDateTo = isoDate(new Date());
   const defaultDateFrom = daysAgo(periodDays);
 
@@ -363,7 +354,6 @@ export default async function SkusPage({ searchParams }: {
 
   return (
     <div className="space-y-6">
-      {/* Header: только title + название склада + «Закупка на N дней» форма справа */}
       <header className="flex items-end justify-between gap-3 sm:gap-4 flex-wrap">
         <div className="min-w-0">
           <div className="inline-flex items-center gap-2 mb-2">
@@ -407,9 +397,6 @@ export default async function SkusPage({ searchParams }: {
         />
       )}
 
-      {/* Серая плашка фильтров: Период + чекбокс + 3 ranges.
-          defaultDateFrom/defaultDateTo — чтобы поле «Период» всегда было
-          заполнено (по умолчанию = последние periodDays дней). */}
       <SkusFilters
         warehouseCreatedAt={warehouseCreatedAt}
         ranges={filterRanges}
@@ -419,7 +406,6 @@ export default async function SkusPage({ searchParams }: {
         defaultDateTo={defaultDateTo}
       />
 
-      {/* Строка под фильтрами: поиск + сегменты + ColumnsPicker + Excel/CSV (paint-скрин 27.05.2026) */}
       <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
         <SearchInput />
         <div className="inline-flex gap-1 rounded-lg border border-line bg-paper p-1 overflow-x-auto max-w-full">
@@ -496,7 +482,6 @@ export default async function SkusPage({ searchParams }: {
               <Th col="stock" align="right">Остаток</Th>
               <Th col="price" align="right">Цена</Th>
               <Th col="tvelo" align="right">TVelo</Th>
-              <Th col="median" align="right">Медиана</Th>
               <Th col="trend" align="center">Тренд</Th>
               <Th col="coverage" align="right">Покрытие</Th>
               <Th col="oos" align="right">OOS ({periodDays}д)</Th>
@@ -527,7 +512,6 @@ export default async function SkusPage({ searchParams }: {
             {filtered.map((p: any) => {
               const m = (p.tvelo_metrics?.[0] ?? null) as any;
               const adjVel = m?.adjusted_velocity != null ? Number(m.adjusted_velocity) : 0;
-              const medVel = m?.median_30d_velocity != null ? Number(m.median_30d_velocity) : 0;
               const stockoutDays = m?.stockout_days != null ? Number(m.stockout_days) : 0;
               const salesUnits = salesByProduct[p.product_id] ?? 0;
               const lostRev = lostByProduct[p.product_id] ?? 0;
@@ -551,9 +535,6 @@ export default async function SkusPage({ searchParams }: {
                   <td className="col-skucol-price px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{m?.current_price ?? "—"}</td>
                   <td className="col-skucol-tvelo px-3 sm:px-4 py-3 text-right font-semibold tabular text-ink">
                     {adjVel > 0 ? adjVel.toFixed(2) : "—"}
-                  </td>
-                  <td className="col-skucol-median px-3 sm:px-4 py-3 text-right tabular text-ink-hush" title="Медиана из 30-day pre-period — используется для continuity correction">
-                    {medVel > 0 ? medVel.toFixed(2) : "—"}
                   </td>
                   <td className="col-skucol-trend px-3 sm:px-4 py-3"><VelocitySparkline points={sparkData[p.product_id] ?? []} /></td>
                   <td className="col-skucol-coverage px-3 sm:px-4 py-3 text-right tabular text-ink-soft">
@@ -597,7 +578,7 @@ export default async function SkusPage({ searchParams }: {
             })}
             {!filtered.length && (
               <tr>
-                <td colSpan={15} className="px-3 sm:px-4 py-12 text-center text-ink-muted text-sm">
+                <td colSpan={14} className="px-3 sm:px-4 py-12 text-center text-ink-muted text-sm">
                   {selected
                     ? `Пока нет данных по складу «${selected.name}». Дождитесь первой синхронизации или проверьте фильтры.`
                     : "Пока нет данных или ничего не подходит под фильтр."}

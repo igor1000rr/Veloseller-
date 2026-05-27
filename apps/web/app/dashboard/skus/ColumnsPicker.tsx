@@ -3,22 +3,23 @@
 import { useEffect, useState } from "react";
 
 /**
- * Регулировка видимости столбцов в таблице SKU (правка 8 Александра:
- * "И возможность регулировки столбцов").
+ * Регулировка видимости столбцов в таблице SKU.
  *
  * Сохраняет выбор в localStorage под ключом VELOSELLER_SKU_COLUMNS.
  *
  * Mobile-friendly: при первой загрузке (localStorage пуст) определяем
- * ширину окна и показываем только важные колонки на мобиле, чтобы не
- * было полотна-скрола из 15 столбцов.
+ * ширину окна и показываем только важные колонки на мобиле.
  *
  * Подход без перекомпиляции SSR: page.tsx навешивает классы col-skucol-<key>
  * на каждую ячейку <th>/<td>, а здесь генерим CSS-правила display:none
  * для скрытых ключей через inline <style> тег.
+ *
+ * История: колонка "median" убрана Игорьом 27.05.2026 — это внутреннее
+ * значение для continuity correction, юзеру видеть не нужно.
  */
 
 export type ColumnKey =
-  | "sku" | "name" | "stock" | "price" | "tvelo" | "median" | "trend"
+  | "sku" | "name" | "stock" | "price" | "tvelo" | "trend"
   | "coverage" | "oos" | "sales" | "reorder" | "confidence" | "health"
   | "lost_revenue" | "notes";
 
@@ -28,7 +29,6 @@ export const ALL_COLUMNS: { key: ColumnKey; label: string; required?: boolean }[
   { key: "stock",        label: "Остаток" },
   { key: "price",        label: "Цена" },
   { key: "tvelo",        label: "TVelo" },
-  { key: "median",       label: "Медиана" },
   { key: "trend",        label: "Тренд" },
   { key: "coverage",     label: "Покрытие" },
   { key: "oos",          label: "OOS" },
