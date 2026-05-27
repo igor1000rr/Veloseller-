@@ -7,8 +7,9 @@
 - snapshots retention в 04:00 UTC (БАГ 89)
 - reset stuck syncing каждые 10 минут (БАГ 90)
 - radar-poll в 06:00 UTC ежедневно (Wordstat poll для approved брендов + suggest)
+- radar-digest пн+чт в 09:00 UTC (Telegram дайджест по новинкам)
 
-Старые джобы daily-digest и weekly-report удалены — их функциял
+Старые джобы daily-digest и weekly-report удалены — их функционал
 выполняет универсальный daily-reports через notification_subscriptions.
 """
 from __future__ import annotations
@@ -93,10 +94,17 @@ def _job_sync_active_connections() -> None:
 
 
 def _job_expire_subscriptions() -> None:
-    """Откатывает истёкшие платные подписки в trial."""
+    """Откатывает истёкшие платные подписки в trial.
+
+    Также откатывает истёкшие Radar-подписки (radar_active_until < now)
+    в radar_plan='none', сохраняя radar_trial_started_at чтобы юзер
+    не мог получить ещё один trial.
+    """
     try:
         sb = get_supabase()
         now_iso = datetime.now(timezone.utc).isoformat()
+
+        # 1. Veloseller подписки
         expired_res = (
             sb.table("sellers")
             .select("id,email,plan,subscription_expires_at")
@@ -106,9 +114,6 @@ def _job_expire_subscriptions() -> None:
             .execute()
         )
         expired = expired_res.data or []
-        if not expired:
-            logger.info("expire-subscriptions: nothing to expire")
-            return
         for s in expired:
             try:
                 sb.table("sellers").update({
@@ -123,7 +128,38 @@ def _job_expire_subscriptions() -> None:
                 })
             except Exception:
                 logger.exception("failed to expire subscription for %s", s.get("id"))
-        logger.warning("expire-subscriptions: rolled back %d sellers to trial", len(expired))
+        if expired:
+            logger.warning("expire-subscriptions: rolled back %d sellers to trial", len(expired))
+
+        # 2. Radar подписки
+        expired_radar_res = (
+            sb.table("sellers")
+            .select("id,email,radar_plan,radar_active_until")
+            .neq("radar_plan", "none")
+            .not_.is_("radar_active_until", "null")
+            .lt("radar_active_until", now_iso)
+            .execute()
+        )
+        expired_radar = expired_radar_res.data or []
+        for s in expired_radar:
+            try:
+                sb.table("sellers").update({
+                    "radar_plan": "none",
+                    "radar_brands_limit": 0,
+                    "radar_active_until": None,
+                }).eq("id", s["id"]).execute()
+                logger.info("radar plan expired", extra={
+                    "seller_id": s["id"],
+                    "email": s.get("email"),
+                    "prev_radar_plan": s.get("radar_plan"),
+                })
+            except Exception:
+                logger.exception("failed to expire radar plan for %s", s.get("id"))
+        if expired_radar:
+            logger.warning("expire-subscriptions: rolled back %d radar plans", len(expired_radar))
+
+        if not expired and not expired_radar:
+            logger.info("expire-subscriptions: nothing to expire")
     except Exception:
         logger.exception("expire-subscriptions job failed")
 
@@ -159,6 +195,24 @@ def _job_radar_poll() -> None:
         logger.info("Cron radar-poll done: %s", result)
     except Exception:
         logger.exception("radar-poll scheduler job failed")
+
+
+def _job_radar_digest() -> None:
+    """Понедельник + четверг 09:00 UTC (= 12:00 МСК) — Telegram-дайджест по Radar.
+
+    Концепция Александра: "с 10 брендов 5 фраз в 2 недели". 2 раза в неделю
+    обеспечивает регулярность, но без спама. Дайджест отправляется только
+    если есть новые сигналы за последние 7 дней — пустыми не спамим.
+
+    Дедуп по дню (radar_actions) защищает от двойной отправки при
+    рестарте worker'а.
+    """
+    try:
+        from app.jobs.radar_digest import send_digests_to_all
+        result = send_digests_to_all()
+        logger.info("Cron radar-digest done: %s", result)
+    except Exception:
+        logger.exception("radar-digest scheduler job failed")
 
 
 def _job_snapshots_retention() -> None:
@@ -255,6 +309,15 @@ def start_scheduler() -> None:
         _job_daily_reports,
         CronTrigger(hour=9, minute=0),
         id="daily-reports",
+        replace_existing=True,
+    )
+    # Radar digest: 2x/week в понедельник (day_of_week=0) и четверг (=3)
+    # в 09:00 UTC (12:00 МСК). Концепция Александра — "5 фраз в 2 недели".
+    # APScheduler понимает day_of_week='mon,thu'.
+    _scheduler.add_job(
+        _job_radar_digest,
+        CronTrigger(day_of_week="mon,thu", hour=9, minute=0),
+        id="radar-digest",
         replace_existing=True,
     )
     _scheduler.add_job(
