@@ -25,6 +25,10 @@ export const dynamic = "force-dynamic";
  * Раньше выгружали всё подряд — с тысячами SKU в файле сложно работать.
  * Теперь: SKU из таблицы = SKU в файле (без лимита в 50).
  *
+ * Правка Игоря 28.05.2026: добавлена колонка sales_units (фактические продажи
+ * за период) — sum abs(delta_stock) для sales_like событий. Соответствует
+ * колонке "Продажи" в /dashboard/skus.
+ *
  * Логика фильтров должна быть синхронизирована с apps/web/app/dashboard/skus/page.tsx.
  * Если там появятся новые фильтры — добавлять и сюда.
  */
@@ -227,6 +231,53 @@ export async function GET(req: NextRequest) {
     fromOffset += PAGE;
   }
 
+  // === Фактические продажи за период (sales_units) — sum sales_like deltas ===
+  // То же что в page.tsx для колонки "Продажи". Берём матчем по periodDays:
+  // если period_end-period_start ≈ periodDays-1, событие учитывается.
+  // Для эффективности — один запрос на все product_ids видимой выборки.
+  const salesByProduct: Record<string, number> = {};
+  const productIdsForSales = allRows.map((p: any) => p.product_id);
+  if (productIdsForSales.length > 0) {
+    // Найдём общий period_start/end из метрик (если есть). Если фильтры по дате
+    // активны — используем их; иначе берём из первой подходящей метрики.
+    let salesStart: string | null = dateFrom;
+    let salesEnd: string | null = dateTo;
+    if (!salesStart || !salesEnd) {
+      for (const p of allRows) {
+        const metrics = (p.tvelo_metrics as any[] | undefined) ?? [];
+        const matched = metrics.find((m: any) => {
+          const len = Math.round((new Date(m.period_end).getTime() - new Date(m.period_start).getTime()) / 86400_000);
+          return Math.abs(len - (periodDays - 1)) <= 1;
+        }) ?? metrics[0];
+        if (matched?.period_start && matched?.period_end) {
+          salesStart = matched.period_start;
+          salesEnd = matched.period_end;
+          break;
+        }
+      }
+    }
+
+    if (salesStart && salesEnd) {
+      // Supabase .in() с большими массивами — батчим по 1000
+      const BATCH = 1000;
+      for (let i = 0; i < productIdsForSales.length; i += BATCH) {
+        const batch = productIdsForSales.slice(i, i + BATCH);
+        const { data: salesEvents } = await supabase
+          .from("inventory_events")
+          .select("product_id, delta_stock")
+          .in("product_id", batch)
+          .eq("event_type", "sales_like")
+          .gte("event_date", salesStart)
+          .lte("event_date", salesEnd);
+        for (const ev of (salesEvents ?? []) as any[]) {
+          const pid = ev.product_id;
+          const delta = Math.abs(Number(ev.delta_stock ?? 0));
+          salesByProduct[pid] = (salesByProduct[pid] ?? 0) + delta;
+        }
+      }
+    }
+  }
+
   // === Post-process фильтр по lost_revenue (вычисляемая колонка) ===
   // Нельзя отфильтровать в SQL — считается на лету: adj_vel * stockout_days * price
   const lostFilterActive = (lostMin !== null && lostMin > 0) || lostMax !== null;
@@ -236,6 +287,7 @@ export async function GET(req: NextRequest) {
     "current_stock", "current_price",
     "confirmed_velocity", "adjusted_velocity", "median_30d_velocity",
     "in_stock_days", "stockout_days", "coverage_days",
+    "sales_units",
     "inventory_segment", "sku_health_score", "underestimated_sku",
     "confidence_final", "confidence_initial",
     "confidence_replenishment", "confidence_anomaly",
@@ -263,13 +315,16 @@ export async function GET(req: NextRequest) {
     }) ?? metrics[0];
 
     const userNotes = p.user_notes ?? "";
+    const salesUnits = salesByProduct[p.product_id] ?? 0;
 
     if (!matched) {
       // Товар без метрик (возможно только без фильтров) — пропускаем если есть lost-фильтр.
       if (lostFilterActive) continue;
       lines.push([
         escape(p.sku), escape(p.product_name),
-        periodDays, "", "", "", "", "", "", "", "", "", "", "", "", "",
+        periodDays, "", "", "", "", "", "", "", "", "", "",
+        salesUnits,
+        "", "", "",
         "", "", "", "", "", "", "",
         escape(userNotes),
       ].join(sep));
@@ -296,6 +351,7 @@ export async function GET(req: NextRequest) {
       matched.current_stock, currentPrice,
       matched.confirmed_velocity, matched.adjusted_velocity, matched.median_30d_velocity ?? "",
       matched.in_stock_days, matched.stockout_days, matched.coverage_days ?? "",
+      salesUnits,
       escape(matched.inventory_segment ?? ""), matched.sku_health_score ?? "",
       matched.underestimated_sku ? "1" : "0",
       matched.confidence_score,
