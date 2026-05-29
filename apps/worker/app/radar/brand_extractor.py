@@ -1,4 +1,4 @@
-"""Извлечение брендов из прайса через OpenRouter + Claude Haiku.
+"""Извлечение брендов из прайса через DeepSeek (OpenAI-совместимый API).
 
 Workflow:
   1. Парсим XLSX/CSV → list[dict[colname, value]]
@@ -10,9 +10,16 @@ Workflow:
   5. Сохраняем в radar_brands со status=approved
   6. Возвращаем (brands_list, ai_metrics) для записи в radar_price_uploads
 
-ENV переменные:
-  OPENROUTER_API_KEY — обязательно
-  OPENROUTER_MODEL — необязательно (default: anthropic/claude-haiku-4.5)
+ENV переменные (priority order):
+  DEEPSEEK_API_KEY   — основной (рекомендуется), прямой API api.deepseek.com
+  OPENROUTER_API_KEY — fallback, через OpenRouter (если ходим из-под VPN)
+
+DEEPSEEK_MODEL — необязательно, default 'deepseek-chat' (DeepSeek V3, дёшево)
+                 альтернатива 'deepseek-reasoner' (R1, для сложных задач)
+
+История: 29.05.2026 переход с OpenRouter на DeepSeek прямой — OpenRouter
+перестал принимать платежи из РФ. DeepSeek работает напрямую (китайский
+сервис), не блокируется, формат OpenAI-совместимый.
 """
 from __future__ import annotations
 
@@ -28,12 +35,17 @@ import requests
 
 logger = logging.getLogger("veloseller.radar.brand_extractor")
 
+# DeepSeek основной (рекомендуется в РФ), OpenRouter fallback
+_DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 _OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
 _REQUEST_TIMEOUT_SEC = 120.0
 _MAX_ROWS_TO_AI = 200  # больше не отправляем — это уже >30K input tokens
 
-# Дефолтная модель — Haiku 4.5 ($1/M input, $5/M output)
-_DEFAULT_MODEL = "anthropic/claude-haiku-4.5"
+# Дефолтная модель DeepSeek — V3 chat ($0.27/M in, $1.10/M out)
+# В 3-4 раза дешевле Claude Haiku, качество на task «бренды из прайса» сравнимое
+_DEFAULT_DEEPSEEK_MODEL = "deepseek-chat"
+_DEFAULT_OPENROUTER_MODEL = "anthropic/claude-haiku-4.5"
 
 # Системный промт для AI: оно должно вернуть строго JSON
 _SYSTEM_PROMPT = """Ты — помощник для селлеров маркетплейсов (OZON, Wildberries).
@@ -168,19 +180,68 @@ def _format_rows_as_text(rows: list[dict]) -> str:
 
 
 def _calculate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
-    """Стоимость в USD по тарифу OpenRouter.
+    """Стоимость в USD по тарифу провайдера.
 
     Цены за 1M токенов (актуально на май 2026):
-      anthropic/claude-haiku-4.5: $1/$5
-      anthropic/claude-sonnet-4.6: $3/$15
+
+    DeepSeek:
+      deepseek-chat:     $0.27/$1.10  (V3 — дешёвая universal модель)
+      deepseek-reasoner: $0.55/$2.19  (R1 — reasoning, для сложных задач)
+
+    OpenRouter (если используется как fallback):
+      anthropic/claude-haiku-4.5:  $1.00/$5.00
+      anthropic/claude-sonnet-4.6: $3.00/$15.00
+      anthropic/claude-opus-4.7:   $5.00/$25.00
     """
     rates = {
-        "anthropic/claude-haiku-4.5": (1.0, 5.0),
+        # DeepSeek прямой
+        "deepseek-chat":      (0.27, 1.10),
+        "deepseek-reasoner":  (0.55, 2.19),
+        # OpenRouter — Claude
+        "anthropic/claude-haiku-4.5":  (1.0, 5.0),
         "anthropic/claude-sonnet-4.6": (3.0, 15.0),
-        "anthropic/claude-opus-4.7": (5.0, 25.0),
+        "anthropic/claude-opus-4.7":   (5.0, 25.0),
     }
-    in_rate, out_rate = rates.get(model, (1.0, 5.0))  # default Haiku
+    in_rate, out_rate = rates.get(model, (0.27, 1.10))  # default deepseek-chat
     return (input_tokens * in_rate + output_tokens * out_rate) / 1_000_000
+
+
+def _resolve_provider() -> tuple[str, str, str, dict[str, str]]:
+    """Определяет какой провайдер использовать на основе env переменных.
+
+    Returns:
+        (api_url, api_key, default_model, extra_headers)
+
+    Приоритет:
+      1. DEEPSEEK_API_KEY — основной (рекомендуется в РФ)
+      2. OPENROUTER_API_KEY — fallback (если работает VPN или прокси)
+
+    Если ни один не задан — возвращает пустой api_key, вызывающий код вернёт
+    BrandExtractionResult с error.
+    """
+    deepseek_key = os.getenv("DEEPSEEK_API_KEY", "").strip()
+    openrouter_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+
+    if deepseek_key:
+        return (
+            _DEEPSEEK_URL,
+            deepseek_key,
+            os.getenv("DEEPSEEK_MODEL", _DEFAULT_DEEPSEEK_MODEL),
+            {},  # DeepSeek не требует никаких доп. заголовков
+        )
+
+    if openrouter_key:
+        return (
+            _OPENROUTER_URL,
+            openrouter_key,
+            os.getenv("OPENROUTER_MODEL", _DEFAULT_OPENROUTER_MODEL),
+            {
+                "HTTP-Referer": "https://veloseller.ru",
+                "X-Title": "Veloseller Radar",
+            },
+        )
+
+    return ("", "", "", {})
 
 
 def extract_brands_from_price(
@@ -195,13 +256,11 @@ def extract_brands_from_price(
     Используется и в /api/radar/upload, и в worker если будет отложенная
     обработка.
     """
-    api_key = os.getenv("OPENROUTER_API_KEY", "").strip()
+    api_url, api_key, model, extra_headers = _resolve_provider()
     if not api_key:
         return BrandExtractionResult(
-            error="OPENROUTER_API_KEY не настроен в env"
+            error="Ни DEEPSEEK_API_KEY, ни OPENROUTER_API_KEY не настроены в env"
         )
-
-    model = os.getenv("OPENROUTER_MODEL", _DEFAULT_MODEL)
 
     # 1. Парсим файл
     try:
@@ -220,16 +279,16 @@ def extract_brands_from_price(
             error="В прайсе не нашлось текстовых данных — нечего анализировать"
         )
 
-    # 3. Запрос к OpenRouter
+    # 3. Запрос к AI (OpenAI-совместимый формат, работает и для DeepSeek и для OpenRouter)
     try:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            **extra_headers,
+        }
         resp = requests.post(
-            _OPENROUTER_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://veloseller.ru",
-                "X-Title": "Veloseller Radar",
-            },
+            api_url,
+            headers=headers,
             json={
                 "model": model,
                 "messages": [
@@ -238,20 +297,22 @@ def extract_brands_from_price(
                 ],
                 "temperature": 0.0,
                 "max_tokens": 4000,
+                # DeepSeek поддерживает response_format для гарантии JSON,
+                # но не все версии. Не используем, парсим вручную с regex.
             },
             timeout=_REQUEST_TIMEOUT_SEC,
         )
         resp.raise_for_status()
         data = resp.json()
     except Exception as e:
-        return BrandExtractionResult(error=f"OpenRouter API ошибка: {e}")
+        return BrandExtractionResult(error=f"AI API ошибка: {e}")
 
     # 4. Парсим ответ
     try:
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError) as e:
         return BrandExtractionResult(
-            error=f"Неожиданный формат ответа OpenRouter: {e}",
+            error=f"Неожиданный формат ответа AI: {e}",
             ai_raw_response=data,
         )
 
