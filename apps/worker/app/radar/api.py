@@ -1,8 +1,9 @@
 """Radar HTTP endpoints для worker'а.
 
 Сейчас один endpoint:
-  POST /radar/extract-brands — принимает прайс XLSX/CSV, вызывает OpenRouter,
-       создаёт бренды в БД через radar_price_uploads + radar_brands.
+  POST /radar/extract-brands — принимает прайс XLSX/CSV, вызывает DeepSeek
+       (или OpenRouter fallback), создаёт бренды в БД через
+       radar_price_uploads + radar_brands.
 
 Вызывается из /api/radar/upload (Next.js → Worker).
 Аутентификация — X-Worker-Secret (как у /jobs/*).
@@ -27,6 +28,19 @@ from app.radar.brand_extractor import extract_brands_from_price
 logger = logging.getLogger("veloseller.worker.radar_api")
 
 router = APIRouter(prefix="/radar", tags=["radar"])
+
+
+def _detect_ai_provider(model_name: str) -> str:
+    """Определяет провайдер по имени модели для записи в radar_price_uploads.
+
+    DeepSeek модели начинаются с 'deepseek-', OpenRouter — с провайдер/префиксов
+    ('anthropic/', 'openai/' и т.п.).
+    """
+    if model_name.startswith("deepseek-"):
+        return "deepseek"
+    if "/" in model_name:
+        return "openrouter"
+    return "unknown"
 
 
 @router.post("/extract-brands")
@@ -153,11 +167,14 @@ async def extract_brands(
                              extra={"seller_id": seller_id, "brand": brand.name})
 
     # 5. Обновление upload
+    # ai_provider определяется по имени модели — раньше было захардкожено
+    # "openrouter", теперь поддерживается и DeepSeek (29.05.2026 переход
+    # OpenRouter → DeepSeek из-за блокировки платежей из РФ).
     try:
         sb.table("radar_price_uploads").update({
             "status": "completed",
             "rows_total": rows_total,
-            "ai_provider": "openrouter",
+            "ai_provider": _detect_ai_provider(result.ai_model),
             "ai_model": result.ai_model,
             "ai_input_tokens": result.ai_input_tokens,
             "ai_output_tokens": result.ai_output_tokens,
@@ -171,6 +188,7 @@ async def extract_brands(
 
     logger.info("radar.extract_brands done",
                 extra={"seller_id": seller_id, "upload_id": upload_id,
+                       "ai_provider": _detect_ai_provider(result.ai_model),
                        "ai_model": result.ai_model,
                        "tokens_in": result.ai_input_tokens,
                        "tokens_out": result.ai_output_tokens,
