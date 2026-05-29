@@ -67,6 +67,7 @@ export default function AppHeader({
     : [
         { href: "/admin",          label: "Обзор" },
         { href: "/admin/finance",  label: "Финансы" },
+        { href: "/admin/radar",    label: "Radar" },
         { href: "/admin/health",   label: "Здоровье" },
         { href: "/admin/sellers",  label: "Селлеры" },
         { href: "/admin/activity", label: "Активность" },
