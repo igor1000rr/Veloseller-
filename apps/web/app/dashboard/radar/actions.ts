@@ -140,3 +140,78 @@ export async function actionAddBrandManual(name: string) {
   revalidatePath("/dashboard/radar");
   revalidatePath("/dashboard/radar/brands");
 }
+
+/**
+ * Массовое подтверждение брендов из ревью прайса.
+ * Фишка из обсуждения с Александром 28.05.2026 — после загрузки прайса
+ * селлер видит таблицу с галочками и одной кнопкой подтверждает выбор.
+ *
+ * approvedIds — те что надо сделать approved (галочка стоит).
+ * excludedIds — те что надо сделать excluded (галочка снята).
+ *
+ * Проверяем лимит тарифа: если approvedIds + текущие approved (которые
+ * НЕ входят в excludedIds) превышают лимит — кидаем ошибку с количеством.
+ */
+export async function actionBulkUpdateBrands(
+  approvedIds: string[],
+  excludedIds: string[],
+) {
+  const { sb, user } = await getUser();
+
+  // Лимит тарифа
+  const { data: seller } = await sb
+    .from("sellers")
+    .select("radar_brands_limit")
+    .eq("id", user.id)
+    .maybeSingle();
+  const limit = seller?.radar_brands_limit ?? 0;
+
+  // Сколько approved останется ПОСЛЕ операции:
+  //   currently_approved - те что excluded (часть из excludedIds может быть approved)
+  //   + approvedIds (те что хотим включить)
+  // Считаем точно: смотрим текущее состояние всех затронутых брендов.
+  const allIds = [...new Set([...approvedIds, ...excludedIds])];
+  if (allIds.length === 0) return { changed: 0 };
+
+  const { data: existing } = await sb
+    .from("radar_brands")
+    .select("id, status")
+    .eq("seller_id", user.id)
+    .in("id", allIds);
+
+  // Текущие approved селлера (не в нашем списке)
+  const { count: otherApproved } = await sb
+    .from("radar_brands")
+    .select("id", { count: "exact", head: true })
+    .eq("seller_id", user.id)
+    .eq("status", "approved")
+    .not("id", "in", `(${allIds.join(",")})`);
+
+  const futureApprovedCount = (otherApproved ?? 0) + approvedIds.length;
+  if (futureApprovedCount > limit) {
+    throw new Error(
+      `Лимит тарифа: ${limit} брендов. Выбрано ${futureApprovedCount} — снимите галочки с ${futureApprovedCount - limit} или перейдите на старший тариф.`,
+    );
+  }
+
+  // Bulk update: два запроса вместо N
+  const updatedAt = new Date().toISOString();
+  if (approvedIds.length > 0) {
+    await sb.from("radar_brands")
+      .update({ status: "approved", updated_at: updatedAt })
+      .eq("seller_id", user.id)
+      .in("id", approvedIds);
+  }
+  if (excludedIds.length > 0) {
+    await sb.from("radar_brands")
+      .update({ status: "excluded", updated_at: updatedAt })
+      .eq("seller_id", user.id)
+      .in("id", excludedIds);
+  }
+
+  await logAction(sb, user.id, null, "brands_bulk_updated");
+  revalidatePath("/dashboard/radar");
+  revalidatePath("/dashboard/radar/brands");
+
+  return { changed: approvedIds.length + excludedIds.length };
+}
