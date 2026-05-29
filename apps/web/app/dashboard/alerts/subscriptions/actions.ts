@@ -19,7 +19,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  *   weekly_report       — сводный отчёт по всему складу
  *
  * Каналы (channel): email | telegram
- * Частота (frequency): weekly | monthly (Правка 11 Правок 4)
+ * Частота (frequency): daily | weekly | monthly
+ *   daily   — каждый день (params.day_of_week игнорируется), 29.05.2026
  *   weekly  — каждую неделю в day_of_week
  *   monthly — в первый day_of_week каждого месяца (today.day <= 7)
  *
@@ -39,7 +40,7 @@ export type NotificationKind =
   | "weekly_report";
 
 export type NotificationChannel = "email" | "telegram";
-export type NotificationFrequency = "weekly" | "monthly";
+export type NotificationFrequency = "daily" | "weekly" | "monthly";
 
 type ActionResult = { ok: boolean; error?: string };
 
