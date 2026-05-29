@@ -58,6 +58,22 @@ export default async function DashboardOverview({ searchParams }: {
   const currency = (seller as any)?.currency ?? "RUB";
   const fmt = (n: number | null | undefined) => formatMoney(n, currency);
 
+  // ПРАВКА 29.05.2026: возраст данных склада для баннера «низкая точность».
+  // Считаем от первого snapshot текущего склада. Если меньше 14 дней —
+  // TVelo и связанные расчёты ещё нестабильны.
+  // Запрос дешёвый: ORDER ASC LIMIT 1 на indexed колонке.
+  const { data: oldestSnapshot } = await supabase
+    .from("inventory_snapshots")
+    .select("snapshot_time")
+    .eq("connection_id", currentWarehouseId)
+    .order("snapshot_time", { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  const daysOfWarehouseHistory = oldestSnapshot?.snapshot_time
+    ? Math.floor((Date.now() - new Date(oldestSnapshot.snapshot_time).getTime()) / 86400_000)
+    : 0;
+  const showDataWarmupBanner = daysOfWarehouseHistory < 14;
+
   // ПРАВКА 10 этап 1 (25.05.2026): per-warehouse агрегаты в моменте.
   // RPC считает на лету для одного connection_id — заменяет старый
   // запрос store_metrics (агрегат по seller_id).
@@ -165,6 +181,10 @@ export default async function DashboardOverview({ searchParams }: {
             на случай если потребуется для админ-нужд. */}
         <PeriodSelector current={period} />
       </div>
+
+      {showDataWarmupBanner && (
+        <DataWarmupBanner days={daysOfWarehouseHistory} />
+      )}
 
       {showMultiWarehouseBanner && (
         <div className="rounded-xl border border-lime-deep/30 bg-lime-soft/40 p-4 flex items-start gap-3">
@@ -369,6 +389,64 @@ export default async function DashboardOverview({ searchParams }: {
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Баннер «низкая точность данных» — показывается когда у склада < 14 дней истории.
+ * Алгоритм TVelo нуждается в этом окне для стабилизации; до 14 дней расчёты
+ * сильно скачут от каждого snapshot, что юзер видит и недоумевает.
+ *
+ * Три уровня по дням:
+ *   0-3   красный   «практически нет данных» — все цифры приблизительные
+ *   4-7   оранжевый «данных мало» — расчёты могут меняться сильно
+ *   8-13  жёлтый    «накапливается» — точность растёт каждый день
+ */
+function DataWarmupBanner({ days }: { days: number }) {
+  let tone: "danger" | "warn" | "soft" = "soft";
+  let label = "";
+  let detail = "";
+
+  if (days <= 3) {
+    tone = "danger";
+    label = days === 0
+      ? "По этому складу пока ничего не считалось"
+      : `Данных всего ${days} ${pluralize(days, "день", "дня", "дней")}`;
+    detail = "Все цифры — приблизительные. TVelo, покрытие, неликвид, потерянная выручка стабилизируются через 14 дней. Подождите неделю и возвращайтесь — будет принципиально другая картина.";
+  } else if (days <= 7) {
+    tone = "warn";
+    label = `Данных ${days} ${pluralize(days, "день", "дня", "дней")} — точность низкая`;
+    detail = "Расчёты ещё не вышли на плато. Скорость и покрытие могут заметно меняться каждый день. Через 14 дней цифры будут более устойчивыми.";
+  } else {
+    tone = "soft";
+    label = `Данных ${days} ${pluralize(days, "день", "дня", "дней")} из 14 минимально нужных`;
+    detail = "Уже видно общую картину, но расчёты ещё уточняются. Через несколько дней дисперсия станет минимальной.";
+  }
+
+  const classes = {
+    danger: "border-rose/30 bg-rose/5",
+    warn:   "border-orange/30 bg-orange/5",
+    soft:   "border-azure/30 bg-azure/5",
+  }[tone];
+  const dotClasses = {
+    danger: "bg-rose",
+    warn:   "bg-orange",
+    soft:   "bg-azure",
+  }[tone];
+  const labelClasses = {
+    danger: "text-rose",
+    warn:   "text-orange",
+    soft:   "text-azure",
+  }[tone];
+
+  return (
+    <div className={`rounded-xl border ${classes} p-4 flex items-start gap-3`}>
+      <span className={`${dotClasses} size-2 rounded-full mt-2 shrink-0`} />
+      <div className="flex-1 text-sm">
+        <div className={`font-medium ${labelClasses}`}>{label}</div>
+        <p className="mt-1 text-ink-muted leading-relaxed">{detail}</p>
+      </div>
     </div>
   );
 }
