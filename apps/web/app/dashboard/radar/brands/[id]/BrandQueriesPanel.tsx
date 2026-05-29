@@ -31,7 +31,14 @@ const STATUS_TABS = [
 
 type StatusFilter = (typeof STATUS_TABS)[number]["id"] | "all";
 
-export default function BrandQueriesPanel({ queries }: { queries: Query[] }) {
+export default function BrandQueriesPanel({
+  queries,
+  perQueryHistory,
+}: {
+  queries: Query[];
+  /** Помесячная history каждой фразы — словарь query_id → [{ym, freq}, ...] */
+  perQueryHistory?: Record<string, { ym: string; freq: number }[]>;
+}) {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
 
@@ -99,7 +106,7 @@ export default function BrandQueriesPanel({ queries }: { queries: Query[] }) {
               <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
                 Частота
               </th>
-              <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
+              <th className="text-center px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
                 Тренд
               </th>
               <th className="text-center px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
@@ -119,7 +126,11 @@ export default function BrandQueriesPanel({ queries }: { queries: Query[] }) {
               </tr>
             )}
             {filtered.map((q) => (
-              <QueryRow key={q.id} query={q} />
+              <QueryRow
+                key={q.id}
+                query={q}
+                history={perQueryHistory?.[q.id]}
+              />
             ))}
           </tbody>
         </table>
@@ -128,7 +139,13 @@ export default function BrandQueriesPanel({ queries }: { queries: Query[] }) {
   );
 }
 
-function QueryRow({ query }: { query: Query }) {
+function QueryRow({
+  query,
+  history,
+}: {
+  query: Query;
+  history?: { ym: string; freq: number }[];
+}) {
   const [pending, startTransition] = useTransition();
 
   const onFavorite = () => startTransition(async () => {
@@ -166,13 +183,19 @@ function QueryRow({ query }: { query: Query }) {
           </span>
         )}
       </td>
-      <td className="px-4 py-3 text-right tabular text-ink">
+      <td className="px-4 py-3 text-right tabular text-ink whitespace-nowrap">
         {query.current_frequency?.toLocaleString("ru-RU") ?? "—"}
       </td>
-      <td className={`px-4 py-3 text-right tabular ${trendColor}`}>
-        {trend == null ? "—" : `${trend > 0 ? "+" : ""}${trend.toFixed(0)}%`}
+      <td className={`px-4 py-3 text-center whitespace-nowrap`}>
+        {/* Sparkline + trend % компактно в одной ячейке */}
+        <div className="inline-flex items-center gap-2">
+          <MiniSparkline history={history} trendPct={trend} />
+          <span className={`tabular text-xs font-mono ${trendColor}`}>
+            {trend == null ? "—" : `${trend > 0 ? "+" : ""}${trend.toFixed(0)}%`}
+          </span>
+        </div>
       </td>
-      <td className="px-4 py-3 text-center text-xs">
+      <td className="px-4 py-3 text-center text-xs whitespace-nowrap">
         <span className={`font-mono uppercase tracking-wider mr-1 ${
           query.present_in_wb ? "text-lime-deep" : "text-ink-hush"
         }`}>
@@ -205,5 +228,68 @@ function QueryRow({ query }: { query: Query }) {
         </button>
       </td>
     </tr>
+  );
+}
+
+/**
+ * Мини-sparkline для одной строки таблицы — компактный SVG 80×24.
+ * Показывает последние 6 точек частоты фразы по месяцам.
+ * Цвет линии: зелёный/красный/серый по trend_pct (синхронизирован с
+ * текстовым значением рядом).
+ *
+ * Если history меньше 2 точек — не рендерим вообще (нечего показать).
+ */
+function MiniSparkline({
+  history,
+  trendPct,
+}: {
+  history?: { ym: string; freq: number }[];
+  trendPct: number | null;
+}) {
+  if (!history || history.length < 2) {
+    return <span className="inline-block w-[80px] h-[24px] text-ink-hush text-xs text-center leading-[24px]">—</span>;
+  }
+
+  const points = history.slice(-6);  // последние 6 месяцев
+  const W = 80;
+  const H = 24;
+  const PAD = 2;
+  const max = Math.max(...points.map(p => p.freq), 1);
+  const min = Math.min(...points.map(p => p.freq), 0);
+  const xStep = (W - PAD * 2) / Math.max(points.length - 1, 1);
+  const yScale = (v: number) =>
+    H - PAD - ((v - min) / (max - min || 1)) * (H - PAD * 2);
+
+  const pathD = points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${PAD + i * xStep} ${yScale(p.freq)}`)
+    .join(" ");
+
+  const color =
+    trendPct == null ? "text-ink-hush"
+    : trendPct > 5 ? "text-lime-deep"
+    : trendPct < -5 ? "text-rose"
+    : "text-ink-muted";
+
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      width={W}
+      height={H}
+      className={`inline-block ${color}`}
+      style={{ verticalAlign: "middle" }}
+    >
+      <path d={pathD} fill="none" stroke="currentColor" strokeWidth="1.5" />
+      {/* Последняя точка — кружочек для эмфазиса */}
+      <circle
+        cx={PAD + (points.length - 1) * xStep}
+        cy={yScale(points[points.length - 1].freq)}
+        r="1.5"
+        fill="currentColor"
+      >
+        <title>
+          {points.map(p => `${p.ym}: ${p.freq.toLocaleString("ru-RU")}`).join(" → ")}
+        </title>
+      </circle>
+    </svg>
   );
 }
