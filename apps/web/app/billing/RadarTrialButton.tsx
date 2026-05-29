@@ -13,7 +13,9 @@ export function RadarTrialButton() {
     startTransition(async () => {
       try {
         await actionStartRadarTrial();
-        router.push("/dashboard/radar");
+        // ?welcome=1 — флаг для onboarding-баннера на /dashboard/radar.
+        // Показывает поздравление с активацией триала, направляет на загрузку прайса.
+        router.push("/dashboard/radar?welcome=1");
         router.refresh();
       } catch (e: any) {
         setError(e.message ?? "Ошибка");
