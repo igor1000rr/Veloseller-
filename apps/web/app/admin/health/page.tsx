@@ -1,4 +1,5 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import Link from "next/link";
 import { HealthRadial, HourlyHeatmap } from "../AdminCharts";
 
 export const dynamic = "force-dynamic";
@@ -12,23 +13,25 @@ export default async function HealthPage() {
     { count: connectionsTotal },
     { count: connectionsActive },
     { count: connectionsError },
-    { count: connectionsIdle },
+    { count: connectionsPaused },
     { count: snapshots1d },
     { count: snapshots7d },
     { data: snapshots1dRows },
     { data: connectionsBySource },
     { data: errorConns },
+    { data: connectionsAge },
   ] = await Promise.all([
     supabase.from("data_connections").select("id", { count: "exact", head: true }),
     supabase.from("data_connections").select("id", { count: "exact", head: true }).eq("status", "active"),
     supabase.from("data_connections").select("id", { count: "exact", head: true }).eq("status", "error"),
-    supabase.from("data_connections").select("id", { count: "exact", head: true }).eq("status", "idle"),
+    supabase.from("data_connections").select("id", { count: "exact", head: true }).eq("status", "paused"),
     supabase.from("inventory_snapshots").select("snapshot_id", { count: "exact", head: true }).gte("snapshot_time", day1Ago),
     supabase.from("inventory_snapshots").select("snapshot_id", { count: "exact", head: true }).gte("snapshot_time", day7Ago),
     supabase.from("inventory_snapshots").select("snapshot_time").gte("snapshot_time", day1Ago),
     supabase.from("data_connections").select("id,source,marketplace,status"),
     supabase.from("data_connections").select("id,source,marketplace,name,status,last_error,last_sync_at,seller_id,sellers(email)")
       .eq("status", "error").order("last_sync_at", { ascending: false }).limit(20),
+    supabase.rpc("admin_connection_data_age"),
   ]);
 
   // Hourly distribution за 24ч
@@ -51,6 +54,13 @@ export default async function HealthPage() {
   // Overall health score
   const total = connectionsTotal ?? 0;
   const healthScore = total > 0 ? Math.round(((connectionsActive ?? 0) / total) * 100) : 100;
+
+  // Stale connections: 24h+ без sync (или sync вообще не было)
+  const connAge = (connectionsAge ?? []) as any[];
+  const staleConnections = connAge.filter(c =>
+    c.hours_since_last_sync == null || Number(c.hours_since_last_sync) > 24
+  );
+  const youngHistory = connAge.filter(c => c.days_of_history < 14 && c.status === "active");
 
   return (
     <div className="space-y-8 md:space-y-10">
@@ -78,10 +88,69 @@ export default async function HealthPage() {
         <div className="md:col-span-2 grid grid-cols-2 gap-3">
           <StatusCard label="Активных"     value={connectionsActive ?? 0} tone="good" />
           <StatusCard label="Ошибка"        value={connectionsError ?? 0}  tone={connectionsError ? "bad" : "neutral"} />
-          <StatusCard label="Простаивают" value={connectionsIdle ?? 0}   tone={connectionsIdle ? "warn" : "neutral"} />
+          <StatusCard label="На паузе"     value={connectionsPaused ?? 0} tone={connectionsPaused ? "warn" : "neutral"} />
           <StatusCard label="Всего"         value={connectionsTotal ?? 0}  tone="neutral" />
         </div>
       </section>
+
+      {/* Возраст данных — главный новый раздел.
+          Stale > 24h sync и младше 14 дней истории — рискованные склады */}
+      {connAge.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+            <div className="flex items-center gap-2">
+              <span className="size-1 rounded-full bg-azure" />
+              <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-azure font-semibold">
+                Возраст данных по складам
+              </h2>
+            </div>
+            <div className="font-mono text-[10px] text-ink-hush">
+              {staleConnections.length > 0 && (
+                <span className="text-rose mr-3">{staleConnections.length} зависших</span>
+              )}
+              {youngHistory.length > 0 && (
+                <span className="text-orange">{youngHistory.length} новых (&lt;14д)</span>
+              )}
+            </div>
+          </div>
+          <div className="rounded-2xl border border-line bg-paper overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-bg-soft border-b border-line">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
+                      Склад
+                    </th>
+                    <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
+                      Селлер
+                    </th>
+                    <th className="text-center px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
+                      Статус
+                    </th>
+                    <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
+                      История
+                    </th>
+                    <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
+                      Snapshots
+                    </th>
+                    <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
+                      Последний sync
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {connAge.map(row => (
+                    <ConnectionAgeRow key={row.connection_id} row={row} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p className="mt-2 font-mono text-[10px] text-ink-hush">
+            Красный — sync &gt; 24ч или меньше 7 дней истории · Жёлтый — sync &gt; 12ч или 7-14 дней истории
+          </p>
+        </section>
+      )}
 
       <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="rounded-2xl border border-line bg-paper p-5 md:p-6">
@@ -138,7 +207,9 @@ export default async function HealthPage() {
               <div key={c.id} className="px-4 md:px-5 py-3 border-b border-line last:border-0">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm text-ink font-medium">{seller?.email || "—"}</div>
+                    <Link href={`/admin/sellers/${c.seller_id}` as any} className="text-sm text-ink font-medium hover:text-lime-deep transition">
+                      {seller?.email || "—"}
+                    </Link>
                     <div className="mt-0.5 font-mono text-[11px] text-ink-hush">{c.marketplace || c.source} · {c.name}</div>
                     <div className="mt-1 text-xs text-rose" title={c.last_error}>{c.last_error}</div>
                   </div>
@@ -153,6 +224,90 @@ export default async function HealthPage() {
       </section>
     </div>
   );
+}
+
+function ConnectionAgeRow({ row }: { row: any }) {
+  const hours = row.hours_since_last_sync == null ? null : Number(row.hours_since_last_sync);
+  const days = Number(row.days_of_history ?? 0);
+  const snapshotsCount = Number(row.snapshots_count ?? 0);
+
+  // Цветовая индикация для последнего sync
+  const syncTone =
+    hours == null ? "bad"      // нет sync вообще = красный
+    : hours > 24 ? "bad"        // > 24ч = красный
+    : hours > 12 ? "warn"       // > 12ч = жёлтый
+    : "good";                   // < 12ч = зелёный
+  const syncColor = {
+    good: "text-lime-deep",
+    warn: "text-orange",
+    bad:  "text-rose",
+  }[syncTone];
+
+  // Цветовая индикация для возраста истории
+  const histTone =
+    days < 7 ? "bad"
+    : days < 14 ? "warn"
+    : "good";
+  const histColor = {
+    good: "text-ink",
+    warn: "text-orange",
+    bad:  "text-rose",
+  }[histTone];
+
+  const syncLabel =
+    hours == null ? "никогда"
+    : hours < 1 ? `${Math.round(hours * 60)} мин назад`
+    : hours < 24 ? `${Math.round(hours)} ч назад`
+    : `${Math.floor(hours / 24)} д назад`;
+
+  const statusColor =
+    row.status === "active" ? "text-lime-deep"
+    : row.status === "error" ? "text-rose"
+    : "text-ink-hush";
+
+  return (
+    <tr className="border-b border-line last:border-0 hover:bg-bg-soft/40 transition">
+      <td className="px-4 py-3 text-ink text-xs">
+        <div className="truncate max-w-[180px]" title={row.connection_name}>
+          {row.connection_name || "—"}
+        </div>
+        <div className="mt-0.5 font-mono text-[9px] uppercase text-ink-hush">
+          {row.marketplace || row.source}
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <Link
+          href={`/admin/sellers/${row.seller_id}` as any}
+          className="text-ink text-xs hover:text-lime-deep transition truncate inline-block max-w-[220px]"
+          title={row.seller_email}
+        >
+          {row.seller_email || "—"}
+        </Link>
+      </td>
+      <td className="px-4 py-3 text-center">
+        <span className={`font-mono text-[10px] uppercase tracking-wider ${statusColor}`}>
+          {row.status}
+        </span>
+      </td>
+      <td className={`px-4 py-3 text-right tabular text-xs whitespace-nowrap ${histColor}`}>
+        {days} {pluralizeDays(days)}
+      </td>
+      <td className="px-4 py-3 text-right tabular text-xs text-ink-muted whitespace-nowrap">
+        {snapshotsCount.toLocaleString("ru-RU")}
+      </td>
+      <td className={`px-4 py-3 text-right text-xs whitespace-nowrap ${syncColor}`}>
+        {syncLabel}
+      </td>
+    </tr>
+  );
+}
+
+function pluralizeDays(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "день";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "дня";
+  return "дней";
 }
 
 function StatusCard({ label, value, tone }: { label: string; value: number; tone: "good" | "warn" | "bad" | "neutral" }) {
