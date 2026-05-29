@@ -30,8 +30,11 @@ export type KindMeta = {
 
 /**
  * Все kinds имеют параметр day_of_week (1-7) — день формирования отчёта.
- * Частота отправки (weekly/monthly) хранится отдельной колонкой
+ * Частота отправки (daily/weekly/monthly) хранится отдельной колонкой
  * notification_subscriptions.frequency, а не в params.
+ *
+ * Для daily частоты day_of_week игнорируется на стороне worker'а, но
+ * хранится для возврата если юзер переключит обратно на weekly/monthly.
  */
 const DAY_OF_WEEK_PARAM = {
   key: "day_of_week",
@@ -115,6 +118,7 @@ export const KIND_META: Record<NotificationKind, KindMeta> = {
 };
 
 const FREQUENCY_OPTIONS: Array<{ value: NotificationFrequency; label: string; hint: string }> = [
+  { value: "daily",   label: "Каждый день", hint: "Каждый день — день недели игнорируется" },
   { value: "weekly",  label: "Еженедельно", hint: "Каждую неделю в выбранный день" },
   { value: "monthly", label: "Ежемесячно",  hint: "В первый выбранный день недели каждого месяца" },
 ];
@@ -250,6 +254,8 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
           {meta.paramSchema.length > 0 && (
             <div className="mt-2 flex items-center gap-3 flex-wrap text-xs">
               {meta.paramSchema.map(param => {
+                // Для daily частоты не показываем day_of_week — он игнорируется worker'ом
+                if (param.key === "day_of_week" && currentFreq === "daily") return null;
                 const val = sub.params[param.key] ?? param.default;
                 let displayVal: string;
                 if (param.type === "select" && param.options) {
@@ -313,6 +319,10 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // day_of_week disabled при daily частоте — worker всё равно его игнорирует.
+  // Сохраняем значение в params чтобы можно было вернуться к weekly/monthly.
+  const isDayDisabled = frequency === "daily";
+
   function handleSave() {
     setError(null);
     setSaving(true);
@@ -331,38 +341,44 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
   return (
     <div className="border-t border-line p-3 sm:p-4 bg-bg-soft">
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {meta.paramSchema.map(p => (
-          <div key={p.key}>
-            <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
-              {p.label}
-            </label>
-            {p.type === "select" && p.options ? (
-              <select
-                value={params[p.key]}
-                onChange={e => setParams({ ...params, [p.key]: parseInt(e.target.value, 10) })}
-                className="w-full px-2 py-2 border border-line rounded-lg bg-paper text-sm focus:outline-none focus:border-lime-deep min-h-[40px]"
-              >
-                {p.options.map(o => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-            ) : (
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  inputMode="numeric"
+        {meta.paramSchema.map(p => {
+          const disabled = p.key === "day_of_week" && isDayDisabled;
+          return (
+            <div key={p.key} className={disabled ? "opacity-50" : ""}>
+              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
+                {p.label}
+                {disabled && <span className="ml-1 normal-case text-ink-hush"> · не используется при «каждый день»</span>}
+              </label>
+              {p.type === "select" && p.options ? (
+                <select
                   value={params[p.key]}
-                  min={p.min}
-                  max={p.max}
-                  onChange={e => setParams({ ...params, [p.key]: parseInt(e.target.value, 10) || 0 })}
-                  className="w-full px-2 py-2 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[40px]"
-                />
-                {p.suffix && <span className="text-xs text-ink-muted">{p.suffix}</span>}
-              </div>
-            )}
-            {p.hint && <p className="mt-1 text-[11px] text-ink-hush">{p.hint}</p>}
-          </div>
-        ))}
+                  onChange={e => setParams({ ...params, [p.key]: parseInt(e.target.value, 10) })}
+                  disabled={disabled}
+                  className="w-full px-2 py-2 border border-line rounded-lg bg-paper text-sm focus:outline-none focus:border-lime-deep min-h-[40px] disabled:bg-bg-soft disabled:cursor-not-allowed"
+                >
+                  {p.options.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    value={params[p.key]}
+                    min={p.min}
+                    max={p.max}
+                    disabled={disabled}
+                    onChange={e => setParams({ ...params, [p.key]: parseInt(e.target.value, 10) || 0 })}
+                    className="w-full px-2 py-2 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[40px] disabled:bg-bg-soft disabled:cursor-not-allowed"
+                  />
+                  {p.suffix && <span className="text-xs text-ink-muted">{p.suffix}</span>}
+                </div>
+              )}
+              {p.hint && !disabled && <p className="mt-1 text-[11px] text-ink-hush">{p.hint}</p>}
+            </div>
+          );
+        })}
         <div>
           <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
             Частота отправки
@@ -547,9 +563,10 @@ function ChannelBadge({ channel }: { channel: NotificationChannel }) {
 
 function FrequencyBadge({ frequency }: { frequency: NotificationFrequency }) {
   const label = frequencyLabel(frequency);
-  const cls = frequency === "monthly"
-    ? "text-orange bg-orange/10 border-orange/30"
-    : "text-ink-soft bg-bg-soft border-line";
+  const cls =
+    frequency === "daily"   ? "text-rose bg-rose/10 border-rose/30"
+    : frequency === "monthly" ? "text-orange bg-orange/10 border-orange/30"
+    :                           "text-ink-soft bg-bg-soft border-line";
   return (
     <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold ${cls}`}>
       {label}
