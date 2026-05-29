@@ -22,6 +22,24 @@ const TAB_TITLES: Record<RadarTab, string> = {
   archived: "Архив",
 };
 
+// Тарифы Radar (rub/мес, лимит брендов).
+// Должны совпадать с PLAN_RADAR_LIMITS в lib/radar-plans.ts (если есть)
+// и с тарифами в Robokassa.
+const RADAR_TIERS: Array<{ id: string; name: string; limit: number; price: number }> = [
+  { id: "trial",  name: "Trial",   limit: 3,   price: 0 },
+  { id: "start",  name: "Старт",   limit: 3,   price: 900 },
+  { id: "seller", name: "Селлер",  limit: 10,  price: 2500 },
+  { id: "pro",    name: "Про",     limit: 30,  price: 5000 },
+  { id: "expert", name: "Эксперт", limit: 100, price: 10000 },
+];
+
+function getNextTier(currentLimit: number, untrackedCount: number) {
+  // Ищем минимальный tier который покрывает (current + untracked).
+  const needed = currentLimit + untrackedCount;
+  return RADAR_TIERS.find(t => t.limit >= needed)
+      ?? RADAR_TIERS[RADAR_TIERS.length - 1];  // если нужно > 100, всё равно ведём на expert
+}
+
 export default async function RadarPage({ searchParams }: {
   searchParams: Promise<{ tab?: string; brand?: string; welcome?: string }>;
 }) {
@@ -48,8 +66,10 @@ export default async function RadarPage({ searchParams }: {
   const [brandsRes, countsRes] = await Promise.all([
     supabase
       .from("radar_brands")
-      .select("id, name, status, sku_count")
+      .select("id, name, status, sku_count, source")
       .eq("seller_id", user.id)
+      .order("status", { ascending: true })  // approved сначала
+      .order("sku_count", { ascending: false, nullsFirst: false })
       .order("name"),
     supabase
       .from("radar_queries")
@@ -58,6 +78,7 @@ export default async function RadarPage({ searchParams }: {
   ]);
   const brands = brandsRes.data ?? [];
   const approvedBrands = brands.filter(b => b.status === "approved");
+  const excludedBrands = brands.filter(b => b.status === "excluded");
 
   // Группируем counts по status одним проходом.
   const tabCounts: Record<RadarTab, number> = { early: 0, new: 0, watching: 0, archived: 0 };
@@ -131,10 +152,140 @@ export default async function RadarPage({ searchParams }: {
             brandFilter={brandFilter}
             currentTabTitle={TAB_TITLES[tab]}
           />
+
+          {/* Teaser-секция: бренды которые селлер загрузил, но НЕ подключил к
+              отслеживанию (excluded). Фишка Александра 29.05.2026 — даёт FOMO
+              «а не пропускаю ли я что-то по этим брендам». Драйвер апгрейда тарифа. */}
+          {excludedBrands.length > 0 && (
+            <UntrackedBrandsTeaser
+              excluded={excludedBrands}
+              currentPlan={seller?.radar_plan ?? ""}
+              currentLimit={seller?.radar_brands_limit ?? 0}
+            />
+          )}
         </>
       )}
     </div>
   );
+}
+
+function UntrackedBrandsTeaser({
+  excluded,
+  currentPlan,
+  currentLimit,
+}: {
+  excluded: Array<{ id: string; name: string; sku_count: number | null; source: string }>;
+  currentPlan: string;
+  currentLimit: number;
+}) {
+  const nextTier = getNextTier(currentLimit, excluded.length);
+  const isMaxTier = nextTier.id === "expert" && currentPlan === "expert";
+
+  // Показ ограничен до 30 брендов чтобы не было визуального переполнения.
+  // Остальные — счётчик «и ещё N».
+  const DISPLAY_LIMIT = 30;
+  const visible = excluded.slice(0, DISPLAY_LIMIT);
+  const hiddenCount = excluded.length - visible.length;
+
+  return (
+    <section className="rounded-2xl border-2 border-orange/30 bg-gradient-to-br from-orange/[0.05] to-rose/[0.03] overflow-hidden">
+      <div className="px-5 py-4 border-b border-orange/20 flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <div className="shrink-0 size-10 rounded-full bg-orange/15 flex items-center justify-center mt-0.5">
+            <span className="text-xl">👀</span>
+          </div>
+          <div className="min-w-0">
+            <div className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold mb-1">
+              Не отслеживаются
+            </div>
+            <h3 className="font-display text-lg md:text-xl font-medium text-ink">
+              {excluded.length}{" "}
+              {pluralizeBrand(excluded.length)} вне Radar
+            </h3>
+            <p className="mt-1.5 text-sm text-ink-muted max-w-xl leading-relaxed">
+              Эти бренды у вас в системе, но Radar по ним не собирает сигналы — лимит тарифа{" "}
+              {currentLimit > 0 && (
+                <span className="font-mono text-ink-soft">
+                  ({currentLimit} {pluralizeBrand(currentLimit)})
+                </span>
+              )}.
+              {!isMaxTier && " Вы можете пропускать новинки в этих категориях."}
+            </p>
+          </div>
+        </div>
+        {!isMaxTier ? (
+          <Link
+            href={"/billing" as any}
+            className="shrink-0 inline-flex items-center rounded-lg bg-orange text-paper hover:bg-orange/90 px-4 py-2.5 text-sm font-mono uppercase tracking-wider font-semibold transition whitespace-nowrap"
+          >
+            Тариф {nextTier.name} — {nextTier.limit}{" "}
+            {pluralizeBrand(nextTier.limit)} за {nextTier.price.toLocaleString("ru-RU")}₽
+          </Link>
+        ) : (
+          <div className="shrink-0 font-mono text-[10px] uppercase tracking-widest text-ink-hush">
+            Максимальный тариф
+          </div>
+        )}
+      </div>
+
+      {/* Сетка бренд-плашек: blurred визуально, кликабельные → детальная страница (там пусто, что усиливает FOMO) */}
+      <div className="p-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+        {visible.map(b => (
+          <Link
+            key={b.id}
+            href={`/dashboard/radar/brands/${b.id}` as any}
+            className="group relative rounded-lg border border-line bg-paper/70 px-3 py-2.5 hover:bg-paper hover:border-orange/40 transition"
+            title="Бренд не отслеживается. Подключите тариф чтобы видеть сигналы."
+          >
+            <div className="font-medium text-ink-muted group-hover:text-ink text-sm truncate transition">
+              {b.name}
+            </div>
+            <div className="flex items-center justify-between mt-0.5 gap-2">
+              {b.sku_count != null && b.sku_count > 0 ? (
+                <span className="font-mono text-[10px] text-ink-hush">{b.sku_count} SKU</span>
+              ) : (
+                <span />
+              )}
+              <span className="font-mono text-[9px] uppercase tracking-wider text-orange/70 group-hover:text-orange transition">
+                закрыто
+              </span>
+            </div>
+          </Link>
+        ))}
+        {hiddenCount > 0 && (
+          <div className="rounded-lg border border-dashed border-line bg-bg-soft/50 px-3 py-2.5 flex items-center justify-center text-center">
+            <span className="font-mono text-xs text-ink-hush">
+              и ещё {hiddenCount}
+            </span>
+          </div>
+        )}
+      </div>
+
+      {!isMaxTier && (
+        <div className="px-5 py-3 border-t border-orange/15 bg-paper/40 flex items-center justify-between gap-3 flex-wrap">
+          <div className="text-xs text-ink-muted">
+            На тарифе <span className="font-medium text-ink">{nextTier.name}</span> отслеживаются все ваши{" "}
+            <span className="font-medium text-ink">{currentLimit + excluded.length} {pluralizeBrand(currentLimit + excluded.length)}</span>
+            {" "}— ни одной новинки не пропустите.
+          </div>
+          <Link
+            href={"/dashboard/radar/brands" as any}
+            className="font-mono text-[10px] uppercase tracking-wider text-ink-hush hover:text-ink transition"
+          >
+            Управление списком →
+          </Link>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function pluralizeBrand(n: number): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return "бренд";
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "бренда";
+  return "брендов";
 }
 
 function WelcomeBanner({ plan }: { plan: string }) {
