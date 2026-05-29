@@ -1,5 +1,6 @@
 "use client";
 import { useTransition } from "react";
+import Link from "next/link";
 import { actionApproveBrand, actionExcludeBrand } from "../actions";
 
 type Brand = {
@@ -51,15 +52,22 @@ function Section({ title, brands, muted }: { title: string; brands: Brand[]; mut
 function BrandRow({ brand, muted, last }: { brand: Brand; muted?: boolean; last: boolean }) {
   const [pending, startTransition] = useTransition();
 
-  const onAction = () => startTransition(async () => {
-    if (brand.status === "approved") await actionExcludeBrand(brand.id);
-    else await actionApproveBrand(brand.id);
-  });
+  const onAction = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startTransition(async () => {
+      if (brand.status === "approved") await actionExcludeBrand(brand.id);
+      else await actionApproveBrand(brand.id);
+    });
+  };
 
   return (
-    <div className={`flex items-center justify-between gap-3 px-4 py-3 ${!last ? "border-b border-line" : ""} ${muted ? "opacity-60" : ""}`}>
-      <div className="flex items-center gap-3 min-w-0">
-        <span className={`font-medium ${muted ? "text-ink-muted line-through" : "text-ink"} truncate`}>
+    <div className={`flex items-center justify-between gap-3 px-4 py-3 ${!last ? "border-b border-line" : ""} ${muted ? "opacity-60" : ""} hover:bg-bg-soft/40 transition`}>
+      <Link
+        href={`/dashboard/radar/brands/${brand.id}` as any}
+        className="flex items-center gap-3 min-w-0 flex-1 group"
+      >
+        <span className={`font-medium ${muted ? "text-ink-muted line-through" : "text-ink group-hover:text-lime-deep"} truncate transition`}>
           {brand.name}
         </span>
         <span className={`font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
@@ -72,7 +80,10 @@ function BrandRow({ brand, muted, last }: { brand: Brand; muted?: boolean; last:
             {brand.sku_count} SKU
           </span>
         )}
-      </div>
+        <span className="font-mono text-[10px] text-ink-hush group-hover:text-lime-deep transition ml-auto pr-2">
+          →
+        </span>
+      </Link>
       <button
         onClick={onAction}
         disabled={pending}
