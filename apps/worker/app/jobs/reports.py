@@ -1,11 +1,12 @@
-"""Диспетчер Excel-отчётов: weekly + monthly.
+"""Диспетчер Excel-отчётов: daily + weekly + monthly.
 
-Архитектура (этап 2 перехода «алерты → отчёты» + правка 11 Правок 4):
+Архитектура (этап 2 перехода «алерты → отчёты» + правка 11 Правок 4 + daily 29.05.2026):
 
 - Каждый день в 09:00 UTC запускается `dispatch_daily_reports()`
-- Для каждого seller'а ищем все enabled подписки в notification_subscriptions
-  где params.day_of_week = isoweekday(today). Для monthly — ещё и today.day <= 7
-  (первый такой day_of_week в месяце).
+- Для каждого seller'а ищем все enabled подписки в notification_subscriptions:
+  - daily   — отправка каждый день (params.day_of_week игнорируется)
+  - weekly  — params.day_of_week = isoweekday(today)
+  - monthly — params.day_of_week = isoweekday(today) И today.day <= 7
 - Группируем подписки по (seller_id, channel) — если несколько kinds на один день
   → один XLSX с разными листами
 - Отправка: email (Resend attachment) или telegram (Bot API sendDocument)
@@ -438,15 +439,19 @@ def dispatch_daily_reports() -> None:
                 dow = int(params.get("day_of_week", 1))
             except (ValueError, TypeError):
                 dow = 1
-            if dow != today_dow:
-                continue
-
-            # Правка 11 Правок 4: weekly / monthly
-            # • weekly  — каждую неделю в dow (дефолтное поведение)
-            # • monthly — только в первый dow месяца (т.е. today.day <= 7)
             frequency = sub.get("frequency") or "weekly"
-            if frequency == "monthly" and today_dom > 7:
-                continue
+
+            # 29.05.2026: добавлена частота 'daily'
+            # • daily   — каждый день (dow/dom игнорируются)
+            # • weekly  — каждую неделю в dow
+            # • monthly — только в первый dow месяца (т.е. today.day <= 7)
+            if frequency == "daily":
+                pass  # шлём каждый день, без фильтра по дате
+            else:
+                if dow != today_dow:
+                    continue
+                if frequency == "monthly" and today_dom > 7:
+                    continue
 
             groups[(sub["seller_id"], sub["channel"])].append(sub)
 
