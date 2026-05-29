@@ -20,6 +20,7 @@ export const revalidate = 0;
  *   - быстрая навигация назад на список брендов
  *   - сводный график «суммарная частота всех фраз бренда по месяцам»
  *     (агрегат по radar_query_history)
+ *   - per-фраза sparkline в каждой строке таблицы (последние 6 точек)
  */
 export default async function BrandDetailPage({
   params,
@@ -52,24 +53,33 @@ export default async function BrandDetailPage({
     .limit(200);
   const queries = queriesRaw ?? [];
 
-  // 3. Помесячная история частот для агрегатного графика
-  //    Берём последние 12 месяцев, агрегируем sum(frequency) по period_year+period_month
+  // 3. Помесячная история частот: одним запросом тянем всю history по всем
+  //    queryIds, потом раздаём в два бакета:
+  //    - monthlyTotals — для большого графика (sum по бренду)
+  //    - perQueryHistory — для per-фраза sparkline в таблице
   const queryIds = queries.map((q: any) => q.id);
   let monthlyTotals: { ym: string; total: number }[] = [];
+  const perQueryHistory: Record<string, { ym: string; freq: number }[]> = {};
+
   if (queryIds.length > 0) {
     const { data: history } = await sb
       .from("radar_query_history")
-      .select("period_year, period_month, frequency")
+      .select("query_id, period_year, period_month, frequency")
       .in("query_id", queryIds)
       .order("period_year", { ascending: true })
       .order("period_month", { ascending: true });
 
-    const bucket = new Map<string, number>();
+    const totalBucket = new Map<string, number>();
     for (const row of (history ?? []) as any[]) {
       const key = `${row.period_year}-${String(row.period_month).padStart(2, "0")}`;
-      bucket.set(key, (bucket.get(key) ?? 0) + (row.frequency ?? 0));
+      const freq = Number(row.frequency ?? 0);
+      // Агрегат для большого графика
+      totalBucket.set(key, (totalBucket.get(key) ?? 0) + freq);
+      // Per-query разбивка
+      if (!perQueryHistory[row.query_id]) perQueryHistory[row.query_id] = [];
+      perQueryHistory[row.query_id].push({ ym: key, freq });
     }
-    monthlyTotals = Array.from(bucket.entries())
+    monthlyTotals = Array.from(totalBucket.entries())
       .map(([ym, total]) => ({ ym, total }))
       .sort((a, b) => a.ym.localeCompare(b.ym))
       .slice(-12);
@@ -132,8 +142,8 @@ export default async function BrandDetailPage({
         <MonthlyTrendChart points={monthlyTotals} />
       )}
 
-      {/* Таблица запросов */}
-      <BrandQueriesPanel queries={queries} />
+      {/* Таблица запросов с per-фраза sparkline */}
+      <BrandQueriesPanel queries={queries} perQueryHistory={perQueryHistory} />
     </div>
   );
 }
