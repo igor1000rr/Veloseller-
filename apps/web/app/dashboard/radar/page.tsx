@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import RadarTabs from "./RadarTabs";
 import RadarTable from "./RadarTable";
-import RadarEmpty from "./RadarEmpty";
+import { OnboardingBlock } from "./OnboardingBlock";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -23,11 +23,12 @@ const TAB_TITLES: Record<RadarTab, string> = {
 };
 
 export default async function RadarPage({ searchParams }: {
-  searchParams: Promise<{ tab?: string; brand?: string }>;
+  searchParams: Promise<{ tab?: string; brand?: string; welcome?: string }>;
 }) {
   const sp = await searchParams;
   const tab: RadarTab = (["early", "new", "watching", "archived"].includes(sp.tab ?? "") ? sp.tab : "early") as RadarTab;
   const brandFilter = sp.brand || null;
+  const isWelcome = sp.welcome === "1";
 
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -107,10 +108,19 @@ export default async function RadarPage({ searchParams }: {
         </div>
       </div>
 
+      {/* Welcome-баннер после активации триала (?welcome=1).
+          Закрытие — через ссылку на /dashboard/radar без параметра. */}
+      {isWelcome && hasAccess && approvedBrands.length === 0 && (
+        <WelcomeBanner plan={seller?.radar_plan ?? ""} />
+      )}
+
       {!hasAccess ? (
         <RadarNoAccess plan={seller?.radar_plan ?? "none"} />
       ) : approvedBrands.length === 0 ? (
-        <RadarEmpty />
+        <OnboardingBlock
+          plan={seller?.radar_plan ?? ""}
+          brandsLimit={seller?.radar_brands_limit ?? 0}
+        />
       ) : (
         <>
           <RadarTabs tab={tab} counts={tabCounts} brandFilter={brandFilter} />
@@ -123,6 +133,37 @@ export default async function RadarPage({ searchParams }: {
           />
         </>
       )}
+    </div>
+  );
+}
+
+function WelcomeBanner({ plan }: { plan: string }) {
+  return (
+    <div className="rounded-2xl border-2 border-azure/40 bg-gradient-to-br from-azure/10 to-lime-soft/40 p-6">
+      <div className="flex items-start gap-4">
+        <div className="flex-shrink-0 size-12 rounded-full bg-azure/20 flex items-center justify-center">
+          <span className="text-2xl">🎯</span>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="font-mono text-[10px] uppercase tracking-widest text-azure font-semibold mb-1">
+            Тариф {plan} активирован
+          </div>
+          <h3 className="font-display text-xl md:text-2xl font-medium text-ink">
+            Добро пожаловать в Radar
+          </h3>
+          <p className="mt-2 text-sm text-ink leading-relaxed max-w-2xl">
+            Дальше — загрузите прайс или добавьте бренды руками. Worker
+            проснётся раз в 3 дня и начнёт собирать сигналы из Wordstat
+            и подсказок маркетплейсов. Первый дайджест придёт через неделю.
+          </p>
+          <Link
+            href={"/dashboard/radar" as any}
+            className="mt-3 inline-block font-mono text-[10px] uppercase tracking-wider text-ink-hush hover:text-ink transition"
+          >
+            Закрыть
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }
