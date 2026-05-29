@@ -142,6 +142,135 @@ export async function actionAddBrandManual(name: string) {
 }
 
 /**
+ * Массовое добавление брендов руками без AI-обработки прайса.
+ * Use case: у селлера есть готовый список брендов (например 30 марок),
+ * прайс ему лень загружать. Он вставляет в textarea одним блоком —
+ * каждая строка/запятая = один бренд.
+ *
+ * Парсинг:
+ *   - Разделители: \n (любой переход строки), запятая, точка с запятой, табуляция
+ *   - Trim каждой строки, пропускаем пустые
+ *   - Дедуп по normalized name внутри input'а
+ *   - Дедуп с существующими brand'ами селлера (upsert разрулит)
+ *
+ * Лимит тарифа:
+ *   - Если currently_approved + новые_approved > limit, кидаем ошибку с
+ *     точным сообщением сколько штук убрать
+ *   - Существующие excluded бренды при upsert переходят в approved
+ *     (поведение совпадает с одиночным actionAddBrandManual)
+ *
+ * Returns:
+ *   { added: N, skipped: M, totalApproved: K }
+ */
+export async function actionAddBrandsBulkManual(rawInput: string): Promise<{
+  added: number;
+  skipped: number;
+  totalApproved: number;
+}> {
+  const { sb, user } = await getUser();
+
+  // 1. Парсим список — разделители \n, ,, ;, \t
+  const tokens = rawInput
+    .split(/[\n,;\t]+/)
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  if (tokens.length === 0) {
+    throw new Error("Список пустой");
+  }
+  if (tokens.length > 200) {
+    throw new Error(`Слишком много брендов за раз: ${tokens.length}. Максимум 200.`);
+  }
+
+  // 2. Внутренний дедуп по normalized name
+  const uniqueMap = new Map<string, string>();  // normalized → display name
+  for (const t of tokens) {
+    if (t.length < 2 || t.length > 60) continue;  // длина 2-60 как в /api/radar/brands
+    const norm = t.toLowerCase().replace(/\s+/g, " ");
+    if (!uniqueMap.has(norm)) uniqueMap.set(norm, t);
+  }
+  const unique = [...uniqueMap.entries()];
+  if (unique.length === 0) {
+    throw new Error("Все названия слишком короткие (<2) или длинные (>60)");
+  }
+
+  // 3. Считаем лимит
+  const { data: seller } = await sb
+    .from("sellers")
+    .select("radar_brands_limit")
+    .eq("id", user.id)
+    .maybeSingle();
+  const limit = seller?.radar_brands_limit ?? 0;
+
+  // 4. Сколько уже approved (не считая тех что мы сейчас добавляем — upsert разрулит)
+  const existingNormalized = unique.map(([norm]) => norm);
+  const { data: existingBrands } = await sb
+    .from("radar_brands")
+    .select("id, name_normalized, status")
+    .eq("seller_id", user.id)
+    .in("name_normalized", existingNormalized);
+
+  const existingByNorm = new Map<string, { id: string; status: string }>();
+  for (const b of (existingBrands ?? []) as any[]) {
+    existingByNorm.set(b.name_normalized, { id: b.id, status: b.status });
+  }
+
+  // approved бренды НЕ из нашего списка
+  const { count: otherApprovedCount } = await sb
+    .from("radar_brands")
+    .select("id", { count: "exact", head: true })
+    .eq("seller_id", user.id)
+    .eq("status", "approved")
+    .not("name_normalized", "in", `(${existingNormalized.map(n => `"${n.replace(/"/g, '\\"')}"`).join(",")})`);
+
+  // Будущее количество approved: остальные + все из нашего списка (мы все добавляем как approved)
+  const futureApproved = (otherApprovedCount ?? 0) + unique.length;
+  if (futureApproved > limit) {
+    throw new Error(
+      `Лимит тарифа: ${limit} брендов. После добавления будет ${futureApproved}. ` +
+      `Уберите ${futureApproved - limit} из списка или перейдите на старший тариф.`,
+    );
+  }
+
+  // 5. Batch upsert одним запросом
+  const rows = unique.map(([norm, displayName]) => ({
+    seller_id: user.id,
+    name: displayName,
+    name_normalized: norm,
+    source: "manual" as const,
+    status: "approved" as const,
+  }));
+  const { error: upsertError } = await sb
+    .from("radar_brands")
+    .upsert(rows, { onConflict: "seller_id,name_normalized" });
+
+  if (upsertError) {
+    throw new Error(`Ошибка БД: ${upsertError.message}`);
+  }
+
+  await logAction(sb, user.id, null, "brands_bulk_added_manual");
+  revalidatePath("/dashboard/radar");
+  revalidatePath("/dashboard/radar/brands");
+
+  // Считаем точные числа для возврата:
+  // - added: те которых вообще не было ИЛИ были excluded (стали approved)
+  // - skipped: те которые уже были approved (для них upsert noop по status)
+  let added = 0;
+  let skipped = 0;
+  for (const [norm] of unique) {
+    const ex = existingByNorm.get(norm);
+    if (!ex || ex.status !== "approved") added++;
+    else skipped++;
+  }
+
+  return {
+    added,
+    skipped,
+    totalApproved: futureApproved,
+  };
+}
+
+/**
  * Массовое подтверждение брендов из ревью прайса.
  * Фишка из обсуждения с Александром 28.05.2026 — после загрузки прайса
  * селлер видит таблицу с галочками и одной кнопкой подтверждает выбор.
