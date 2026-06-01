@@ -1,13 +1,16 @@
 /**
- * In-memory rate limiter для API endpoints.
+ * Rate limiter для API endpoints.
  *
- * Алгоритм: token bucket (sliding window). Для каждого ключа храним
+ * Алгоритм (in-memory): token bucket (sliding window). Для каждого ключа храним
  * timestamps последних запросов, выпиливая старше windowMs.
  *
- * Ограничения:
- *  - In-memory: при перезагрузке Next.js лимиты сбрасываются.
- *  - Не работает в multi-instance deployment (для этого нужен Redis/Upstash).
- *  - Для single-instance VPS (наш случай) этого достаточно.
+ * Бэкенды:
+ *  - In-memory (по умолчанию): при перезагрузке Next.js лимиты сбрасываются,
+ *    не работает в multi-instance. Для single-instance VPS (наш случай) — ок.
+ *  - Распределённый (опционально): Upstash Redis REST — включается, если заданы
+ *    UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN. Использовать через
+ *    checkRateLimitDurable / enforceRateLimitDurable (async). Без этих env всё
+ *    работает как раньше. См. блок внизу файла.
  *
  * Для продакшен-безопасности ключ = user_id если залогинен, иначе IP.
  */
@@ -143,8 +146,25 @@ export function getRateLimitKey(req: Request, userId?: string): string {
   return `ip:${getClientIp(req)}`;
 }
 
+function buildRateLimitResponse(config: RateLimitConfig, result: RateLimitResult): Response {
+  const retryAfter = Math.ceil((result.resetAt - Date.now()) / 1000);
+  return new Response(JSON.stringify({
+    error: "Rate limit exceeded",
+    retryAfter,
+  }), {
+    status: 429,
+    headers: {
+      "Content-Type": "application/json",
+      "Retry-After": String(retryAfter),
+      "X-RateLimit-Limit": String(config.max),
+      "X-RateLimit-Remaining": "0",
+      "X-RateLimit-Reset": String(Math.ceil(result.resetAt / 1000)),
+    },
+  });
+}
+
 /**
- * Helper для route handlers: возвращает NextResponse с 429 если limit exceeded,
+ * Helper для route handlers: возвращает Response с 429 если limit exceeded,
  * иначе null. Пример использования:
  *
  *   const limit = await enforceRateLimit(req, RATE_LIMITS.WRITE);
@@ -158,23 +178,94 @@ export function enforceRateLimit(
 ): Response | null {
   const key = getRateLimitKey(req, userId);
   const result = checkRateLimit(key, config);
-
   if (!result.allowed) {
-    const retryAfter = Math.ceil((result.resetAt - Date.now()) / 1000);
-    return new Response(JSON.stringify({
-      error: "Rate limit exceeded",
-      retryAfter,
-    }), {
-      status: 429,
+    return buildRateLimitResponse(config, result);
+  }
+  return null;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Опциональный распределённый бэкенд — Upstash Redis (REST, без зависимостей).
+//
+// Зачем: in-memory лимиты не переживают рестарт и не общие между инстансами.
+// Когда понадобится multi-instance — задать UPSTASH_REDIS_REST_URL +
+// UPSTASH_REDIS_REST_TOKEN и переключить нужные роуты на *Durable-функции.
+//
+// Безопасность по доступности (fail-open): если Upstash не сконфигурирован
+// ИЛИ запрос к нему упал — откатываемся на in-memory checkRateLimit, чтобы
+// проблема с Redis не выводила API из строя.
+// ───────────────────────────────────────────────────────────────────────────
+
+function upstashConfigured(): boolean {
+  return !!(process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN);
+}
+
+async function upstashPipeline(commands: string[][]): Promise<unknown[] | null> {
+  const url = process.env.UPSTASH_REDIS_REST_URL;
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
+  if (!url || !token) return null;
+  try {
+    const res = await fetch(`${url}/pipeline`, {
+      method: "POST",
       headers: {
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
-        "Retry-After": String(retryAfter),
-        "X-RateLimit-Limit": String(config.max),
-        "X-RateLimit-Remaining": "0",
-        "X-RateLimit-Reset": String(Math.ceil(result.resetAt / 1000)),
       },
+      body: JSON.stringify(commands),
+      cache: "no-store",
     });
+    if (!res.ok) return null;
+    const data = await res.json();
+    // Upstash pipeline → массив объектов { result } | { error }
+    if (!Array.isArray(data)) return null;
+    return data.map((d) => (d && typeof d === "object" && "result" in d ? (d as { result: unknown }).result : null));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Распределённый rate-limit через Upstash Redis (фиксированное окно: INCR+EXPIRE).
+ * Fallback на in-memory checkRateLimit, если Upstash не задан или недоступен.
+ */
+export async function checkRateLimitDurable(key: string, config: RateLimitConfig): Promise<RateLimitResult> {
+  if (!upstashConfigured()) {
+    return checkRateLimit(key, config);
+  }
+  const windowSec = Math.max(1, Math.ceil(config.windowMs / 1000));
+  // Фиксированное окно: id окна меняется каждые windowSec секунд.
+  const windowId = Math.floor(Date.now() / 1000 / windowSec);
+  const redisKey = `rl:${key}:${windowId}`;
+
+  const res = await upstashPipeline([
+    ["INCR", redisKey],
+    ["EXPIRE", redisKey, String(windowSec)],
+  ]);
+
+  if (!res || typeof res[0] !== "number") {
+    // Redis недоступен — не блокируем легитимный трафик, падаем на in-memory.
+    return checkRateLimit(key, config);
   }
 
+  const count = res[0] as number;
+  const resetAt = (windowId + 1) * windowSec * 1000;
+  return {
+    allowed: count <= config.max,
+    remaining: Math.max(0, config.max - count),
+    resetAt,
+  };
+}
+
+/** Async-версия enforceRateLimit поверх распределённого бэкенда (с fallback). */
+export async function enforceRateLimitDurable(
+  req: Request,
+  config: RateLimitConfig,
+  userId?: string,
+): Promise<Response | null> {
+  const key = getRateLimitKey(req, userId);
+  const result = await checkRateLimitDurable(key, config);
+  if (!result.allowed) {
+    return buildRateLimitResponse(config, result);
+  }
   return null;
 }
