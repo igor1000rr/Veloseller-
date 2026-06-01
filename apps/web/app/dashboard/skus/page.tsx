@@ -27,6 +27,7 @@ type DashboardFilter =
   | "dead_inventory"
   | "oos"
   | "inactive"
+  | "active"
   | "frequently_oos"
   | "inventory_concentration"
   | "demand_concentration";
@@ -37,6 +38,7 @@ const DASHBOARD_FILTERS: ReadonlySet<DashboardFilter> = new Set([
   "dead_inventory",
   "oos",
   "inactive",
+  "active",
   "frequently_oos",
   "inventory_concentration",
   "demand_concentration",
@@ -75,7 +77,6 @@ function daysAgo(n: number): string {
   return isoDate(d);
 }
 
-/** Строка из RPC get_skus_period_metrics — реальные метрики за предпраздничный период. */
 type PreHolidayRow = {
   product_id: string;
   velocity: number;
@@ -104,6 +105,8 @@ export default async function SkusPage({ searchParams }: {
     oos_max?: string;
     lost_min?: string;
     lost_max?: string;
+    coverage_min?: string;
+    coverage_max?: string;
     date_from?: string;
     date_to?: string;
   }>;
@@ -129,19 +132,13 @@ export default async function SkusPage({ searchParams }: {
   const oosMax = parseIntOrNull(sp.oos_max);
   const lostMin = parseIntOrNull(sp.lost_min);
   const lostMax = parseIntOrNull(sp.lost_max);
+  // Новый фильтр (Александр 01.06.2026): "Дней до окончания остатков"
+  // — по coverage_days. Очень важный для закупок.
+  const coverageMin = parseIntOrNull(sp.coverage_min);
+  const coverageMax = parseIntOrNull(sp.coverage_max);
   const dateFrom = parseDateOrNull(sp.date_from);
   const dateTo = parseDateOrNull(sp.date_to);
 
-  // Дефолты дат в фильтре + предпраздничный режим (Игорь 27.05.2026):
-  //   1. Если юзер явно выбрал ?period=N в URL — используем его (today - N .. today).
-  //      Предпраздничный режим выключен.
-  //   2. Иначе проверяем предпраздничное окно (18.12-31.12 — НГ, 07.02-13.02 — 14.02,
-  //      16.02-22.02 — 23.02, 01.03-07.03 — 8.03). Если today внутри:
-  //        - дефолты в фильтре = [windowStart, today]
-  //        - реальный расчёт velocity/stockout/sales/coverage/lost_revenue идёт
-  //          через RPC get_skus_period_metrics за этот же диапазон (override)
-  //        - OOS-колонка показывает daysBefore (14 или 7) вместо periodDays
-  //   3. Иначе — обычные today-30..today, расчёт по tvelo_metrics.
   const today = new Date();
   const preHoliday = userExplicitPeriod ? null : getPreHolidayWindow(today);
   let defaultDateTo: string;
@@ -179,6 +176,10 @@ export default async function SkusPage({ searchParams }: {
     oosMax: Number(rangesRaw?.oos_max ?? 0),
     lostMin: Number(rangesRaw?.lost_min ?? 0),
     lostMax: Number(rangesRaw?.lost_max ?? 0),
+    // coverage_min/coverage_max — placeholder'ы для нового фильтра.
+    // Если RPC ещё не возвращает эти поля — fallback к разумным дефолтам.
+    coverageMin: Number(rangesRaw?.coverage_min ?? 0),
+    coverageMax: Number(rangesRaw?.coverage_max ?? 365),
   };
 
   let concentrationIds: string[] | null = null;
@@ -227,6 +228,13 @@ export default async function SkusPage({ searchParams }: {
     productsQuery = productsQuery
       .eq("tvelo_metrics.current_stock", 0)
       .eq("tvelo_metrics.adjusted_velocity", 0);
+  } else if (dashFilter === "active") {
+    // Новый dashFilter (Александр 01.06.2026): активные SKU.
+    // Условие = stock > 0 OR velocity > 0 (зеркало inactive).
+    productsQuery = productsQuery.or(
+      "current_stock.gt.0,adjusted_velocity.gt.0",
+      { foreignTable: "tvelo_metrics" },
+    );
   } else if (dashFilter === "frequently_oos") {
     productsQuery = productsQuery.gt("tvelo_metrics.stockout_days", effectiveThreshold!);
   } else if (dashFilter === "inventory_concentration" || dashFilter === "demand_concentration") {
@@ -252,6 +260,8 @@ export default async function SkusPage({ searchParams }: {
   if (stockMax !== null) productsQuery = productsQuery.lte("tvelo_metrics.current_stock", stockMax);
   if (oosMin !== null)   productsQuery = productsQuery.gte("tvelo_metrics.stockout_days", oosMin);
   if (oosMax !== null)   productsQuery = productsQuery.lte("tvelo_metrics.stockout_days", oosMax);
+  if (coverageMin !== null) productsQuery = productsQuery.gte("tvelo_metrics.coverage_days", coverageMin);
+  if (coverageMax !== null) productsQuery = productsQuery.lte("tvelo_metrics.coverage_days", coverageMax);
   if (dateFrom)          productsQuery = productsQuery.gte("tvelo_metrics.period_end", dateFrom);
   if (dateTo)            productsQuery = productsQuery.lte("tvelo_metrics.period_end", dateTo);
 
@@ -285,9 +295,6 @@ export default async function SkusPage({ searchParams }: {
     return { ...p, tvelo_metrics: matchedMetric ? [matchedMetric] : [] };
   });
 
-  // ПРЕДПРАЗДНИЧНЫЙ OVERRIDE: реальный расчёт за preHoliday.windowStart..today
-  // через RPC get_skus_period_metrics. Перезаписываем velocity/stockout/sales/
-  // coverage/lost_revenue/current_stock/current_price для видимых SKU.
   let preHolidayMetrics: Map<string, PreHolidayRow> | null = null;
   if (preHoliday && filtered.length > 0) {
     const { data: rpcRows } = await supabase.rpc("get_skus_period_metrics", {
@@ -313,8 +320,6 @@ export default async function SkusPage({ searchParams }: {
     }
   }
 
-  // salesByProduct — для НЕ-предпраздничного режима (обычный расчёт по tvelo_metrics
-  // period). В preHoliday режиме salesUnits берётся из preHolidayMetrics.
   const salesByProduct: Record<string, number> = {};
   if (!preHolidayMetrics && filtered.length > 0) {
     const firstM = filtered[0].tvelo_metrics?.[0];
@@ -335,17 +340,25 @@ export default async function SkusPage({ searchParams }: {
     }
   }
 
-  // lostByProduct — с учётом override для preHoliday режима.
   const lostByProduct: Record<string, number> = {};
+  const lostUnitsByProduct: Record<string, number> = {};
   for (const p of filtered) {
     const override = preHolidayMetrics?.get(p.product_id);
     if (override) {
       lostByProduct[p.product_id] = override.lost_revenue;
+      lostUnitsByProduct[p.product_id] = Math.round(override.velocity * override.stockout_days);
     } else {
       const m = p.tvelo_metrics?.[0];
-      lostByProduct[p.product_id] = m
-        ? Number(m.adjusted_velocity ?? 0) * Number(m.stockout_days ?? 0) * Number(m.current_price ?? 0)
-        : 0;
+      if (m) {
+        const vel = Number(m.adjusted_velocity ?? 0);
+        const sod = Number(m.stockout_days ?? 0);
+        const pr = Number(m.current_price ?? 0);
+        lostByProduct[p.product_id] = vel * sod * pr;
+        lostUnitsByProduct[p.product_id] = Math.round(vel * sod);
+      } else {
+        lostByProduct[p.product_id] = 0;
+        lostUnitsByProduct[p.product_id] = 0;
+      }
     }
   }
   if (lostFilterActiveButPostProcess) {
@@ -373,6 +386,8 @@ export default async function SkusPage({ searchParams }: {
   if (oosMax !== null) exportParams.set("oos_max", String(oosMax));
   if (lostMin !== null) exportParams.set("lost_min", String(lostMin));
   if (lostMax !== null) exportParams.set("lost_max", String(lostMax));
+  if (coverageMin !== null) exportParams.set("coverage_min", String(coverageMin));
+  if (coverageMax !== null) exportParams.set("coverage_max", String(coverageMax));
   if (dateFrom) exportParams.set("date_from", dateFrom);
   if (dateTo) exportParams.set("date_to", dateTo);
   const exportQS = exportParams.toString();
@@ -384,6 +399,7 @@ export default async function SkusPage({ searchParams }: {
     ((stockMin !== null || stockMax !== null) ? 1 : 0) +
     ((oosMin !== null || oosMax !== null) ? 1 : 0) +
     ((lostMin !== null || lostMax !== null) ? 1 : 0) +
+    ((coverageMin !== null || coverageMax !== null) ? 1 : 0) +
     ((dateFrom || dateTo) ? 1 : 0) +
     (includeInactive && !dashFilter ? 1 : 0);
 
@@ -404,6 +420,8 @@ export default async function SkusPage({ searchParams }: {
     if (oosMax !== null) current.oos_max = String(oosMax);
     if (lostMin !== null) current.lost_min = String(lostMin);
     if (lostMax !== null) current.lost_max = String(lostMax);
+    if (coverageMin !== null) current.coverage_min = String(coverageMin);
+    if (coverageMax !== null) current.coverage_max = String(coverageMax);
     if (dateFrom) current.date_from = dateFrom;
     if (dateTo) current.date_to = dateTo;
 
@@ -422,8 +440,6 @@ export default async function SkusPage({ searchParams }: {
     return params.toString();
   };
 
-  // Эффективная длина периода для UI колонки OOS — в preHoliday показываем
-  // daysBefore (14 или 7), иначе обычный periodDays.
   const displayPeriodDays = preHoliday ? preHoliday.daysBefore : periodDays;
 
   return (
@@ -559,11 +575,12 @@ export default async function SkusPage({ searchParams }: {
               <Th col="tvelo" align="right">TVelo</Th>
               <Th col="trend" align="center">Тренд</Th>
               <Th col="coverage" align="right">Покрытие</Th>
-              <Th col="oos" align="right">OOS ({displayPeriodDays}д)</Th>
+              {/* Александр 01.06.2026: "OOS" → "Дней без наличия" */}
+              <Th col="oos" align="right">Дней без наличия ({displayPeriodDays}д)</Th>
               <Th col="sales" align="right">
                 <span className="inline-flex items-center">
                   Продажи
-                  <InfoTooltip text="Фактические продажи за период — сумма дельт снижения остатка (sales_like события). Может НЕ равняться TVelo × дни в наличии: TVelo добавляет оценочные продажи за дни пополнений и аномалий чтобы не занижать скорость." />
+                  <InfoTooltip text="Фактические продажи за период. В дни поступления товаров или аномальных данных продажи не учитываются. В эти дни считается средняя TVelo." />
                 </span>
               </Th>
               <Th col="reorder" align="right">Закупка ({reorderDays}д)</Th>
@@ -577,7 +594,7 @@ export default async function SkusPage({ searchParams }: {
               <Th col="lost_revenue" align="right">
                 <span className="inline-flex items-center">
                   Потерянная выручка
-                  <InfoTooltip text="Потерянная выручка из-за отсутствия товара на складе. Формула: velocity × дни OOS × цена." />
+                  <InfoTooltip text="Потерянная выручка из-за отсутствия товара на складе." />
                 </span>
               </Th>
               <Th col="notes">Заметки</Th>
@@ -588,7 +605,6 @@ export default async function SkusPage({ searchParams }: {
               const m = (p.tvelo_metrics?.[0] ?? null) as any;
               const override = preHolidayMetrics?.get(p.product_id) ?? null;
 
-              // Эффективные значения: override (preHoliday) > tvelo_metrics > 0
               const adjVel = override
                 ? override.velocity
                 : (m?.adjusted_velocity != null ? Number(m.adjusted_velocity) : 0);
@@ -608,6 +624,7 @@ export default async function SkusPage({ searchParams }: {
                 ? override.coverage_days
                 : (m?.coverage_days != null ? Number(m.coverage_days) : null);
               const lostRev = lostByProduct[p.product_id] ?? 0;
+              const lostUnits = lostUnitsByProduct[p.product_id] ?? 0;
               const reorderQty = Math.round(adjVel * reorderDays);
               const isUnderestimated = m?.underestimated_sku;
 
@@ -619,9 +636,15 @@ export default async function SkusPage({ searchParams }: {
                     </Link>
                   </td>
                   <td className="col-skucol-name px-3 sm:px-4 py-3">
-                    <div className="text-ink-soft">{p.product_name}</div>
+                    {/* Александр 01.06.2026: название тоже сделать ссылкой для проваливания в SKU */}
+                    <Link
+                      href={`/dashboard/skus/${p.product_id}` as any}
+                      className="text-ink-soft hover:text-lime-deep transition"
+                    >
+                      {p.product_name}
+                    </Link>
                     {isUnderestimated && (
-                      <span className="font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">недооценён</span>
+                      <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">недооценён</span>
                     )}
                   </td>
                   <td className="col-skucol-stock px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{currentStock ?? "—"}</td>
@@ -633,14 +656,14 @@ export default async function SkusPage({ searchParams }: {
                   <td className="col-skucol-coverage px-3 sm:px-4 py-3 text-right tabular text-ink-soft">
                     {coverageDays != null ? `${coverageDays.toFixed(0)} д.` : "—"}
                   </td>
-                  <td className="col-skucol-oos px-3 sm:px-4 py-3 text-right tabular" title="Дни out-of-stock за выбранный период">
+                  <td className="col-skucol-oos px-3 sm:px-4 py-3 text-right tabular" title="Дней без наличия за выбранный период">
                     {stockoutDays > 0 ? (
                       <span className="text-orange font-semibold">{stockoutDays}</span>
                     ) : (
                       <span className="text-ink-soft">0</span>
                     )}
                   </td>
-                  <td className="col-skucol-sales px-3 sm:px-4 py-3 text-right tabular text-ink-soft" title="Фактические продажи за период (sum sales_like deltas)">
+                  <td className="col-skucol-sales px-3 sm:px-4 py-3 text-right tabular text-ink-soft" title="Фактические продажи за период">
                     {salesUnits > 0 ? salesUnits : "—"}
                   </td>
                   <td className="col-skucol-reorder px-3 sm:px-4 py-3 text-right font-semibold tabular text-lime-deep">
@@ -654,10 +677,14 @@ export default async function SkusPage({ searchParams }: {
                   <td className="col-skucol-health px-3 sm:px-4 py-3 text-right">
                     <HealthBadge score={m?.sku_health_score} />
                   </td>
+                  {/* Александр 01.06.2026: к сумме в ₽ добавить количество в шт в скобках */}
                   <td className="col-skucol-lost_revenue px-3 sm:px-4 py-3 text-right tabular">
                     {lostRev > 0 ? (
                       <span className="text-rose font-semibold whitespace-nowrap">
                         {Math.round(lostRev).toLocaleString("ru-RU")}
+                        {lostUnits > 0 && (
+                          <span className="ml-1 text-rose/60 font-normal text-xs">({lostUnits} шт)</span>
+                        )}
                       </span>
                     ) : (
                       <span className="text-ink-hush">—</span>
