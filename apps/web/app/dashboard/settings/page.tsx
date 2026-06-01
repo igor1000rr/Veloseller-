@@ -1,4 +1,5 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { signTelegramLinkToken } from "@/lib/telegram-link";
 import SettingsForm from "./SettingsForm";
 
 export const dynamic = "force-dynamic";
@@ -14,8 +15,11 @@ export default async function SettingsPage() {
     .eq("id", user.id)
     .single();
 
+  // Deep-link c ПОДПИСАННЫМ токеном (не сырой UUID) — закрывает hijack привязки.
+  // Нет бота/секрета → null → SettingsForm покажет ручной ввод Chat ID.
   const botUsername = process.env.NEXT_PUBLIC_TELEGRAM_BOT_USERNAME ?? "";
-  const deeplinkUrl = botUsername ? `https://t.me/${botUsername}?start=${user.id}` : null;
+  const linkToken = signTelegramLinkToken(user.id);
+  const deeplinkUrl = botUsername && linkToken ? `https://t.me/${botUsername}?start=${linkToken}` : null;
 
   return (
     <div className="max-w-2xl space-y-6">
