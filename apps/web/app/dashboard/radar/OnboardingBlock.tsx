@@ -12,13 +12,13 @@ export function OnboardingBlock({ plan, brandsLimit }: { plan: string; brandsLim
         </h1>
         <p className="mx-auto mt-3 max-w-xl text-ink-muted leading-relaxed">
           Загрузите ваш прайс — ИИ извлечёт список брендов автоматически.
-          Либо добавьте бренды руками. После подтверждения Radar начнёт
-          опрашивать Wordstat и подсказки маркетплейсов раз в 3 дня.
+          Либо добавьте бренды вручную. После подтверждения Radar начнёт
+          собирать и обрабатывать информацию. Раз в 2 недели высылаем отчёт
+          о проделанной работе.
         </p>
       </div>
 
       <div className="grid sm:grid-cols-2 gap-4">
-        {/* Загрузить прайс — основной путь */}
         <Link
           href={"/dashboard/radar/upload" as any}
           className="group rounded-2xl border-2 border-lime-deep/30 bg-lime-soft/30 p-6 hover:border-lime-deep/60 hover:shadow-md transition"
@@ -36,7 +36,6 @@ export function OnboardingBlock({ plan, brandsLimit }: { plan: string; brandsLim
           </div>
         </Link>
 
-        {/* Добавить руками — для тех у кого нет прайса */}
         <Link
           href={"/dashboard/radar/brands" as any}
           className="group rounded-2xl border border-line bg-paper p-6 hover:border-lime-deep/40 hover:shadow-sm transition"
@@ -55,17 +54,17 @@ export function OnboardingBlock({ plan, brandsLimit }: { plan: string; brandsLim
         </Link>
       </div>
 
-      {/* Краткое объяснение что Radar делает */}
+      {/* «Как работает Radar» — текст Александра 01.06.2026 */}
       <div className="mt-8 rounded-xl border border-line bg-bg-soft p-5">
         <h4 className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-3">
           Как работает Radar
         </h4>
         <ol className="space-y-2 text-sm text-ink leading-relaxed">
-          <li><span className="font-mono text-xs text-lime-deep mr-2">01</span> Wordstat возвращает по каждому бренду топ-50 связанных запросов и их частоту</li>
-          <li><span className="font-mono text-xs text-lime-deep mr-2">02</span> Каждый запрос проверяется через подсказки WB и OZON</li>
-          <li><span className="font-mono text-xs text-lime-deep mr-2">03</span> Совпадение спроса + наличия = сигнал «Новый запрос» (на закупку)</li>
-          <li><span className="font-mono text-xs text-lime-deep mr-2">04</span> Только Wordstat без подтверждения = «Ранний сигнал» (товар ещё не в РФ)</li>
-          <li><span className="font-mono text-xs text-lime-deep mr-2">05</span> Дайджест приходит на email и в Telegram раз в 2 недели</li>
+          <li><span className="font-mono text-xs text-lime-deep mr-2">01</span> Сервис делает обращение к Wordstat и получает поисковые запросы с частотой от 60</li>
+          <li><span className="font-mono text-xs text-lime-deep mr-2">02</span> Каждый запрос проверяется через подсказки OZON и WB</li>
+          <li><span className="font-mono text-xs text-lime-deep mr-2">03</span> Совпадение спроса — сигнал «Новый запрос» (на закупку)</li>
+          <li><span className="font-mono text-xs text-lime-deep mr-2">04</span> Только Wordstat без подтверждения — «Ранний сигнал» (спрос на покупку не подтверждён)</li>
+          <li><span className="font-mono text-xs text-lime-deep mr-2">05</span> Отчёты о работе приходят на email и в Telegram раз в 2 недели</li>
         </ol>
       </div>
     </div>
