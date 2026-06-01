@@ -42,7 +42,11 @@ export default async function RadarBrandsPage() {
       </div>
 
       <AddBrandForm limitReached={approvedCount >= limit} />
-      <BrandList brands={brands ?? []} />
+      <BrandList
+        brands={brands ?? []}
+        approvedCount={approvedCount}
+        brandsLimit={limit}
+      />
     </div>
   );
 }
