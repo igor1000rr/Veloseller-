@@ -7,10 +7,6 @@ import {
   actionUnarchiveQuery,
 } from "../../actions";
 
-// Radar v2 (29.05.2026): убран статус "early". Тип ужат до трёх живых.
-// Поля present_in_wb/present_in_ozon оставлены опциональными — в БД они
-// есть (nullable) для backward compat и возможной англ. версии, но в UI
-// больше не показываем колонку «В каталогах».
 type Query = {
   id: string;
   brand_id: string;
@@ -37,7 +33,6 @@ export default function BrandQueriesPanel({
   perQueryHistory,
 }: {
   queries: Query[];
-  /** Помесячная history каждой фразы — словарь query_id → [{ym, freq}, ...] */
   perQueryHistory?: Record<string, { ym: string; freq: number }[]>;
 }) {
   const [filter, setFilter] = useState<StatusFilter>("all");
@@ -45,8 +40,6 @@ export default function BrandQueriesPanel({
 
   const filtered = queries.filter(q => {
     if (filter !== "all") {
-      // Legacy: status='early' (если ещё не перепрогнал worker) показываем
-      // как 'new' для backward compat.
       const effective = (q.status as string) === "early" ? "new" : q.status;
       if (effective !== filter) return false;
     }
@@ -55,12 +48,15 @@ export default function BrandQueriesPanel({
   });
 
   if (queries.length === 0) {
+    // Текст Александра 01.06.2026
     return (
       <div className="rounded-2xl border-2 border-dashed border-line bg-paper p-8 text-center">
-        <h3 className="font-display text-lg font-medium text-ink">Worker ещё не опрашивал этот бренд</h3>
+        <h3 className="font-display text-lg font-medium text-ink">
+          Бренд в очереди на обновление
+        </h3>
         <p className="mt-2 text-sm text-ink-muted max-w-md mx-auto">
-          Radar опрашивает Wordstat раз в 3 дня. Если бренд добавлен только что —
-          сигналы появятся в ближайшие сутки. До тех пор список будет пустым.
+          Radar делает запросы Wordstat раз в 3 дня. Если бренд добавлен
+          только что — сигналы появятся в ближайшие сутки.
         </p>
       </div>
     );
@@ -79,7 +75,6 @@ export default function BrandQueriesPanel({
             Все ({queries.length})
           </button>
           {STATUS_TABS.map(t => {
-            // legacy 'early' тоже считается в 'new'
             const count = queries.filter(q => {
               const effective = (q.status as string) === "early" ? "new" : q.status;
               return effective === t.id;
@@ -173,7 +168,6 @@ function QueryRow({
     : trend < -5 ? "text-rose"
     : "text-ink-muted";
 
-  // Legacy 'early' эффективно показываем как 'new'
   const effectiveStatus = (query.status as string) === "early" ? "new" : query.status;
 
   return (
@@ -228,11 +222,6 @@ function QueryRow({
   );
 }
 
-/**
- * Мини-sparkline для одной строки таблицы — компактный SVG 80×24.
- * Показывает последние 6 точек частоты фразы по месяцам.
- * Цвет линии: зелёный/красный/серый по trend_pct.
- */
 function MiniSparkline({
   history,
   trendPct,
