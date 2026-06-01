@@ -9,6 +9,12 @@
 Фильтр «brand + model» отбрасывает общие запросы типа "dyson пылесос" (всё в
 архив) и оставляет только "dyson v15", "bosch gbh2-26" и подобные где
 явно виден модельный номер.
+
+Архитектура (29.05.2026):
+  - При upload'е прайса worker извлекает все модельные токены и сохраняет
+    в radar_price_models (одна таблица на селлера)
+  - В poll_brand берём этот set один раз и передаём в match_against_model_set
+  - Дёшево — не нужно каждый раз читать прайс из БД или из файла
 """
 from __future__ import annotations
 
@@ -69,34 +75,31 @@ def extract_model_from_phrase(phrase: str, brand: str) -> Optional[str]:
     return None
 
 
-def match_wordstat_to_price(
+def match_against_model_set(
     brand_name: str,
     wordstat_phrases: list[dict],
-    price_rows: list[dict],
+    seller_models: set[str],
     *,
     min_frequency: int = DEFAULT_MIN_FREQUENCY,
 ) -> list[MatchedQuery]:
-    """Сопоставляет Wordstat фразы с прайсом и определяет статус.
+    """Сопоставляет Wordstat фразы с готовым set'ом моделей селлера.
+
+    Используется в poll_brand (worker job) — модели берутся один раз из
+    radar_price_models, не нужно перечитывать прайс.
 
     Args:
         brand_name: имя бренда ("Dyson")
-        wordstat_phrases: [{phrase, frequency}, ...] из Wordstat выборки
-        price_rows: строки прайса
-        min_frequency: минимальная частота в Wordstat чтобы учитывать
+        wordstat_phrases: [{phrase, frequency}, ...] из Wordstat
+        seller_models: set нормализованных (lowercase) моделей селлера
+                       из radar_price_models. Например {"v11", "v15", "gbh2-26"}
+        min_frequency: минимальная частота Wordstat (≥60 по умолчанию)
 
     Returns:
         Список MatchedQuery — только фразы прошедшие brand+model фильтр.
+        status='archived' если model в seller_models, иначе 'new'.
     """
     if not wordstat_phrases:
         return []
-
-    # Собираем все названия из прайса в нижнем регистре одной строкой
-    price_text_parts: list[str] = []
-    for row in price_rows:
-        for v in row.values():
-            if v is not None:
-                price_text_parts.append(str(v).lower())
-    price_blob = " ".join(price_text_parts)
 
     results: list[MatchedQuery] = []
     for item in wordstat_phrases:
@@ -112,10 +115,8 @@ def match_wordstat_to_price(
         if model is None:
             continue  # фраза не brand+model — выбрасываем
 
-        # Сопоставляем model с прайсом через word boundary regex.
-        # Это нужно чтобы model="v11" не матчила "v110" в названии товара.
-        pattern = re.compile(r"\b" + re.escape(model) + r"\b", re.IGNORECASE)
-        is_in_price = bool(pattern.search(price_blob))
+        # Прямой O(1) lookup в set вместо regex по price_blob
+        is_in_price = model.lower() in seller_models
 
         results.append(MatchedQuery(
             phrase=phrase,
@@ -125,3 +126,24 @@ def match_wordstat_to_price(
         ))
 
     return results
+
+
+def match_wordstat_to_price(
+    brand_name: str,
+    wordstat_phrases: list[dict],
+    price_rows: list[dict],
+    *,
+    min_frequency: int = DEFAULT_MIN_FREQUENCY,
+) -> list[MatchedQuery]:
+    """Альтернативный вход — принимает сырые строки прайса (для тестов/однократного использования).
+
+    Извлекает модели из строк один раз и делегирует match_against_model_set.
+    В production коде используется match_against_model_set напрямую.
+    """
+    # Импорт здесь чтобы избежать круговой зависимости brand_detector ↔ wordstat_matcher
+    from app.radar.brand_detector import detect_models_from_price
+    seller_models = detect_models_from_price(price_rows)
+    return match_against_model_set(
+        brand_name, wordstat_phrases, seller_models,
+        min_frequency=min_frequency,
+    )
