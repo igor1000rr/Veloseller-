@@ -1,46 +1,31 @@
 """Radar HTTP endpoints для worker'а.
 
 Сейчас один endpoint:
-  POST /radar/extract-brands — принимает прайс XLSX/CSV, вызывает DeepSeek
-       (или OpenRouter fallback), создаёт бренды в БД через
+  POST /radar/extract-brands — принимает прайс XLSX/CSV, вызывает
+       brand_detector (частотный анализ), создаёт бренды в БД через
        radar_price_uploads + radar_brands.
 
 Вызывается из /api/radar/upload (Next.js → Worker).
 Аутентификация — X-Worker-Secret (как у /jobs/*).
 
-Решение делать через worker (а не Node.js):
-  - openpyxl уже в зависимостях worker'а
-  - не нужен xlsx-parser в Node
-  - тяжёлая AI-обработка асинхронная, не блокирует UI
-  - retry/backoff на стороне worker'а удобнее централизованно
+29.05.2026: AI-парсинг (DeepSeek) заменён на простой частотный
+анализ. Александр: это оверкилл для задачи которая решается
+словарём стоп-слов и регуляркой.
 """
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.db import get_supabase
-from app.radar.brand_extractor import extract_brands_from_price
+from app.radar.brand_detector import detect_brands_from_price
+from app.radar.price_parser import parse_price_file
 
 logger = logging.getLogger("veloseller.worker.radar_api")
 
 router = APIRouter(prefix="/radar", tags=["radar"])
-
-
-def _detect_ai_provider(model_name: str) -> str:
-    """Определяет провайдер по имени модели для записи в radar_price_uploads.
-
-    DeepSeek модели начинаются с 'deepseek-', OpenRouter — с провайдер/префиксов
-    ('anthropic/', 'openai/' и т.п.).
-    """
-    if model_name.startswith("deepseek-"):
-        return "deepseek"
-    if "/" in model_name:
-        return "openrouter"
-    return "unknown"
 
 
 @router.post("/extract-brands")
@@ -49,21 +34,17 @@ async def extract_brands(
     upload_id: str = Form(...),
     file: UploadFile = File(...),
 ) -> dict:
-    """Извлечь бренды из прайса.
+    """Извлечь бренды из прайса через частотный анализ.
 
     Workflow:
-    1. Читаем файл (bytes)
-    2. extract_brands_from_price → AI делает работу
+    1. Читаем файл (bytes) → parse_price_file → list[dict]
+    2. detect_brands_from_price — частотный анализ без AI
     3. Обновляем radar_price_uploads (status, metrics)
-    4. Создаём radar_brands (status=approved) — пользователь потом может
-       исключить ненужные
-    5. Возвращаем {brands_count, brands_approved, ai_cost_usd}
+    4. Создаём radar_brands (status=approved в пределах лимита тарифа)
+    5. Остальные пишутся как excluded — в UI показываются в FOMO-тизере
+    6. Возвращаем {brands_count, brands_approved}
 
-    Лимит брендов уважается: если у селлера тариф на 10 брендов и AI
-    нашёл 25 — записываем только топ-10 по sku_count. Остальные пишутся
-    как excluded (пользователь может перевести в approved вручную).
-
-    Идемпотентность: если этот upload уже processed (status=completed),
+    Идемпотентность: если upload уже processed (status=completed),
     повторный вызов вернёт текущий результат без перерасчёта.
     """
     sb = get_supabase()
@@ -101,7 +82,7 @@ async def extract_brands(
             "message": "Уже обработано ранее",
         }
 
-    # 2. Извлечение брендов через AI
+    # 2. Парсинг файла + частотный анализ
     file_bytes = await file.read()
     file_name = file.filename or "upload.xlsx"
 
@@ -109,32 +90,38 @@ async def extract_brands(
                 extra={"seller_id": seller_id, "upload_id": upload_id,
                        "file_name": file_name, "size": len(file_bytes)})
 
-    result = extract_brands_from_price(file_bytes, file_name)
-
-    # 3. Подсчёт rows_total для записи в upload (даже если AI упал)
     try:
-        from app.radar.brand_extractor import parse_price_file
         rows = parse_price_file(file_bytes, file_name)
-        rows_total = len(rows)
-    except Exception:
-        rows_total = 0
-
-    if result.error:
-        # AI упал — отмечаем failed
+    except Exception as e:
+        logger.exception("price parse failed", extra={"upload_id": upload_id})
         try:
             sb.table("radar_price_uploads").update({
                 "status": "failed",
-                "error_message": result.error[:500],
-                "rows_total": rows_total,
+                "error_message": f"Парсинг файла: {e}"[:500],
                 "completed_at": datetime.now(timezone.utc).isoformat(),
             }).eq("id", upload_id).execute()
         except Exception:
-            logger.exception("failed to mark upload as failed", extra={"upload_id": upload_id})
-        logger.warning("radar.extract_brands AI failed: %s", result.error,
-                       extra={"seller_id": seller_id, "upload_id": upload_id})
-        raise HTTPException(500, f"AI extraction failed: {result.error}")
+            logger.exception("failed to mark upload as failed")
+        raise HTTPException(400, f"Не удалось прочитать прайс: {e}")
 
-    # 4. Запись брендов
+    detection = detect_brands_from_price(rows, min_repetitions=3)
+
+    if detection.error or not detection.brands:
+        try:
+            sb.table("radar_price_uploads").update({
+                "status": "failed",
+                "error_message": (detection.error or "Не найдено ни одного бренда с повторяемостью ≥3 раз")[:500],
+                "rows_total": detection.rows_total,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            }).eq("id", upload_id).execute()
+        except Exception:
+            logger.exception("failed to mark upload as failed")
+        raise HTTPException(
+            422,
+            detection.error or "Не найдено ни одного бренда с повторяемостью ≥3. Проверьте что в прайсе есть названия товаров с латинскими брендами.",
+        )
+
+    # 3. Запись брендов в БД
     # Считаем сколько уже есть approved у селлера
     current_approved = (
         sb.table("radar_brands").select("id", count="exact", head=True)
@@ -145,16 +132,15 @@ async def extract_brands(
 
     brands_inserted = 0
     brands_marked_excluded = 0
-    for i, brand in enumerate(result.brands):
-        normalized = brand.name.lower().strip()
-        # Если уже есть в БД — пропускаем (upsert обновит sku_count)
+    for i, brand in enumerate(detection.brands):
+        # До лимита — approved, остальные — excluded (FOMO-тизер в UI)
         status = "approved" if i < available_slots else "excluded"
         try:
             sb.table("radar_brands").upsert({
                 "seller_id": seller_id,
                 "name": brand.name,
-                "name_normalized": normalized,
-                "source": "ai",
+                "name_normalized": brand.name_normalized,
+                "source": "price",  # раньше было "ai", теперь это не AI
                 "status": status,
                 "sku_count": brand.sku_count,
             }, on_conflict="seller_id,name_normalized").execute()
@@ -166,20 +152,17 @@ async def extract_brands(
             logger.exception("radar_brands upsert failed",
                              extra={"seller_id": seller_id, "brand": brand.name})
 
-    # 5. Обновление upload
-    # ai_provider определяется по имени модели — раньше было захардкожено
-    # "openrouter", теперь поддерживается и DeepSeek (29.05.2026 переход
-    # OpenRouter → DeepSeek из-за блокировки платежей из РФ).
+    # 4. Обновление upload — ai_provider теперь "internal", cost = 0
     try:
         sb.table("radar_price_uploads").update({
             "status": "completed",
-            "rows_total": rows_total,
-            "ai_provider": _detect_ai_provider(result.ai_model),
-            "ai_model": result.ai_model,
-            "ai_input_tokens": result.ai_input_tokens,
-            "ai_output_tokens": result.ai_output_tokens,
-            "ai_cost_usd": round(result.ai_cost_usd, 6),
-            "brands_extracted": len(result.brands),
+            "rows_total": detection.rows_total,
+            "ai_provider": "internal",
+            "ai_model": "frequency-analyzer-v1",
+            "ai_input_tokens": 0,
+            "ai_output_tokens": 0,
+            "ai_cost_usd": 0,
+            "brands_extracted": len(detection.brands),
             "brands_approved": brands_inserted,
             "completed_at": datetime.now(timezone.utc).isoformat(),
         }).eq("id", upload_id).execute()
@@ -188,23 +171,21 @@ async def extract_brands(
 
     logger.info("radar.extract_brands done",
                 extra={"seller_id": seller_id, "upload_id": upload_id,
-                       "ai_provider": _detect_ai_provider(result.ai_model),
-                       "ai_model": result.ai_model,
-                       "tokens_in": result.ai_input_tokens,
-                       "tokens_out": result.ai_output_tokens,
-                       "cost_usd": result.ai_cost_usd,
-                       "brands_total": len(result.brands),
+                       "rows_total": detection.rows_total,
+                       "rows_analyzed": detection.rows_analyzed,
+                       "brands_total": len(detection.brands),
                        "brands_approved": brands_inserted,
                        "brands_excluded": brands_marked_excluded})
 
     return {
         "uploadId": upload_id,
         "status": "completed",
-        "brandsExtracted": len(result.brands),
+        "brandsExtracted": len(detection.brands),
         "brandsApproved": brands_inserted,
         "brandsExcluded": brands_marked_excluded,
-        "aiCostUsd": round(result.ai_cost_usd, 4),
-        "rowsTotal": rows_total,
+        "rowsTotal": detection.rows_total,
+        "rowsAnalyzed": detection.rows_analyzed,
+        "aiCostUsd": 0,
     }
 
 
