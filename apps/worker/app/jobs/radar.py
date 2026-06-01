@@ -1,38 +1,46 @@
 """Radar poller — основной worker-job для мониторинга новинок.
 
-Что делает:
+Что делает (Radar v2, 29.05.2026, план Александра):
   1. Для каждого селлера с активным radar_plan и approved-брендами:
+     - Загружаем seller_models (один запрос на селлера в radar_price_models)
      - Для каждого approved-бренда, у которого last_wordstat_at старше N дней:
        a. Запрашивает Wordstat (через WordstatService — Yandex/XMLRiver+cache)
        b. Сохраняет history в radar_query_history
-       c. Для каждого уточнения (related query):
-          - Проверяет WB/OZON suggest (check_suggest_cached)
-          - Решает статус: early / new / watching / archived
-          - Upsert в radar_queries
+       c. Через wordstat_matcher.match_against_model_set сопоставляет фразы
+          с моделями селлера:
+            - model в прайсе → archived (селлер уже продаёт)
+            - модели нет → new (новинка)
+          Фильтр brand+model отсекает шумные фразы типа "dyson пылесос".
+       d. Upsert в radar_queries
 
-Логика статусов:
-  early:    Wordstat показывает рост, но НЕ в suggest ни в одном маркетплейсе
-  new:      Wordstat показывает рост И есть в WB или OZON (или обоих)
+Логика статусов (упрощено vs v1):
+  new:      Wordstat freq≥60, brand+model паттерн, модели НЕТ в прайсе селлера
+  archived: то же что выше но модель уже есть в прайсе, ИЛИ
+            автоархивация после 30 дней без активности, ИЛИ
+            ручное действие пользователя
   watching: пользователь нажал звезду → is_favorite=true
-  archived: пользователь убрал в архив вручную, ИЛИ автоархивация после 30 дней
-            без активности
 
 Расписание:
   - Wordstat poll: каждые 3 дня для бренда (last_wordstat_at + 3 дня)
-  - Suggest poll: каждый день (но кэш 1 день, так что повторные вызовы дёшевы)
   - Запускается scheduler'ом раз в сутки в 06:00 UTC (= 09:00 МСК)
 
-Логирование: каждый бренд — отдельная строка в логах с метриками
-(сколько запросов, сколько новых, сколько повышений до 'new').
+Что изменилось vs v1:
+  - Убрали suggest WB/Ozon — Wordstat freq≥60 + matcher достаточно
+  - Убрали статус 'early' — теперь только new/archived/watching
+  - Убрали present_in_wb/present_in_ozon из payload (поля остаются в БД
+    nullable для backward compat и возможной англоязычной версии)
 """
 from __future__ import annotations
 
 import logging
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any
 
 from app.db import fetch_all, get_supabase
-from app.radar.suggest_provider import check_suggest_cached
+from app.radar.wordstat_matcher import (
+    DEFAULT_MIN_FREQUENCY,
+    match_against_model_set,
+)
 from app.radar.wordstat_provider import WordstatService
 
 logger = logging.getLogger("veloseller.radar.poller")
@@ -40,11 +48,8 @@ logger = logging.getLogger("veloseller.radar.poller")
 # Минимальный интервал между Wordstat-запросами одного бренда (часов)
 _WORDSTAT_POLL_INTERVAL_HOURS = 72  # 3 дня
 
-# Минимальная частота запроса чтобы вообще сохранять (отсекаем мусор)
-_MIN_FREQUENCY_TO_TRACK = 50
-
-# Сколько уточнений с одного бренда сохраняем (top по частоте)
-_MAX_RELATED_PER_BRAND = 30
+# Сколько уточнений с одного бренда сохраняем после фильтра brand+model
+_MAX_QUERIES_PER_BRAND = 30
 
 # Автоархивация: если запрос не обновлялся N дней — переводим в archived
 _AUTO_ARCHIVE_DAYS = 30
@@ -78,23 +83,45 @@ def _brand_needs_polling(brand: dict) -> bool:
     return (datetime.now(timezone.utc) - last_dt) >= timedelta(hours=_WORDSTAT_POLL_INTERVAL_HOURS)
 
 
-def _decide_status(present_in_wb: bool, present_in_ozon: bool,
-                   current_status: str, is_favorite: bool) -> str:
-    """Решает в какой статус положить запрос на основе suggest-сигналов.
+def _load_seller_models(sb, seller_id: str) -> set[str]:
+    """Загружает все модели селлера из radar_price_models в set.
 
-    Не меняет watching/archived если пользователь их выставил вручную.
-    Auto-промоушн: early → new, как только появилось в любом маркетплейсе.
+    Используется matcher'ом для O(1) проверки наличия model в прайсе.
+    Один SELECT на селлера независимо от количества брендов.
     """
-    # Пользовательские статусы (выставленные вручную) не трогаем
+    try:
+        rows = fetch_all(
+            sb.table("radar_price_models")
+            .select("model_token")
+            .eq("seller_id", seller_id)
+        )
+        return {r["model_token"] for r in rows if r.get("model_token")}
+    except Exception:
+        logger.exception("radar.poll: не удалось загрузить модели селлера %s", seller_id)
+        return set()
+
+
+def _decide_status_for_matched(
+    matched_status: str,
+    current_status: str | None,
+    is_favorite: bool,
+) -> str:
+    """Решает финальный status для записи в radar_queries.
+
+    Пользовательские статусы (выставленные вручную) не перетираются:
+    - watching/is_favorite=true — оставляем
+    - archived вручную — оставляем
+    Auto-статус из matcher применяется только если запись новая или
+    в "natural" статусе.
+    """
     if current_status == "watching" and is_favorite:
         return "watching"
     if current_status == "archived":
+        # Если matcher теперь говорит archived (модель появилась в прайсе) —
+        # подтверждаем; если new — оставляем archived (пользователь убрал
+        # сознательно)
         return "archived"
-
-    # Авто-логика:
-    if present_in_wb or present_in_ozon:
-        return "new"  # подтверждение спроса → реальный сигнал
-    return "early"   # только Wordstat, ещё не в магазинах
+    return matched_status  # "new" или "archived" из matcher'а
 
 
 def poll_brand(
@@ -102,14 +129,19 @@ def poll_brand(
     seller_id: str,
     brand: dict,
     wordstat: WordstatService,
+    seller_models: set[str],
 ) -> dict[str, int]:
     """Обрабатывает один бренд.
 
-    Возвращает метрики: {queries_processed, new_queries, promoted_to_new}.
+    Возвращает метрики: {queries_processed, new_queries, matched_to_archived}.
     """
     brand_id = brand["id"]
     brand_name = brand["name"]
-    metrics = {"queries_processed": 0, "new_queries": 0, "promoted_to_new": 0}
+    metrics = {
+        "queries_processed": 0,
+        "new_queries": 0,
+        "matched_to_archived": 0,
+    }
 
     # 1. Wordstat: частота + до 50 уточнений + история (для бренда)
     result = wordstat.fetch(brand_name, with_history=True)
@@ -118,8 +150,8 @@ def poll_brand(
                        brand_name, seller_id)
         return metrics
 
-    # Обновляем last_wordstat_at сразу — даже если ничего нового, чтобы не
-    # дёргать снова через минуту.
+    # Обновляем last_wordstat_at — даже если ничего нового, чтобы не дёргать
+    # снова через минуту.
     try:
         sb.table("radar_brands").update({
             "last_wordstat_at": datetime.now(timezone.utc).isoformat(),
@@ -127,76 +159,76 @@ def poll_brand(
     except Exception:
         logger.exception("radar.poll: не удалось обновить last_wordstat_at для бренда %s", brand_id)
 
-    # 2. Отбираем top-N уточнений
-    related_sorted = sorted(result.related, key=lambda r: r.frequency, reverse=True)
-    significant = [r for r in related_sorted if r.frequency >= _MIN_FREQUENCY_TO_TRACK]
-    significant = significant[:_MAX_RELATED_PER_BRAND]
+    # 2. Преобразуем related в формат для matcher'а
+    wordstat_phrases = [
+        {"phrase": r.text, "frequency": r.frequency}
+        for r in result.related
+    ]
 
-    # 3. Для каждого уточнения — suggest проверка + upsert
-    for rel in significant:
+    # 3. Matcher: фильтр brand+model + сопоставление с seller_models
+    matched = match_against_model_set(
+        brand_name, wordstat_phrases, seller_models,
+        min_frequency=DEFAULT_MIN_FREQUENCY,
+    )
+    # Сортируем по frequency убыванию (самые востребованные первыми)
+    matched.sort(key=lambda m: m.frequency, reverse=True)
+    matched = matched[:_MAX_QUERIES_PER_BRAND]
+
+    # 4. Upsert каждой matched фразы в radar_queries
+    now_iso = datetime.now(timezone.utc).isoformat()
+    for mq in matched:
         try:
-            present_in_wb, present_in_ozon = check_suggest_cached(rel.text)
-
-            # Существующий запрос?
             existing = (
                 sb.table("radar_queries")
                 .select("id,status,is_favorite,current_frequency")
                 .eq("seller_id", seller_id)
                 .eq("brand_id", brand_id)
-                .eq("query_normalized", rel.text.lower().strip())
+                .eq("query_normalized", mq.phrase.lower().strip())
                 .maybeSingle()
                 .execute()
             )
             existing_row = existing.data
 
-            old_status = existing_row["status"] if existing_row else "early"
+            old_status = existing_row["status"] if existing_row else None
             is_favorite = bool(existing_row.get("is_favorite", False)) if existing_row else False
-            new_status = _decide_status(present_in_wb, present_in_ozon, old_status, is_favorite)
+            new_status = _decide_status_for_matched(mq.status, old_status, is_favorite)
 
             old_freq = int(existing_row.get("current_frequency", 0) or 0) if existing_row else 0
             trend_pct = None
             if old_freq > 0:
-                trend_pct = round((rel.frequency - old_freq) / old_freq * 100, 1)
+                trend_pct = round((mq.frequency - old_freq) / old_freq * 100, 1)
 
             payload = {
                 "seller_id": seller_id,
                 "brand_id": brand_id,
-                "query_text": rel.text,
-                "query_normalized": rel.text.lower().strip(),
-                "current_frequency": rel.frequency,
+                "query_text": mq.phrase,
+                "query_normalized": mq.phrase.lower().strip(),
+                "current_frequency": mq.frequency,
                 "trend_pct": trend_pct,
-                "present_in_wb": present_in_wb,
-                "present_in_ozon": present_in_ozon,
-                "suggest_checked_at": datetime.now(timezone.utc).isoformat(),
+                # present_in_wb/ozon оставлены NULL — не используем suggest в v2
                 "status": new_status,
-                "last_updated_at": datetime.now(timezone.utc).isoformat(),
+                "last_updated_at": now_iso,
             }
 
             if existing_row:
                 sb.table("radar_queries").update(payload).eq("id", existing_row["id"]).execute()
-                if old_status == "early" and new_status == "new":
-                    metrics["promoted_to_new"] += 1
+                if new_status == "archived" and old_status != "archived":
+                    metrics["matched_to_archived"] += 1
             else:
-                payload["first_seen_at"] = datetime.now(timezone.utc).isoformat()
+                payload["first_seen_at"] = now_iso
                 sb.table("radar_queries").insert(payload).execute()
                 metrics["new_queries"] += 1
-                if new_status == "new":
-                    metrics["promoted_to_new"] += 1
+                if new_status == "archived":
+                    metrics["matched_to_archived"] += 1
 
             metrics["queries_processed"] += 1
         except Exception:
             logger.exception("radar.poll: ошибка для запроса %r бренда %r",
-                             rel.text, brand_name)
+                             mq.phrase, brand_name)
 
-    # 4. История бренда → radar_query_history (только для базовой фразы)
-    # Историю сохраняем по brand_name, для UI график трендов бренда
-    # NOTE: query_history привязан к query_id, но истории конкретно по
-    # query_text от Wordstat мы не получаем (только по запросу к API на
-    # тот же phrase). Поэтому history записываем для основной фразы бренда —
-    # его представительный query, если есть.
+    # 5. История бренда → radar_query_history
     if result.history:
         try:
-            # Пишем историю как привязанную к "родительскому" запросу = brand_name
             parent = (
                 sb.table("radar_queries")
                 .select("id")
@@ -214,7 +246,7 @@ def poll_brand(
                         "period_year": point.year,
                         "period_month": point.month,
                         "frequency": point.frequency,
-                        "captured_at": datetime.now(timezone.utc).isoformat(),
+                        "captured_at": now_iso,
                     }, on_conflict="query_id,period_year,period_month").execute()
         except Exception:
             logger.warning("radar.poll: не удалось записать history для %r", brand_name)
@@ -225,7 +257,7 @@ def poll_brand(
 def auto_archive_stale_queries(sb, seller_id: str) -> int:
     """Перемещает в archived запросы которые не обновлялись N дней.
 
-    Не трогает is_favorite=true (это сознательное "наблюдение").
+    Не трогает is_favorite=true (это сознательное «наблюдение»).
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=_AUTO_ARCHIVE_DAYS)).isoformat()
     try:
@@ -261,7 +293,7 @@ def poll_all_sellers() -> dict[str, Any]:
     total_brands_polled = 0
     total_queries_processed = 0
     total_new_queries = 0
-    total_promoted = 0
+    total_matched_to_archived = 0
     total_archived = 0
     sellers_processed = 0
 
@@ -271,6 +303,15 @@ def poll_all_sellers() -> dict[str, Any]:
 
         sellers_processed += 1
         seller_id = seller["id"]
+
+        # Загружаем seller_models один раз — переиспользуем для всех брендов
+        seller_models = _load_seller_models(sb, seller_id)
+        if not seller_models:
+            logger.info(
+                "radar.poll: у селлера %s нет моделей в radar_price_models — "
+                "все Wordstat фразы будут как new (надо загрузить прайс)",
+                seller_id,
+            )
 
         try:
             brands = fetch_all(
@@ -287,14 +328,15 @@ def poll_all_sellers() -> dict[str, Any]:
             if not _brand_needs_polling(brand):
                 continue
             try:
-                m = poll_brand(sb, seller_id, brand, wordstat)
+                m = poll_brand(sb, seller_id, brand, wordstat, seller_models)
                 total_brands_polled += 1
                 total_queries_processed += m["queries_processed"]
                 total_new_queries += m["new_queries"]
-                total_promoted += m["promoted_to_new"]
+                total_matched_to_archived += m["matched_to_archived"]
                 logger.info(
-                    "radar.poll: brand=%r queries=%d new=%d promoted=%d",
-                    brand["name"], m["queries_processed"], m["new_queries"], m["promoted_to_new"],
+                    "radar.poll: brand=%r queries=%d new=%d archived=%d",
+                    brand["name"], m["queries_processed"], m["new_queries"],
+                    m["matched_to_archived"],
                 )
             except Exception:
                 logger.exception(
@@ -302,7 +344,6 @@ def poll_all_sellers() -> dict[str, Any]:
                     brand.get("name"), seller_id,
                 )
 
-        # Auto-archive в конце обработки селлера
         archived = auto_archive_stale_queries(sb, seller_id)
         total_archived += archived
 
@@ -311,7 +352,7 @@ def poll_all_sellers() -> dict[str, Any]:
         "brands_polled": total_brands_polled,
         "queries_processed": total_queries_processed,
         "new_queries": total_new_queries,
-        "promoted_to_new": total_promoted,
+        "matched_to_archived": total_matched_to_archived,
         "auto_archived": total_archived,
     }
     logger.info("radar.poll_all_sellers done: %s", summary)
