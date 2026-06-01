@@ -7,6 +7,7 @@ type HistoryPoint = {
   warehouse_health_score: number | null;
   lost_revenue: number | null;
   total_inventory_value: number | null;
+  potential_revenue?: number | null;
 };
 
 type SegmentRow = { name: string; value: number };
@@ -31,7 +32,6 @@ const CURRENCY_SYMBOLS: Record<string, string> = {
   RUB: "₽", USD: "$", EUR: "€", BYN: "Br", KZT: "₸", UAH: "₴",
 };
 
-/** Компактное форматирование больших чисел: 1500000 → 1.5M. Для осей графиков. */
 function compactMoney(value: number, symbol: string = "₽"): string {
   if (!isFinite(value)) return "—";
   const abs = Math.abs(value);
@@ -147,6 +147,45 @@ export function DeadInventoryChart({ history, currency = "RUB" }: { history: any
         <Bar yAxisId="skus" dataKey="skus" fill="#94a3b8" name="SKU неликвида" radius={[4,4,0,0]} />
         <Line yAxisId="money" type="monotone" dataKey="money" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} name={`Заморожено, ${symbol}`} />
       </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+/**
+ * Потенциальная выручка — динамика возможной выручки по текущей скорости продаж.
+ * Формула per-snapshot: SUM(TVelo × current_price) по всем SKU в day-снапшоте,
+ * нормализованная на период (30 дней по умолчанию).
+ * Александр 01.06.2026: "Рассчитывается как СУММ(TVelo × Цена по каждому товару)".
+ */
+export function PotentialRevenueChart({ history, currency = "RUB" }: { history: HistoryPoint[]; currency?: string }) {
+  const symbol = CURRENCY_SYMBOLS[currency] ?? currency;
+  const data = history.slice().reverse().map(p => ({
+    date: new Date(p.period_end).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }),
+    potential: Number(p.potential_revenue ?? 0),
+  }));
+
+  // Если ни в одной точке нет потенциальной выручки — placeholder.
+  const allZero = data.every(p => p.potential === 0);
+  if (data.length < 2 || allZero) {
+    return <p className="text-sm text-slate-500">Накапливается история — график появится через 2+ дня после следующего пересчёта метрик.</p>;
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={220}>
+      <LineChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+        <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
+        <YAxis stroke="#64748b" fontSize={12} tickFormatter={(v) => compactMoney(v, symbol)} width={70} />
+        <Tooltip formatter={(v: number) => [fullMoney(v, symbol), "Потенциальная выручка"]} />
+        <Line
+          type="monotone"
+          dataKey="potential"
+          stroke="#0d9488"
+          strokeWidth={2}
+          dot={{ r: 3 }}
+          name="Потенциальная выручка"
+        />
+      </LineChart>
     </ResponsiveContainer>
   );
 }
