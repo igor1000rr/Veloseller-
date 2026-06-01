@@ -2,11 +2,13 @@
 import Link from "next/link";
 import type { RadarTab } from "./page";
 
+// Radar v2 (29.05.2026, план Александра): убрали 'early' таб.
+// Логика теперь только: new (Wordstat фраза brand+model которой нет в прайсе),
+// archived (то же но модель в прайсе или ручной архив), watching (избранное).
 const TABS: Array<{ key: RadarTab; label: string; hint: string }> = [
-  { key: "early",    label: "Ранние сигналы", hint: "Wordstat есть, suggest пусто — товара ещё нет в РФ" },
-  { key: "new",      label: "Новые",          hint: "Впервые в suggest — пора закупать" },
-  { key: "watching", label: "Наблюдение",     hint: "Избранное — отслеживаем для закупки" },
-  { key: "archived", label: "Архив",          hint: "Отклонено или уже закуплено" },
+  { key: "new",      label: "Новые",      hint: "Wordstat показывает спрос, у вас этой модели нет — кандидат на закупку" },
+  { key: "watching", label: "Наблюдение", hint: "Избранное — отслеживаем для закупки" },
+  { key: "archived", label: "Архив",      hint: "Уже продаёте или отклонено вручную" },
 ];
 
 export default function RadarTabs({
@@ -18,7 +20,8 @@ export default function RadarTabs({
 }) {
   const buildHref = (key: RadarTab) => {
     const params = new URLSearchParams();
-    if (key !== "early") params.set("tab", key);
+    // new — дефолт, в URL не пишем
+    if (key !== "new") params.set("tab", key);
     if (brandFilter) params.set("brand", brandFilter);
     const qs = params.toString();
     return `/dashboard/radar${qs ? `?${qs}` : ""}`;
