@@ -5,6 +5,7 @@ import { SkuAnalysisChart, type ChartPoint } from "./SkuAnalysisChart";
 import { ReorderPanel } from "./ReorderPanel";
 import { HealthKpi, buildHealthBreakdown, buildConfidenceBreakdown } from "./HealthTooltip";
 import { Icons } from "../../../_components/Icons";
+import { InfoTooltip } from "../../../_components/InfoTooltip";
 
 export const dynamic = "force-dynamic";
 
@@ -48,10 +49,14 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     .limit(10);
 
   const day30Ago = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+  // Александр 01.06.2026: "фиксация всех event_type кроме sales_like".
+  // sales_like — обычные продажи которые засоряют список. Отфильтровываем
+  // на уровне запроса — экономим bytes и парсинг.
   const { data: changelog } = await supabase
     .from("changelog")
     .select("event_date,event_type,delta_stock,message,confidence_impact")
     .eq("product_id", id)
+    .neq("event_type", "sales_like")
     .gte("event_date", day30Ago)
     .order("event_date", { ascending: false })
     .limit(60);
@@ -93,6 +98,16 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     }
   }
 
+  // Computed KPI по правкам Александра 01.06.2026:
+  // Упущенная выручка = TVelo × stockout_days × price
+  // Рекомендуемая закупка на 30 дней = TVelo × 30
+  const tvelo = latest ? Number(latest.adjusted_velocity ?? 0) : 0;
+  const stockoutDays = latest ? Number(latest.stockout_days ?? 0) : 0;
+  const price = latest ? Number(latest.current_price ?? 0) : 0;
+  const lostRevenue = tvelo * stockoutDays * price;
+  const lostUnits = Math.round(tvelo * stockoutDays);
+  const recommendedReorder30 = Math.round(tvelo * 30);
+
   return (
     <div className="space-y-6">
       <header>
@@ -100,28 +115,68 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
           <span className="rotate-180"><Icons.ArrowRight size={12} /></span> Все SKU
         </Link>
         <div className="mt-3 flex items-baseline gap-2 sm:gap-3 flex-wrap">
-          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink font-mono break-all">{product.sku}</h1>
-          <span className="text-ink-muted text-sm sm:text-base md:text-lg break-words">{product.product_name}</span>
+          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink break-words">{product.product_name}</h1>
+        </div>
+        <div className="mt-1 font-mono text-xs text-ink-hush uppercase tracking-wider">
+          SKU: <span className="text-ink-soft normal-case">{product.sku}</span>
         </div>
       </header>
 
+      {/* Верхний блок KPI — переработан 01.06.2026 по ТЗ Александра.
+          Поля: Health Score, TVelo (3 мес), Покрытие, Достоверность,
+          Дней без наличия (1 мес), Упущенная выручка, Рекомендуемая закупка 30д. */}
       {latest && (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-3">
-          <Kpi label="TVelo" value={Number(latest.adjusted_velocity).toFixed(2)} sub={adjVsMedian || "ед./день"} />
-          <Kpi label="Медиана 30д" value={
-            latest.median_30d_velocity != null
-              ? Number(latest.median_30d_velocity).toFixed(2)
-              : "—"
-          } sub="ед./день (история)" />
-          <Kpi label="Покрытие" value={latest.coverage_days != null ? `${Number(latest.coverage_days).toFixed(0)} дн` : "—"} />
-          <Kpi label="Остаток" value={latest.current_stock} sub={`× ${Number(latest.current_price).toFixed(0)}`} />
-          <HealthKpi label="Confidence" value={`${Number(latest.confidence_score).toFixed(0)}%`}
-                     breakdown={buildConfidenceBreakdown(latest)} accent="blue" />
-          <HealthKpi label="Health" value={`${Number(latest.sku_health_score ?? 0).toFixed(0)}/100`}
-                     breakdown={buildHealthBreakdown(latest)} accent="violet" />
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
+          <HealthKpi
+            label="Health Score"
+            value={`${Number(latest.sku_health_score ?? 0).toFixed(0)}/100`}
+            breakdown={buildHealthBreakdown(latest)}
+            accent="violet"
+          />
+          <Kpi
+            label="TVelo (3 мес)"
+            value={tvelo.toFixed(2)}
+            sub={adjVsMedian || "шт/день"}
+          />
+          <Kpi
+            label="Покрытие"
+            value={latest.coverage_days != null ? `${Number(latest.coverage_days).toFixed(0)} д.` : "—"}
+            sub="дней до конца остатков"
+          />
+          <HealthKpi
+            label="Достоверность"
+            value={`${Number(latest.confidence_score ?? 0).toFixed(0)}%`}
+            breakdown={buildConfidenceBreakdown(latest)}
+            accent="blue"
+          />
+          <Kpi
+            label="Дней без наличия"
+            value={stockoutDays > 0 ? `${stockoutDays}` : "0"}
+            sub="за последний месяц"
+            tone={stockoutDays > 0 ? "warn" : undefined}
+          />
+          <Kpi
+            label="Упущенная выручка"
+            value={lostRevenue > 0 ? Math.round(lostRevenue).toLocaleString("ru-RU") : "0"}
+            sub={lostRevenue > 0 ? `${lostUnits} шт × TVelo × OOS × цена` : "товар не уходил в ноль"}
+            tone={lostRevenue > 0 ? "danger" : undefined}
+          />
+          <Kpi
+            label="Рекомендуемая закупка"
+            value={recommendedReorder30 > 0 ? recommendedReorder30.toLocaleString("ru-RU") : "—"}
+            sub="на 30 дней (TVelo × 30)"
+            tone={recommendedReorder30 > 0 ? "accent" : undefined}
+          />
+          <Kpi
+            label="Остаток"
+            value={latest.current_stock != null ? Number(latest.current_stock).toLocaleString("ru-RU") : "—"}
+            sub={price > 0 ? `× ${price.toLocaleString("ru-RU")} ₽` : undefined}
+          />
         </div>
       )}
 
+      {/* Основной график — TVelo (зелёная), Цена (красная), Остаток/OOS (серые столбцы, красный bg).
+          Использует существующий SkuAnalysisChart — он уже рисует то что описал Александр. */}
       <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
         <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-4">Анализ SKU</h2>
         {chartData.length < 2 ? (
@@ -182,15 +237,20 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         </div>
       )}
 
+      {/* "Последние события" — фиксация всех event_type кроме sales_like.
+          Включает изменения цены (отображаются как replenishment_like с price diff)
+          и аномалии. sales_like засорял список. */}
       <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
-        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">Changelog</h2>
-        <h3 className="font-display text-base sm:text-lg font-medium text-ink mt-1 mb-4">События за последние 30 дней</h3>
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">События</h2>
+        <h3 className="font-display text-base sm:text-lg font-medium text-ink mt-1 mb-4">
+          Последние события за 30 дней
+          <InfoTooltip text="Все события кроме обычных продаж. Здесь видны пополнения, аномалии, пересчёты — то что повлияло на расчёт скорости." />
+        </h3>
         {(changelog ?? []).length === 0 ? (
-          <p className="text-sm text-ink-muted">Событий нет</p>
+          <p className="text-sm text-ink-muted">За последний месяц значимых событий не было</p>
         ) : (
           <ul className="divide-y divide-line">
             {(changelog ?? []).map((e: any, i: number) => (
-              /* На мобиле stack: дата+тип сверху, сообщение ниже. Были жёсткие w-24/w-32 которые ломали layout на 360px. */
               <li key={i} className="py-2.5 flex flex-col sm:flex-row sm:items-start gap-1.5 sm:gap-4 text-sm">
                 <div className="flex items-center gap-2 sm:gap-4 shrink-0">
                   <span className="text-ink-hush text-xs whitespace-nowrap sm:w-24 font-mono">
@@ -215,27 +275,37 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
 
 const TYPE_LABELS: Record<string, string> = {
   first_snapshot: "Старт",
-  sales_like: "Продажа",
   replenishment_like: "Пополнение",
   anomaly_like: "Аномалия",
   missing_data: "Нет данных",
   recount_like: "Пересчёт",
+  price_change: "Изменение цены",
 };
 
 const TYPE_STYLES: Record<string, string> = {
   first_snapshot:     "text-ink-soft bg-bg-soft border-line",
-  sales_like:         "text-lime-deep bg-lime-soft border-lime-deep/30",
   replenishment_like: "text-azure bg-azure/10 border-azure/30",
   anomaly_like:       "text-orange bg-orange/10 border-orange/30",
   missing_data:       "text-ink-soft bg-bg-soft border-line",
   recount_like:       "text-azure bg-azure/10 border-azure/30",
+  price_change:       "text-rose bg-rose/10 border-rose/30",
 };
 
-function Kpi({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+function Kpi({ label, value, sub, tone }: {
+  label: string;
+  value: string | number;
+  sub?: string;
+  tone?: "warn" | "danger" | "accent";
+}) {
+  const valueColor =
+    tone === "warn"   ? "text-orange" :
+    tone === "danger" ? "text-rose" :
+    tone === "accent" ? "text-lime-deep" :
+                        "text-ink";
   return (
     <div className="rounded-xl border border-line bg-paper p-3 sm:p-4">
       <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush">{label}</div>
-      <div className="mt-1 font-display text-lg sm:text-xl md:text-2xl tabular font-medium text-ink break-words">{value}</div>
+      <div className={`mt-1 font-display text-lg sm:text-xl md:text-2xl tabular font-medium break-words ${valueColor}`}>{value}</div>
       {sub && <div className="text-xs text-ink-hush mt-0.5 font-mono truncate">{sub}</div>}
     </div>
   );
