@@ -31,12 +31,29 @@ async function logAction(
   }
 }
 
+/**
+ * Проверка лимита брендов из тарифа.
+ * Возвращает {limit, currentApproved}. Бросает если seller не найден.
+ */
+async function getRadarLimitInfo(sb: any, userId: string) {
+  const { data: seller } = await sb
+    .from("sellers")
+    .select("radar_brands_limit")
+    .eq("id", userId)
+    .maybeSingle();
+  const limit = seller?.radar_brands_limit ?? 0;
+
+  const { count } = await sb
+    .from("radar_brands")
+    .select("id", { count: "exact", head: true })
+    .eq("seller_id", userId)
+    .eq("status", "approved");
+
+  return { limit, currentApproved: count ?? 0 };
+}
+
 export async function actionToggleFavorite(queryId: string, value: boolean) {
   const { sb, user } = await getUser();
-  // Radar v2 (29.05.2026): убран статус 'early', теперь только new/watching/archived.
-  // При добавлении в избранное → watching.
-  // При снятии — возвращаем в 'new' (по умолчанию). Worker на следующем
-  // проходе перепроверит модель в прайсе и при необходимости поставит archived.
   const updates: any = {
     is_favorite: value,
     last_updated_at: new Date().toISOString(),
@@ -67,8 +84,6 @@ export async function actionArchiveQuery(queryId: string) {
 
 export async function actionUnarchiveQuery(queryId: string) {
   const { sb, user } = await getUser();
-  // Radar v2: возврат в 'new' (раньше было 'early').
-  // Worker пересчитает на следующем проходе.
   await sb.from("radar_queries")
     .update({
       status: "new",
@@ -80,8 +95,38 @@ export async function actionUnarchiveQuery(queryId: string) {
   revalidatePath("/dashboard/radar");
 }
 
+/**
+ * Восстановить бренд из excluded в approved.
+ *
+ * Баг Александра 01.06.2026: из excluded можно было восстановить даже
+ * если лимит тарифа исчерпан. Теперь проверяем — если current >= limit,
+ * бросаем понятную ошибку. Клиент покажет её через alert().
+ */
 export async function actionApproveBrand(brandId: string) {
   const { sb, user } = await getUser();
+
+  // Проверяем текущее состояние бренда — если он уже approved, апдейт
+  // безопасен (не увеличивает счётчик). Если excluded — проверяем лимит.
+  const { data: currentBrand } = await sb
+    .from("radar_brands")
+    .select("status")
+    .eq("id", brandId)
+    .eq("seller_id", user.id)
+    .maybeSingle();
+
+  if (!currentBrand) {
+    throw new Error("Бренд не найден");
+  }
+
+  if (currentBrand.status !== "approved") {
+    const { limit, currentApproved } = await getRadarLimitInfo(sb, user.id);
+    if (currentApproved >= limit) {
+      throw new Error(
+        `Лимит тарифа: ${limit} брендов. Исключите другой бренд или перейдите на старший тариф.`,
+      );
+    }
+  }
+
   await sb.from("radar_brands")
     .update({ status: "approved", updated_at: new Date().toISOString() })
     .eq("id", brandId)
@@ -107,21 +152,12 @@ export async function actionAddBrandManual(name: string) {
   const trimmed = name.trim();
   if (!trimmed) throw new Error("empty");
   const normalized = trimmed.toLowerCase().replace(/\s+/g, " ");
-  // Лимит брендов из тарифа.
-  const { data: seller } = await sb
-    .from("sellers")
-    .select("radar_brands_limit")
-    .eq("id", user.id)
-    .maybeSingle();
-  const { count } = await sb
-    .from("radar_brands")
-    .select("id", { count: "exact", head: true })
-    .eq("seller_id", user.id)
-    .eq("status", "approved");
-  const limit = seller?.radar_brands_limit ?? 0;
-  if ((count ?? 0) >= limit) {
+
+  const { limit, currentApproved } = await getRadarLimitInfo(sb, user.id);
+  if (currentApproved >= limit) {
     throw new Error(`Превышен лимит брендов (${limit}). Перейдите на старший тариф.`);
   }
+
   await sb.from("radar_brands").upsert({
     seller_id: user.id,
     name: trimmed,
@@ -136,14 +172,6 @@ export async function actionAddBrandManual(name: string) {
 
 /**
  * Массовое подтверждение брендов из ревью прайса.
- * После загрузки прайса селлер видит список с галочками — одна кнопка
- * обновляет все статусы.
- *
- * approvedIds — те что надо сделать approved (галочка стоит).
- * excludedIds — те что надо сделать excluded (галочка снята).
- *
- * Проверяем лимит тарифа: если approvedIds + текущие approved (которые
- * НЕ входят в excludedIds) превышают лимит — кидаем ошибку с количеством.
  */
 export async function actionBulkUpdateBrands(
   approvedIds: string[],
