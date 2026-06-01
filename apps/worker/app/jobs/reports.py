@@ -38,7 +38,7 @@ STORAGE_BUCKET = "report-files"
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
-# ─── Форматирование ─────────────────────────────────────
+# ─── Форматирование ───────────────────────
 
 def _format_money(value: Any, currency: str = "RUB") -> str:
     if value is None:
@@ -61,7 +61,7 @@ def _column_widths(ws, widths: dict[str, int]) -> None:
         ws.column_dimensions[col_letter].width = width
 
 
-# ─── Метаданные kinds ───────────────────────
+# ─── Метаданные kinds ─────────────────────
 
 SHEET_ROW_LIMIT = 500
 
@@ -100,7 +100,7 @@ def _sheet_name(kind: str) -> str:
     return KIND_LABELS.get(kind, kind)[:31]
 
 
-# ─── Fetchers ────────────────────────────────────────────
+# ─── Fetchers ────────────────────────────────
 
 def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
     """Возвращает строки для листа Excel в формате [{sku, name, ...}, ...]."""
@@ -168,9 +168,6 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
         if kind == "underestimated_sku":
             # Потерянные продажи (бывш. Недооценённый SKU).
             # Колонки Александра: SKU / Название / TVelo / OOS дней / Потеряно ₽
-            # SQL берёт все SKU с stockout_days > 0 и TVelo > 0 — формула потери TVelo×OOS×Price.
-            # Подзапрос underestimated_sku (true) уже фильтрует на "продаётся быстрее чем
-            # медиана и при этом был в OOS" — это и есть "потерянная продажа".
             res = (
                 sb.table("tvelo_metrics")
                 .select("adjusted_velocity,median_30d_velocity,stockout_days,current_price,products!inner(sku,product_name,seller_id),underestimated_sku")
@@ -213,7 +210,7 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
     return []
 
 
-# ─── Sheet builders ───────────────────────────────────────────────────
+# ─── Sheet builders ──────────────────────────────────────
 
 def _row_product(r: dict) -> tuple[str, str]:
     p = r.get("products") or {}
@@ -464,6 +461,11 @@ def _build_xlsx(kind_rows: dict[str, list[dict]], currency: str) -> bytes:
     Порядок листов жёстко SHEET_ORDER. kinds которых нет в KINDS_IN_XLSX
     игнорируются — Александр попросил убрать дубли (low_stock, repeated_stockout)
     и sync_error (теперь отдельным email).
+
+    weekly_report — особый случай: лист «Сводка по складу» генерится только
+    если на него явно подписан seller (kind присутствует в kind_rows). Если
+    rows пуст, но kind в kind_rows есть — лист всё равно делается с прочерками
+    (HEAD-страница как индикатор "метрик ещё нет").
     """
     from openpyxl import Workbook
     wb = Workbook()
@@ -474,9 +476,12 @@ def _build_xlsx(kind_rows: dict[str, list[dict]], currency: str) -> bytes:
     for kind in SHEET_ORDER:
         if kind not in KINDS_IN_XLSX:
             continue
+        if kind not in kind_rows:
+            # На этот kind seller не подписан — лист не нужен.
+            continue
         rows = kind_rows.get(kind) or []
-        # Для weekly_report делаем лист даже если rows пуст — это HEAD-страница
-        # с прочерками (юзер увидит что метрики ещё не сформированы).
+        # Для SKU-листов: пустые rows → пропуск.
+        # Для weekly_report (HEAD-страница): генерим даже без данных — будут прочерки.
         if not rows and kind != "weekly_report":
             continue
         _build_sheet_for_kind(wb, kind, rows, currency)
@@ -491,7 +496,7 @@ def _build_xlsx(kind_rows: dict[str, list[dict]], currency: str) -> bytes:
     return buf.getvalue()
 
 
-# ─── Storage upload ──────────────────────────────────────────────
+# ─── Storage upload ───────────────────────────────────
 
 def _upload_xlsx_to_storage(
     sb,
@@ -517,7 +522,7 @@ def _upload_xlsx_to_storage(
         return None
 
 
-# ─── Dispatcher ──────────────────────────────────────────────────────
+# ─── Dispatcher ────────────────────────────────────────
 
 def _today_iso_date() -> str:
     return datetime.now(timezone.utc).date().isoformat()
