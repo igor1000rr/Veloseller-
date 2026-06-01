@@ -1,20 +1,26 @@
-"""Диспетчер Excel-отчётов: daily + weekly + monthly.
+"""Диспетчер Excel-отчётов: daily + weekly.
 
-Архитектура (этап 2 перехода «алерты → отчёты» + правка 11 Правок 4 + daily 29.05.2026):
+Архитектура (рефакторинг 01.06.2026 — правки Александра из Veloseller_Отчёт.txt):
 
-- Каждый день в 09:00 UTC запускается `dispatch_daily_reports()`
-- Для каждого seller'а ищем все enabled подписки в notification_subscriptions:
-  - daily   — отправка каждый день (params.day_of_week игнорируется)
-  - weekly  — params.day_of_week = isoweekday(today)
-  - monthly — params.day_of_week = isoweekday(today) И today.day <= 7
-- Группируем подписки по (seller_id, channel) — если несколько kinds на один день
-  → один XLSX с разными листами
-- Отправка: email (Resend attachment) или telegram (Bot API sendDocument)
-- XLSX также заливается в Supabase Storage bucket 'report-files' для возможности
-  повторного скачивания из истории на сайте
-- Запись в report_history с проверкой idempotency (не шлём дважды за день)
-Дефолтный набор подписок создаётся триггером trg_create_default_subscriptions
-при INSERT нового seller'а. У существующих доолотся миграцией.
+Стратегия Александра по разделению отчётов:
+- ЕЖЕНЕДЕЛЬНЫЕ — Excel операционный, пользователь сам регулирует подписки
+- МЕСЯЧНЫЕ     — PDF/Word управленческий, шлётся автоматически 1-го числа.
+                  Реализован в apps/worker/app/jobs/monthly_report.py
+
+Состав листов еженедельного Excel (в этом порядке):
+1. Сводка по складу         (kind=weekly_report)    — HEAD-страница с числами
+2. Потерянные продажи       (kind=underestimated_sku) — TVelo×OOS×Price
+3. Критический остаток      (kind=critical_stock)   — нужна срочная поставка
+4. Замороженные остатки     (kind=dead_inventory)   — coverage > 180д
+
+Что Александр попросил убрать из Excel:
+- low_stock         — дублирует Критический остаток
+- repeated_stockout — дублирует Потерянные продажи (это переименованный underestimated)
+- sync_error        — теперь шлётся отдельным email из app.notifications:
+                       send_sync_error_notification (вызывается из sync.py при ошибке)
+
+Эти три kind остаются в notification_subscriptions для backward compat (если
+юзер сам подписан) но в xlsx уже не идут — _build_xlsx их игнорирует.
 """
 from __future__ import annotations
 
@@ -55,20 +61,39 @@ def _column_widths(ws, widths: dict[str, int]) -> None:
         ws.column_dimensions[col_letter].width = width
 
 
-# ─── Метаданные kinds (label + sheet builder) ───────────────────────
+# ─── Метаданные kinds ───────────────────────
 
 SHEET_ROW_LIMIT = 500
 
 
+# Маппинг kind БД → название листа (тексты Александра 01.06.2026)
 KIND_LABELS = {
     "low_stock":          "Низкий остаток",
     "critical_stock":     "Критический остаток",
-    "dead_inventory":     "Неликвид",
+    "dead_inventory":     "Замороженные остатки",    # переименовано
     "repeated_stockout":  "Частый out-of-stock",
-    "underestimated_sku": "Недооценённый SKU",
+    "underestimated_sku": "Потерянные продажи",       # переименовано
     "sync_error":         "Ошибки синхронизации",
     "weekly_report":      "Сводка по складу",
 }
+
+# Какие kinds попадают в Excel.
+# sync_error отправляется отдельным email из sync.py при ошибке.
+# low_stock и repeated_stockout убраны как дубли по решению Александра.
+KINDS_IN_XLSX: frozenset[str] = frozenset({
+    "weekly_report",
+    "underestimated_sku",
+    "critical_stock",
+    "dead_inventory",
+})
+
+# Порядок листов в Excel (от Александра).
+SHEET_ORDER: list[str] = [
+    "weekly_report",       # 1. Сводка по складу
+    "underestimated_sku",  # 2. Потерянные продажи
+    "critical_stock",      # 3. Критический остаток
+    "dead_inventory",      # 4. Замороженные остатки
+]
 
 
 def _sheet_name(kind: str) -> str:
@@ -96,10 +121,12 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             return res.data or []
 
         if kind == "critical_stock":
+            # Критический остаток — мало товара, нужна срочная поставка.
+            # Колонки Александра: SKU / Название / TVelo / Остаток / Покрытие / Рекомендуемая закупка 30 дней
             threshold = int(params.get("coverage_days_threshold", 3))
             res = (
                 sb.table("tvelo_metrics")
-                .select("coverage_days,current_stock,adjusted_velocity,products!inner(sku,product_name,seller_id)")
+                .select("coverage_days,current_stock,current_price,adjusted_velocity,products!inner(sku,product_name,seller_id)")
                 .eq("products.seller_id", seller_id)
                 .lte("coverage_days", threshold)
                 .gt("current_stock", 0)
@@ -111,13 +138,15 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             return res.data or []
 
         if kind == "dead_inventory":
+            # Замороженные остатки — низкая скорость TVelo, деньги стоят.
+            # Колонки Александра: SKU / Название / Остаток / TVelo / Покрытие / Заморожено ₽
             threshold = int(params.get("coverage_days_threshold", 180))
             res = (
                 sb.table("tvelo_metrics")
-                .select("coverage_days,adjusted_velocity,frozen_inventory_value,current_stock,products!inner(sku,product_name,seller_id)")
+                .select("coverage_days,adjusted_velocity,current_stock,current_price,products!inner(sku,product_name,seller_id)")
                 .eq("products.seller_id", seller_id)
                 .gt("coverage_days", threshold)
-                .order("frozen_inventory_value", desc=True)
+                .order("coverage_days", desc=True)
                 .limit(SHEET_ROW_LIMIT)
                 .execute()
             )
@@ -137,9 +166,14 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             return res.data or []
 
         if kind == "underestimated_sku":
+            # Потерянные продажи (бывш. Недооценённый SKU).
+            # Колонки Александра: SKU / Название / TVelo / OOS дней / Потеряно ₽
+            # SQL берёт все SKU с stockout_days > 0 и TVelo > 0 — формула потери TVelo×OOS×Price.
+            # Подзапрос underestimated_sku (true) уже фильтрует на "продаётся быстрее чем
+            # медиана и при этом был в OOS" — это и есть "потерянная продажа".
             res = (
                 sb.table("tvelo_metrics")
-                .select("adjusted_velocity,median_30d_velocity,stockout_days,products!inner(sku,product_name,seller_id),underestimated_sku")
+                .select("adjusted_velocity,median_30d_velocity,stockout_days,current_price,products!inner(sku,product_name,seller_id),underestimated_sku")
                 .eq("products.seller_id", seller_id)
                 .eq("underestimated_sku", True)
                 .order("adjusted_velocity", desc=True)
@@ -161,12 +195,14 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             return res.data or []
 
         if kind == "weekly_report":
+            # Для сводки берём ровно одну точку — последнюю.
+            # Build функция формирует одностраничный лист с числами.
             res = (
                 sb.table("store_metrics")
                 .select("*")
                 .eq("seller_id", seller_id)
                 .order("period_end", desc=True)
-                .limit(14)
+                .limit(1)
                 .execute()
             )
             return res.data or []
@@ -186,138 +222,262 @@ def _row_product(r: dict) -> tuple[str, str]:
     return (p.get("sku") or "—", p.get("product_name") or "—")
 
 
+def _calc_lost_revenue(r: dict) -> float:
+    """Формула Александра: TVelo × OOS дней × Price."""
+    return (
+        float(r.get("adjusted_velocity") or 0)
+        * float(r.get("stockout_days") or 0)
+        * float(r.get("current_price") or 0)
+    )
+
+
+def _calc_frozen_money(r: dict) -> float:
+    """Замороженные деньги = current_stock × current_price."""
+    return float(r.get("current_stock") or 0) * float(r.get("current_price") or 0)
+
+
+def _build_sheet_weekly_summary(wb, rows: list[dict], currency: str) -> None:
+    """Сводка по складу — лист первым.
+
+    Александр 01.06.2026: формат — карточка с числами за неделю, не таблица.
+    Берём последнюю запись из store_metrics и оформляем как заглавную страницу
+    отчёта: Health Score, потери, заморожено, счётчики SKU.
+    """
+    from openpyxl.styles import Alignment, Font, PatternFill
+
+    ws = wb.create_sheet(_sheet_name("weekly_report"))
+
+    m = rows[0] if rows else {}
+    period_end = (m.get("period_end") or "")[:10] if m else "—"
+
+    title_font = Font(bold=True, size=14, color="0F172A")
+    label_font = Font(size=10, color="64748B")
+    value_font_big = Font(bold=True, size=18, color="0F172A")
+    value_font_warn = Font(bold=True, size=18, color="DC2626")
+    section_font = Font(bold=True, size=11, color="0F766E")
+    section_fill = PatternFill("solid", fgColor="F0FDF4")
+
+    # Заголовок
+    ws["A1"] = "Сводка по складу"
+    ws["A1"].font = title_font
+    ws.merge_cells("A1:C1")
+    ws["A2"] = f"Расчёты за неделю · по состоянию на {period_end}"
+    ws["A2"].font = label_font
+    ws.merge_cells("A2:C2")
+
+    # Health Score крупно
+    ws["A4"] = "Health Score"
+    ws["A4"].font = section_font
+    ws["A4"].fill = section_fill
+    ws.merge_cells("A4:C4")
+
+    health = m.get("warehouse_health_score")
+    health_val = round(float(health), 0) if health is not None else None
+    ws["A5"] = "Здоровье склада"
+    ws["A5"].font = label_font
+    ws["B5"] = f"{int(health_val)}/100" if health_val is not None else "—"
+    ws["B5"].font = value_font_big
+
+    # Деньги
+    ws["A7"] = "Деньги"
+    ws["A7"].font = section_font
+    ws["A7"].fill = section_fill
+    ws.merge_cells("A7:C7")
+
+    ws["A8"] = "Потеряно выручки"
+    ws["A8"].font = label_font
+    ws["B8"] = _format_money(m.get("lost_revenue"), currency)
+    ws["B8"].font = value_font_warn
+
+    ws["A9"] = "Заморожено в остатках"
+    ws["A9"].font = label_font
+    ws["B9"] = _format_money(m.get("store_frozen_inventory_value"), currency)
+    ws["B9"].font = value_font_warn
+
+    ws["A10"] = "Стоимость остатков всего"
+    ws["A10"].font = label_font
+    ws["B10"] = _format_money(m.get("total_inventory_value"), currency)
+    ws["B10"].font = value_font_big
+
+    # SKU
+    ws["A12"] = "SKU"
+    ws["A12"].font = section_font
+    ws["A12"].fill = section_fill
+    ws.merge_cells("A12:C12")
+
+    ws["A13"] = "Всего SKU"
+    ws["A13"].font = label_font
+    ws["B13"] = m.get("total_sku_count") or 0
+    ws["B13"].font = value_font_big
+
+    ws["A14"] = "В OOS (нет в наличии)"
+    ws["A14"].font = label_font
+    ws["B14"] = m.get("oos_sku_count") or 0
+    ws["B14"].font = value_font_warn
+
+    ws["A15"] = "В замороженных остатках"
+    ws["A15"].font = label_font
+    ws["B15"] = m.get("dead_inventory_sku_count") or 0
+    ws["B15"].font = value_font_warn
+
+    ws["A16"] = "Без активности"
+    ws["A16"].font = label_font
+    ws["B16"] = m.get("inactive_sku_count") or 0
+    ws["B16"].font = value_font_big
+
+    # Концентрация (если есть)
+    if m.get("inventory_concentration_50") is not None or m.get("demand_concentration_50") is not None:
+        ws["A18"] = "Концентрация"
+        ws["A18"].font = section_font
+        ws["A18"].fill = section_fill
+        ws.merge_cells("A18:C18")
+
+        ws["A19"] = "50% остатков в SKU"
+        ws["A19"].font = label_font
+        ws["B19"] = m.get("inventory_concentration_50") or "—"
+        ws["B19"].font = value_font_big
+
+        ws["A20"] = "50% спроса в SKU"
+        ws["A20"].font = label_font
+        ws["B20"] = m.get("demand_concentration_50") or "—"
+        ws["B20"].font = value_font_big
+
+    _column_widths(ws, {"A": 32, "B": 22, "C": 6})
+
+    for row_num in range(1, 22):
+        ws.row_dimensions[row_num].height = 22
+
+    ws.sheet_view.showGridLines = False
+
+
+def _build_sheet_lost_sales(wb, rows: list[dict], currency: str) -> None:
+    """Потерянные продажи (kind=underestimated_sku).
+
+    Александр 01.06.2026: SKU / Название / TVelo / OOS дней / Потеряно ₽
+    """
+    ws = wb.create_sheet(_sheet_name("underestimated_sku"))
+
+    # Подзаголовок-описание
+    ws.append(["Товар продаётся быстро, нет в наличии. Каждый день — недополученная выручка."])
+    from openpyxl.styles import Font
+    ws["A1"].font = Font(italic=True, color="64748B", size=10)
+    ws.merge_cells("A1:E1")
+
+    headers = ["SKU", "Название", "TVelo", "OOS дней", f"Потеряно ({currency})"]
+    ws.append(headers)
+    for col in range(1, len(headers) + 1):
+        _bold(ws.cell(row=2, column=col))
+
+    for r in rows:
+        sku, name = _row_product(r)
+        ws.append([
+            sku, name,
+            round(float(r.get("adjusted_velocity") or 0), 2),
+            int(r.get("stockout_days") or 0),
+            round(_calc_lost_revenue(r), 0),
+        ])
+
+    _column_widths(ws, {"A": 22, "B": 44, "C": 12, "D": 12, "E": 18})
+    ws.freeze_panes = "A3"
+
+
+def _build_sheet_critical_stock(wb, rows: list[dict], currency: str) -> None:
+    """Критический остаток.
+
+    Александр 01.06.2026: SKU / Название / TVelo / Остаток / Покрытие / Рекомендуемая закупка 30 дней
+    """
+    ws = wb.create_sheet(_sheet_name("critical_stock"))
+
+    ws.append(["Мало товара на складе. Срочно нужна поставка."])
+    from openpyxl.styles import Font
+    ws["A1"].font = Font(italic=True, color="64748B", size=10)
+    ws.merge_cells("A1:F1")
+
+    headers = ["SKU", "Название", "TVelo", "Остаток", "Покрытие (дн)", "Рекомендуемая закупка (30 дн)"]
+    ws.append(headers)
+    for col in range(1, len(headers) + 1):
+        _bold(ws.cell(row=2, column=col))
+
+    for r in rows:
+        sku, name = _row_product(r)
+        velocity = float(r.get("adjusted_velocity") or 0)
+        recommended = round(velocity * 30)
+        ws.append([
+            sku, name,
+            round(velocity, 2),
+            int(r.get("current_stock") or 0),
+            int(r.get("coverage_days") or 0),
+            recommended,
+        ])
+
+    _column_widths(ws, {"A": 22, "B": 44, "C": 12, "D": 12, "E": 14, "F": 28})
+    ws.freeze_panes = "A3"
+
+
+def _build_sheet_frozen_stock(wb, rows: list[dict], currency: str) -> None:
+    """Замороженные остатки (kind=dead_inventory).
+
+    Александр 01.06.2026: SKU / Название / Остаток / TVelo / Покрытие / Заморожено ₽
+    """
+    ws = wb.create_sheet(_sheet_name("dead_inventory"))
+
+    ws.append(["Низкая скорость продаж. Деньги заморожены в товаре. Расчёт по средней скорости TVelo за 30 дней."])
+    from openpyxl.styles import Font
+    ws["A1"].font = Font(italic=True, color="64748B", size=10)
+    ws.merge_cells("A1:F1")
+
+    headers = ["SKU", "Название", "Остаток", "TVelo", "Покрытие (дн)", f"Заморожено ({currency})"]
+    ws.append(headers)
+    for col in range(1, len(headers) + 1):
+        _bold(ws.cell(row=2, column=col))
+
+    for r in rows:
+        sku, name = _row_product(r)
+        ws.append([
+            sku, name,
+            int(r.get("current_stock") or 0),
+            round(float(r.get("adjusted_velocity") or 0), 2),
+            int(r.get("coverage_days") or 0),
+            round(_calc_frozen_money(r), 0),
+        ])
+
+    _column_widths(ws, {"A": 22, "B": 44, "C": 12, "D": 12, "E": 14, "F": 18})
+    ws.freeze_panes = "A3"
+
+
 def _build_sheet_for_kind(wb, kind: str, rows: list[dict], currency: str) -> None:
-    ws = wb.create_sheet(_sheet_name(kind))
-
-    if kind in ("low_stock", "critical_stock"):
-        headers = ["SKU", "Название", "Покрытие (дн)", "Остаток", "Скорость (шт/день)"]
-        ws.append(headers)
-        for col in range(1, len(headers) + 1):
-            _bold(ws.cell(row=1, column=col))
-        for r in rows:
-            sku, name = _row_product(r)
-            ws.append([
-                sku, name,
-                int(r.get("coverage_days") or 0),
-                int(r.get("current_stock") or 0),
-                round(float(r.get("adjusted_velocity") or 0), 2),
-            ])
-        _column_widths(ws, {"A": 22, "B": 42, "C": 14, "D": 12, "E": 18})
-
-    elif kind == "dead_inventory":
-        headers = ["SKU", "Название", "Покрытие (дн)", "Скорость (шт/день)", "Заморожено"]
-        ws.append(headers)
-        for col in range(1, len(headers) + 1):
-            _bold(ws.cell(row=1, column=col))
-        for r in rows:
-            sku, name = _row_product(r)
-            ws.append([
-                sku, name,
-                int(r.get("coverage_days") or 0),
-                round(float(r.get("adjusted_velocity") or 0), 2),
-                _format_money(r.get("frozen_inventory_value"), currency),
-            ])
-        _column_widths(ws, {"A": 22, "B": 42, "C": 14, "D": 18, "E": 18})
-
-    elif kind == "repeated_stockout":
-        headers = ["SKU", "Название", "Дней OOS (30д)", "Скорость (шт/день)", "Покрытие (дн)"]
-        ws.append(headers)
-        for col in range(1, len(headers) + 1):
-            _bold(ws.cell(row=1, column=col))
-        for r in rows:
-            sku, name = _row_product(r)
-            ws.append([
-                sku, name,
-                int(r.get("stockout_days") or 0),
-                round(float(r.get("adjusted_velocity") or 0), 2),
-                int(r.get("coverage_days") or 0),
-            ])
-        _column_widths(ws, {"A": 22, "B": 42, "C": 16, "D": 18, "E": 14})
-
+    """Dispatch на правильный билдер по kind."""
+    if kind == "weekly_report":
+        _build_sheet_weekly_summary(wb, rows, currency)
     elif kind == "underestimated_sku":
-        headers = ["SKU", "Название", "Скорость (шт/день)", "Медиана 30д", "OOS дней"]
-        ws.append(headers)
-        for col in range(1, len(headers) + 1):
-            _bold(ws.cell(row=1, column=col))
-        for r in rows:
-            sku, name = _row_product(r)
-            ws.append([
-                sku, name,
-                round(float(r.get("adjusted_velocity") or 0), 2),
-                round(float(r.get("median_30d_velocity") or 0), 2),
-                int(r.get("stockout_days") or 0),
-            ])
-        _column_widths(ws, {"A": 22, "B": 42, "C": 18, "D": 16, "E": 12})
-
-    elif kind == "sync_error":
-        headers = ["Склад", "Тип", "Последняя ошибка", "Время"]
-        ws.append(headers)
-        for col in range(1, len(headers) + 1):
-            _bold(ws.cell(row=1, column=col))
-        kind_label = {
-            "ozon_fbo": "Ozon FBO", "ozon_fbs": "Ozon FBS",
-            "wb_fbo": "Wildberries FBO", "wb_fbs": "Wildberries FBS",
-            "google_sheet": "Google Sheet",
-        }
-        for r in rows:
-            mp = r.get("marketplace") or r.get("source") or ""
-            ws.append([
-                r.get("name") or "—",
-                kind_label.get(mp, mp),
-                (r.get("last_error") or "")[:500],
-                (r.get("last_sync_at") or "")[:19].replace("T", " "),
-            ])
-        _column_widths(ws, {"A": 26, "B": 18, "C": 60, "D": 20})
-
-    elif kind == "weekly_report":
-        headers = [
-            "Дата", "Всего SKU", "Нет в наличии", "Низкий остаток",
-            "Неликвид (SKU)", "Health", "Остатки", "Заморожено", "Потерянная выручка",
-        ]
-        ws.append(headers)
-        for col in range(1, len(headers) + 1):
-            _bold(ws.cell(row=1, column=col))
-        for m in rows:
-            ws.append([
-                (m.get("period_end") or "")[:10],
-                m.get("total_sku_count") or 0,
-                m.get("oos_sku_count") or 0,
-                m.get("low_stock_sku_count") or 0,
-                m.get("dead_inventory_sku_count") or 0,
-                round(float(m.get("warehouse_health_score") or 0), 1),
-                _format_money(m.get("total_inventory_value"), currency),
-                _format_money(m.get("store_frozen_inventory_value"), currency),
-                _format_money(m.get("lost_revenue"), currency),
-            ])
-        _column_widths(ws, {
-            "A": 12, "B": 12, "C": 14, "D": 14, "E": 14, "F": 10,
-            "G": 18, "H": 18, "I": 20,
-        })
-
-    else:
-        ws.append(["Данные", "Значение"])
-        _bold(ws.cell(row=1, column=1))
-        _bold(ws.cell(row=1, column=2))
-        for i, r in enumerate(rows[:50]):
-            ws.append([f"Запись {i+1}", str(r)[:200]])
-
-    ws.freeze_panes = "A2"
+        _build_sheet_lost_sales(wb, rows, currency)
+    elif kind == "critical_stock":
+        _build_sheet_critical_stock(wb, rows, currency)
+    elif kind == "dead_inventory":
+        _build_sheet_frozen_stock(wb, rows, currency)
+    # Остальные kinds в Excel не идут (см. KINDS_IN_XLSX).
 
 
 def _build_xlsx(kind_rows: dict[str, list[dict]], currency: str) -> bytes:
+    """Собирает xlsx из набора kind→rows.
+
+    Порядок листов жёстко SHEET_ORDER. kinds которых нет в KINDS_IN_XLSX
+    игнорируются — Александр попросил убрать дубли (low_stock, repeated_stockout)
+    и sync_error (теперь отдельным email).
+    """
     from openpyxl import Workbook
     wb = Workbook()
     if "Sheet" in wb.sheetnames:
         del wb["Sheet"]
 
     has_data = False
-    priority = [
-        "critical_stock", "low_stock", "repeated_stockout",
-        "underestimated_sku", "dead_inventory", "sync_error", "weekly_report",
-    ]
-    for kind in priority:
+    for kind in SHEET_ORDER:
+        if kind not in KINDS_IN_XLSX:
+            continue
         rows = kind_rows.get(kind) or []
-        if not rows:
+        # Для weekly_report делаем лист даже если rows пуст — это HEAD-страница
+        # с прочерками (юзер увидит что метрики ещё не сформированы).
+        if not rows and kind != "weekly_report":
             continue
         _build_sheet_for_kind(wb, kind, rows, currency)
         has_data = True
@@ -340,15 +500,7 @@ def _upload_xlsx_to_storage(
     filename: str,
     xlsx_bytes: bytes,
 ) -> Optional[str]:
-    """Заливает XLSX в bucket report-files. Возвращает storage_path или None при ошибке.
-
-    Путь: {seller_id}/{YYYY-MM-DD}/{filename}
-    Первая часть пути (seller_id) используется RLS политикой
-    seller_read_own_report_files для проверки владельца.
-
-    Если заливка падает — возвращаем None и фиксируем ошибку.
-    Основной send всё равно работает (email/telegram).
-    """
+    """Заливает XLSX в bucket report-files. Возвращает storage_path или None."""
     path = f"{seller_id}/{today_str}/{filename}"
     try:
         sb.storage.from_(STORAGE_BUCKET).upload(
@@ -356,7 +508,6 @@ def _upload_xlsx_to_storage(
             file=xlsx_bytes,
             file_options={
                 "content-type": XLSX_MIME,
-                # upsert чтобы при ретрае не было "object exists"
                 "upsert": "true",
             },
         )
@@ -424,7 +575,7 @@ def dispatch_daily_reports() -> None:
         sb = get_supabase()
         now_utc = datetime.now(timezone.utc)
         today_dow = now_utc.isoweekday()
-        today_dom = now_utc.day  # для фильтра monthly: первый day_of_week в месяце
+        today_dom = now_utc.day
 
         all_subs = fetch_all(
             sb.table("notification_subscriptions")
@@ -434,6 +585,13 @@ def dispatch_daily_reports() -> None:
 
         groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
         for sub in all_subs:
+            # Фильтруем kinds которые больше не идут в Excel
+            # (low_stock, repeated_stockout, sync_error).
+            # Эти подписки в БД остаются (юзер мог их включить), но мы их
+            # тихо пропускаем — Александр попросил убрать дубли.
+            if sub["kind"] not in KINDS_IN_XLSX:
+                continue
+
             params = sub.get("params") or {}
             try:
                 dow = int(params.get("day_of_week", 1))
@@ -441,12 +599,8 @@ def dispatch_daily_reports() -> None:
                 dow = 1
             frequency = sub.get("frequency") or "weekly"
 
-            # 29.05.2026: добавлена частота 'daily'
-            # • daily   — каждый день (dow/dom игнорируются)
-            # • weekly  — каждую неделю в dow
-            # • monthly — только в первый dow месяца (т.е. today.day <= 7)
             if frequency == "daily":
-                pass  # шлём каждый день, без фильтра по дате
+                pass
             else:
                 if dow != today_dow:
                     continue
@@ -504,10 +658,17 @@ def dispatch_daily_reports() -> None:
             for kind in kinds:
                 rows = _fetch_sku_rows(sb, seller_id, kind, params_by_kind[kind])
                 kind_rows[kind] = rows
+                # weekly_report = HEAD-страница, считаем как 1 запись если есть metrics
                 sku_counts[kind] = len(rows)
 
-            total_sku = sum(sku_counts.values())
-            if total_sku == 0:
+            # weekly_report сам по себе не "SKU", но если есть подписка только на
+            # неё одну — всё равно отправляем (это сводка). Иначе skipped если
+            # все sku-листы пусты.
+            non_summary_total = sum(
+                cnt for kind, cnt in sku_counts.items() if kind != "weekly_report"
+            )
+            has_summary = sku_counts.get("weekly_report", 0) > 0
+            if non_summary_total == 0 and not has_summary:
                 logger.info("skip (no data) seller=%s channel=%s kinds=%s",
                             seller_id, channel, kinds)
                 _record_history(sb, seller_id, today_dow, kinds, channel,
@@ -527,9 +688,6 @@ def dispatch_daily_reports() -> None:
             today_str = date.today().isoformat()
             filename = f"veloseller-otchet-{today_str}.xlsx"
 
-            # Заливаем в Storage для возможности повторного скачивания.
-            # Делаем один раз на (seller_id, today, filename), даже если
-            # потом email и telegram отправляются отдельно — upsert=true.
             storage_path = _upload_xlsx_to_storage(sb, seller_id, today_str, filename, xlsx_bytes)
 
             success = False
@@ -538,9 +696,6 @@ def dispatch_daily_reports() -> None:
                 if seller.get("email"):
                     try:
                         from app.notifications import send_report_email
-                        # Правка Пункт 1 (25.05.2026): send_report_email теперь
-                        # возвращает (success, error_text). Раньше в базу
-                        # писалось обобщённое "send returned False" без деталей.
                         success, send_err = send_report_email(
                             to_email=seller["email"],
                             seller_name=seller.get("display_name"),
@@ -601,6 +756,8 @@ def _build_telegram_caption(kinds: list[str], sku_counts: dict[str, int]) -> str
     for kind in kinds:
         label = html.escape(KIND_LABELS.get(kind, kind))
         n = sku_counts.get(kind, 0)
-        if n > 0:
+        if kind == "weekly_report":
+            lines.append(f"• {label}")
+        elif n > 0:
             lines.append(f"• {label}: <b>{n}</b> SKU")
     return "\n".join(lines)
