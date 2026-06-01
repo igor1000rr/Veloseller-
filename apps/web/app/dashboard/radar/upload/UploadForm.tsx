@@ -50,8 +50,8 @@ export default function UploadForm() {
         {error && <span className="text-xs text-rose">{error}</span>}
       </div>
       <p className="mt-3 text-xs text-ink-hush leading-relaxed">
-        Формат: CSV (UTF-8) или XLSX. До 50 МБ. ИИ (Claude Haiku 4.5) извлечёт бренды
-        и подсчитает SKU/среднюю цену. Стоимость одной обработки ~$0.04.
+        Формат: CSV (UTF-8) или XLSX. До 50 МБ. ИИ извлечёт бренды и составит
+        список для финальной редакции пользователя.
       </p>
     </div>
   );
