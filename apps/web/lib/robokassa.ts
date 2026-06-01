@@ -20,7 +20,7 @@
  *  - ROBOKASSA_TEST_PASSWORD_1 (для теста)
  *  - ROBOKASSA_TEST_PASSWORD_2 (для теста)
  */
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 
 export type VeloseLLerPlan = "starter" | "growth" | "pro";
 export type RadarPlan = "radar_start" | "radar_seller" | "radar_pro" | "radar_expert";
@@ -133,6 +133,18 @@ function md5Hex(input: string): string {
 }
 
 /**
+ * Constant-time сравнение двух hex-строк подписи.
+ * Сначала сверяем длину (она не секретна — формат подписи публичный),
+ * затем timingSafeEqual по равным буферам, чтобы не утекало время сравнения.
+ */
+function safeEqualHex(a: string, b: string): boolean {
+  const ba = Buffer.from(a.toLowerCase(), "utf8");
+  const bb = Buffer.from(b.toLowerCase(), "utf8");
+  if (ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
+}
+
+/**
  * Генерирует URL на Robokassa для оплаты.
  */
 export function buildPaymentUrl(args: {
@@ -172,7 +184,7 @@ export function buildPaymentUrl(args: {
 }
 
 /**
- * Проверяет подпись Result URL от Robokassa.
+ * Проверяет подпись Result URL от Robokassa (constant-time).
  */
 export function verifyResultSignature(args: {
   outSum: string;
@@ -182,5 +194,5 @@ export function verifyResultSignature(args: {
   const password2 = getPassword2();
   if (!password2) return false;
   const expected = md5Hex(`${args.outSum}:${args.invId}:${password2}`);
-  return expected.toLowerCase() === args.signatureValue.toLowerCase();
+  return safeEqualHex(expected, args.signatureValue);
 }
