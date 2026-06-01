@@ -14,12 +14,15 @@ from typing import Optional
 logger = logging.getLogger("veloseller.notifications")
 
 
+# Александр 01.06.2026 переименовал листы отчёта. Лейблы синхронизированы
+# с reports.py::KIND_LABELS — чтобы в email-уведомлении и в самом Excel
+# было одинаково.
 _KIND_LABELS = {
     "low_stock":          "Низкий остаток",
     "critical_stock":     "Критический остаток",
-    "dead_inventory":     "Неликвид",
+    "dead_inventory":     "Замороженные остатки",   # бывш. "Неликвид"
     "repeated_stockout":  "Частый out-of-stock",
-    "underestimated_sku": "Недооценённый SKU",
+    "underestimated_sku": "Потерянные продажи",     # бывш. "Недооценённый SKU"
     "sync_error":         "Ошибки синхронизации",
     "weekly_report":      "Сводка по складу",
 }
@@ -31,12 +34,7 @@ def _app_url() -> str:
 
 
 def _extract_resend_msg_id(response) -> Optional[str]:
-    """Извлекает message id из ответа resend.Emails.send.
-
-    Resend SDK 2.x возвращает SendResponse (TypedDict) с полем id.
-    Старшие версии могли возвращать dict или объект с .id.
-    Наличие id — признак что Resend API принял письмо в queue.
-    """
+    """Извлекает message id из ответа resend.Emails.send."""
     if response is None:
         return None
     if isinstance(response, dict):
@@ -73,9 +71,9 @@ def send_alert_digest(to_email: str, seller_name: Optional[str], alerts: list[di
         kind_label = {
             "critical_stock": "🔴 Критически мало",
             "low_stock": "🟡 Мало",
-            "dead_inventory": "⚫ Неликвид",
+            "dead_inventory": "⚫ Замороженные остатки",
             "repeated_stockout": "🟠 Регулярный OOS",
-            "underestimated_sku": "🟣 Недооценён",
+            "underestimated_sku": "🟣 Потерянные продажи",
         }.get(a.get("kind", ""), html.escape(a.get("kind", "")))
         sku = (a.get("products") or {}).get("sku", "—") if isinstance(a.get("products"), dict) else "—"
         sku_safe = html.escape(str(sku))
@@ -119,7 +117,12 @@ def send_sync_error_notification(
     failure_count: int,
     auto_paused: bool,
 ) -> bool:
-    """Шлёт email о неудаче sync склада."""
+    """Шлёт email о неудаче sync склада.
+
+    Александр 01.06.2026: вместо листа в Excel отчёте sync_error теперь
+    направляется отдельным письмом в момент ошибки. Эта функция уже
+    вызывается из sync.py — никаких изменений тут не нужно.
+    """
     api_key = os.getenv("RESEND_API_KEY")
     from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
     if not api_key:
@@ -216,9 +219,9 @@ def send_weekly_report_email(
 <p>{greeting}</p>
 <p>Прикрепили Excel с тремя листами:</p>
 <ul>
-<li><b>Сводка</b> — динамика ключевых метрик за 14 дней</li>
-<li><b>Топ потерь</b> — 50 SKU с самыми большими потерями выручки</li>
-<li><b>Неликвид</b> — товары с покрытием &gt; 180 дней и их замороженные деньги</li>
+<li><b>Сводка по складу</b> — Health Score, потери, замороженные деньги, SKU-счётчики</li>
+<li><b>Потерянные продажи</b> — товары которые быстро продаются и часто заканчиваются</li>
+<li><b>Замороженные остатки</b> — товары с покрытием &gt; 180 дней и замороженные деньги</li>
 </ul>
 <p style="margin-top:24px"><a href="{app_url}/dashboard" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">Перейти в дашборд</a></p>
 <p style="color:#64748b;font-size:12px;margin-top:32px">Отписаться от еженедельных отчётов можно в настройках профиля.</p>
@@ -253,13 +256,9 @@ def send_report_email(
     """Универсальная отправка Excel-отчёта.
 
     Правка Пункт 1 (25.05.2026): возвращает (success, error_text) вместо bool.
-    Раньше при любом неудачном результате в report_history записывалось
-    обобщённое "send returned False" без деталей. Сейчас — конкретная причина:
-    "RESEND_API_KEY not configured" / "resend SDK not installed" /
-    "ResendError: ..." / "no message id in response".
 
-    Также логирует resend_id в случае успеха — по нему можно найти
-    письмо в Resend dashboard и увидеть реальный статус delivery.
+    Александр 01.06.2026: лейблы листов в письме синхронизированы с
+    переименованиями в Excel (см. _KIND_LABELS вверху).
     """
     api_key = os.getenv("RESEND_API_KEY")
     from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
@@ -282,7 +281,10 @@ def send_report_email(
     for kind in kinds:
         label = html.escape(_KIND_LABELS.get(kind, kind))
         n = sku_counts.get(kind, 0)
-        if n > 0:
+        if kind == "weekly_report":
+            # Сводка — не SKU, не показываем число
+            list_items.append(f"<li><b>{label}</b></li>")
+        elif n > 0:
             list_items.append(f"<li><b>{label}</b> — {n} SKU</li>")
     items_html = "\n".join(list_items) or "<li>Данных нет</li>"
 
@@ -321,10 +323,6 @@ def send_report_email(
 
     msg_id = _extract_resend_msg_id(response)
     if not msg_id:
-        # Resend не бросил exception, но и id не вернул. Странно —
-        # логируем реальный тип/содержимое ответа для диагностики.
-        # В истории обозначим это как 'no message id', но это подозрение что
-        # письмо могло быть отправлено — проверить стоит в Resend dashboard.
         resp_repr = repr(response)[:200] if response is not None else "None"
         logger.warning(
             "resend returned no message id for %s: type=%s repr=%s",
@@ -334,6 +332,85 @@ def send_report_email(
 
     logger.info("report email sent", extra={
         "to": to_email, "size": len(xlsx_bytes), "kinds": kinds,
+        "resend_id": msg_id,
+    })
+    return True, None
+
+
+# ─── Месячный PDF-отчёт ─────────────────────────────────────────────
+
+def send_monthly_report_email(
+    to_email: str,
+    seller_name: Optional[str],
+    pdf_bytes: bytes,
+    filename: str,
+    period_label: str,
+) -> tuple[bool, Optional[str]]:
+    """Шлёт месячный PDF-отчёт.
+
+    Александр 01.06.2026: автоматическая рассылка в начале месяца.
+    Формат — PDF (управленческий). Excel-эквивалент шлётся отдельно
+    как еженедельный отчёт.
+    """
+    api_key = os.getenv("RESEND_API_KEY")
+    from_email = os.getenv("RESEND_FROM", "Veloseller <noreply@veloseller.ru>")
+    if not api_key:
+        logger.info("RESEND_API_KEY не задан — пропускаю monthly report для %s", to_email)
+        return False, "RESEND_API_KEY not configured"
+
+    try:
+        import resend
+        resend.api_key = api_key
+    except ImportError:
+        logger.warning("resend SDK не установлен")
+        return False, "resend SDK not installed"
+
+    safe_name = html.escape(seller_name) if seller_name else ""
+    greeting = f"Привет{', ' + safe_name if safe_name else ''}!"
+    period_safe = html.escape(period_label)
+    app_url = _app_url()
+    subject = f"Veloseller Monthly Report — {period_label}"
+
+    html_body = f"""<!DOCTYPE html><html><body style="font-family:-apple-system,sans-serif;color:#0f172a;max-width:680px;margin:0 auto;padding:24px">
+<h2 style="color:#0f766e;margin:0 0 16px">Veloseller Monthly Report</h2>
+<p>{greeting}</p>
+<p>Сводный управленческий отчёт за <b>{period_safe}</b>. Сравнение с предыдущим месяцем.</p>
+<p>В отчёте:</p>
+<ul>
+<li>Сводные данные — Health Score, потери, заморожено, OOS</li>
+<li>Что изменилось — позитивные и негативные изменения</li>
+<li>Деньги — топ-10 потерь и топ-10 замороженных SKU</li>
+<li>Динамика TVelo — топ роста и падения спроса</li>
+<li>Сегментация склада — Fast Movers / Stable / Slow / Dead Inventory</li>
+<li>Концентрация — где 50% денег и 50% спроса</li>
+<li>Качество данных</li>
+</ul>
+<p style="margin-top:24px"><a href="{app_url}/dashboard" style="display:inline-block;background:#0f766e;color:white;padding:10px 20px;border-radius:8px;text-decoration:none">Открыть дашборд</a></p>
+<p style="color:#64748b;font-size:12px;margin-top:32px">Месячные отчёты приходят автоматически в начале каждого месяца. Отключить можно в настройках профиля.</p>
+</body></html>"""
+
+    try:
+        response = resend.Emails.send({
+            "from": from_email,
+            "to": [to_email],
+            "subject": subject,
+            "html": html_body,
+            "attachments": [{
+                "filename": filename,
+                "content": base64.b64encode(pdf_bytes).decode("ascii"),
+            }],
+        })
+    except Exception as e:
+        err_text = f"{type(e).__name__}: {str(e)[:250]}"
+        logger.exception("Resend monthly report failed for %s: %s", to_email, err_text)
+        return False, err_text
+
+    msg_id = _extract_resend_msg_id(response)
+    if not msg_id:
+        return False, f"no message id (response: {type(response).__name__})"
+
+    logger.info("monthly report email sent", extra={
+        "to": to_email, "size": len(pdf_bytes), "period": period_label,
         "resend_id": msg_id,
     })
     return True, None
