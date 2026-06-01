@@ -4,6 +4,7 @@
 - sync активных marketplace-connections РАЗ В СУТКИ в 02:00 UTC
 - expire-subscriptions в 03:00 UTC (откатываем в trial истёкшие платные подписки)
 - daily-reports в 09:00 UTC (этап 2 алерты→отчёты — диспетчер по day_of_week)
+- monthly-reports 1-го числа в 09:30 UTC (управленческий PDF за прошлый месяц)
 - snapshots retention в 04:00 UTC (БАГ 89)
 - reset stuck syncing каждые 10 минут (БАГ 90)
 - radar-poll в 06:00 UTC ежедневно (Wordstat poll для approved брендов + suggest)
@@ -165,12 +166,7 @@ def _job_expire_subscriptions() -> None:
 
 
 def _job_daily_reports() -> None:
-    """Каждый день 09:00 UTC — диспетчер Excel-отчётов.
-
-    См. apps/worker/app/jobs/reports.py: по каждому seller собирает включённые
-    подписки с params.day_of_week == сегодня, строит один XLSX с листами по kinds,
-    отправляет через email/telegram, пишет в report_history.
-    """
+    """Каждый день 09:00 UTC — диспетчер Excel-отчётов."""
     try:
         from app.jobs.reports import dispatch_daily_reports
         dispatch_daily_reports()
@@ -178,17 +174,28 @@ def _job_daily_reports() -> None:
         logger.exception("daily-reports scheduler job failed")
 
 
-def _job_radar_poll() -> None:
-    """Каждый день 06:00 UTC (= 09:00 МСК) — опрос Wordstat + suggest для Radar.
+def _job_monthly_reports() -> None:
+    """1-го числа каждого месяца в 09:30 UTC — управленческий PDF за прошлый месяц.
 
-    Cвоё расписание (не вместе с recalc-all чтобы не блокировать пересчёт
-    метрик селлеров на ~10-30 минут при опросе нескольких сотен брендов).
+    Александр 01.06.2026 (Veloseller_Отчёт.txt): в отличие от еженедельных
+    операционных Excel-отчётов, месячный отчёт идёт автоматически всем seller'ам
+    с email+notify_email=true. Сравнивает текущий месяц с предыдущим.
 
-    Конкретный бренд опрашивается не чаще раза в 3 дня (см. _WORDSTAT_POLL_INTERVAL_HOURS
-    в jobs/radar.py) — даже если scheduler сработает 3 раза за 3 дня, только
-    каждый третий вызов реально дёрнет Wordstat. Это умышленно: даёт buffer
-    на случай если cron пропустит запуск.
+    Запускается в 09:30 UTC, через 30 минут после daily-reports, чтобы не
+    конкурировать с ним за ресурсы Resend и Storage.
+
+    Идемпотентность через report_history с kind='monthly_report' — повторный
+    запуск в тот же день не шлёт дубли.
     """
+    try:
+        from app.jobs.monthly_report import dispatch_monthly_reports
+        dispatch_monthly_reports()
+    except Exception:
+        logger.exception("monthly-reports scheduler job failed")
+
+
+def _job_radar_poll() -> None:
+    """Каждый день 06:00 UTC — опрос Wordstat для Radar."""
     try:
         from app.jobs.radar import poll_all_sellers
         result = poll_all_sellers()
@@ -198,15 +205,7 @@ def _job_radar_poll() -> None:
 
 
 def _job_radar_digest() -> None:
-    """Понедельник + четверг 09:00 UTC (= 12:00 МСК) — Telegram-дайджест по Radar.
-
-    Концепция Александра: "с 10 брендов 5 фраз в 2 недели". 2 раза в неделю
-    обеспечивает регулярность, но без спама. Дайджест отправляется только
-    если есть новые сигналы за последние 7 дней — пустыми не спамим.
-
-    Дедуп по дню (radar_actions) защищает от двойной отправки при
-    рестарте worker'а.
-    """
+    """Понедельник + четверг 09:00 UTC — Telegram-дайджест по Radar."""
     try:
         from app.jobs.radar_digest import send_digests_to_all
         result = send_digests_to_all()
@@ -293,27 +292,27 @@ def start_scheduler() -> None:
         id="snapshots-retention",
         replace_existing=True,
     )
-    # Radar: каждый день 06:00 UTC (= 09:00 МСК). Конкретные бренды дёргают
-    # Wordstat не чаще раза в 3 дня (логика в jobs/radar.py). Если опрос
-    # одного селлера занимает несколько минут — это не блокирует параллельно
-    # работающий recalc-all (он раз в час, разные интервалы).
     _scheduler.add_job(
         _job_radar_poll,
         CronTrigger(hour=6, minute=0),
         id="radar-poll",
         replace_existing=True,
     )
-    # Этап 2 «алерты → отчёты»: ежедневный диспетчер. Отбирает подписки
-    # с params.day_of_week == isoweekday(today). Приходят 09:00 UTC = 12:00 МСК.
     _scheduler.add_job(
         _job_daily_reports,
         CronTrigger(hour=9, minute=0),
         id="daily-reports",
         replace_existing=True,
     )
-    # Radar digest: 2x/week в понедельник (day_of_week=0) и четверг (=3)
-    # в 09:00 UTC (12:00 МСК). Концепция Александра — "5 фраз в 2 недели".
-    # APScheduler понимает day_of_week='mon,thu'.
+    # Месячный PDF-отчёт 1-го числа в 09:30 UTC (= 12:30 МСК).
+    # Через 30 минут после daily-reports чтобы не конкурировать за Resend rate-limit.
+    # day='1' в APScheduler означает 1-е число месяца.
+    _scheduler.add_job(
+        _job_monthly_reports,
+        CronTrigger(day=1, hour=9, minute=30),
+        id="monthly-reports",
+        replace_existing=True,
+    )
     _scheduler.add_job(
         _job_radar_digest,
         CronTrigger(day_of_week="mon,thu", hour=9, minute=0),
