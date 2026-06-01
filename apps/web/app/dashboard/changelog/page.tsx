@@ -11,6 +11,18 @@ export const revalidate = 0;
  * Сжато до уровня sync-job'ов вместо per-SKU событий.
  *
  * Mobile-friendly: карточки складов в одной колонке на мобиле, таблица в overflow-x-auto.
+ *
+ * 01.06.2026 (баг от Александра): счётчик SKU показывал 1000 вместо 1883,
+ * и в истории была видна только одна строка (FBS) хотя FBO синхронизирован тоже.
+ *
+ * Root cause: клиент тянул inventory_snapshots с .limit(20_000) и группировал
+ * в JS. Реально за 14 дней у Александра 41 165 строк (1883 SKU × 2 склада × 11 дней).
+ * Supabase PostgREST применяет hard limit 1000 строк по умолчанию — поэтому
+ * вместо 20K получалось 1000, и эти 1000 ORDER BY snapshot_time DESC оказывались
+ * полностью из одного склада (FBS), FBO в окно не попадал.
+ *
+ * Фикс: RPC get_sync_log_history делает GROUP BY на стороне БД и возвращает
+ * 20 строк (по 2 склада × 10 дней) — никаких лимитов не достигаем.
  */
 type StatusKind = "synced" | "syncing" | "error" | "paused" | "stale";
 
@@ -34,6 +46,13 @@ function classifyStatus(conn: any): StatusKind {
   return "paused";
 }
 
+type SyncHistoryRow = {
+  sync_date: string;
+  connection_id: string;
+  snapshots_count: number;
+  last_snapshot_time: string;
+};
+
 export default async function ChangelogPage() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -45,35 +64,16 @@ export default async function ChangelogPage() {
     .eq("seller_id", user.id)
     .order("created_at", { ascending: true });
 
-  const fortnightAgo = new Date(Date.now() - 14 * 86400_000).toISOString();
-  const { data: snapshotRows } = await supabase
-    .from("inventory_snapshots")
-    .select("snapshot_time,products!inner(connection_id,seller_id)")
-    .eq("products.seller_id", user.id)
-    .gte("snapshot_time", fortnightAgo)
-    .order("snapshot_time", { ascending: false })
-    .limit(20_000);
+  // Журнал за 14 дней — агрегат на уровне БД через RPC get_sync_log_history.
+  // Раньше тянули inventory_snapshots с лимитом 20_000 и группировали в JS,
+  // но PostgREST срезал до 1000 строк → счётчик SKU занижался, и часть складов
+  // вообще не отображалась. Теперь BackEnd возвращает сразу готовый агрегат.
+  const { data: historyRaw, error: historyErr } = await supabase
+    .rpc("get_sync_log_history", { p_seller_id: user.id, p_days: 14 });
 
-  type SyncDayRow = { date: string; connectionId: string; count: number; lastTime: string };
-  const syncMap = new Map<string, SyncDayRow>();
-  for (const row of snapshotRows ?? []) {
-    const r = row as any;
-    const product = Array.isArray(r.products) ? r.products[0] : r.products;
-    if (!product?.connection_id) continue;
-    const date = r.snapshot_time.slice(0, 10);
-    const key = `${date}__${product.connection_id}`;
-    const existing = syncMap.get(key);
-    if (existing) {
-      existing.count += 1;
-      if (r.snapshot_time > existing.lastTime) existing.lastTime = r.snapshot_time;
-    } else {
-      syncMap.set(key, { date, connectionId: product.connection_id, count: 1, lastTime: r.snapshot_time });
-    }
-  }
+  const history: SyncHistoryRow[] = (historyRaw ?? []) as SyncHistoryRow[];
 
   const connById = new Map((connections ?? []).map((c: any) => [c.id, c]));
-  const history = Array.from(syncMap.values())
-    .sort((a, b) => b.lastTime.localeCompare(a.lastTime));
 
   return (
     <div className="space-y-6">
@@ -153,7 +153,11 @@ export default async function ChangelogPage() {
             <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">
               История за 14 дней
             </h2>
-            {history.length === 0 ? (
+            {historyErr ? (
+              <div className="rounded-2xl border border-rose/30 bg-rose/5 p-6 text-sm text-rose font-mono">
+                Не удалось загрузить историю: {historyErr.message}
+              </div>
+            ) : history.length === 0 ? (
               <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center text-sm text-ink-muted">
                 За последние 14 дней нет данных по snapshot'ам.
               </div>
@@ -172,12 +176,12 @@ export default async function ChangelogPage() {
                   </thead>
                   <tbody className="divide-y divide-line">
                     {history.map(row => {
-                      const conn = connById.get(row.connectionId) as any;
+                      const conn = connById.get(row.connection_id) as any;
                       if (!conn) return null;
                       return (
-                        <tr key={`${row.date}_${row.connectionId}`} className="hover:bg-bg-soft/40 transition">
+                        <tr key={`${row.sync_date}_${row.connection_id}`} className="hover:bg-bg-soft/40 transition">
                           <td className="px-3 sm:px-4 py-2.5 font-mono text-xs text-ink-soft whitespace-nowrap">
-                            {new Date(row.date).toLocaleDateString("ru-RU")}
+                            {new Date(row.sync_date).toLocaleDateString("ru-RU")}
                           </td>
                           <td className="px-3 sm:px-4 py-2.5">
                             <div className="text-ink-soft font-medium">{conn.name}</div>
@@ -194,7 +198,7 @@ export default async function ChangelogPage() {
                               {STATUS_META.synced.label}
                             </span>
                           </td>
-                          <td className="px-3 sm:px-4 py-2.5 text-right tabular text-xs text-ink-muted">{row.count}</td>
+                          <td className="px-3 sm:px-4 py-2.5 text-right tabular text-xs text-ink-muted">{row.snapshots_count}</td>
                         </tr>
                       );
                     })}
