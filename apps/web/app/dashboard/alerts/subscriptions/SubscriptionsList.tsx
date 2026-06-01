@@ -26,16 +26,11 @@ export type KindMeta = {
     options?: { value: number; label: string }[];
     hint?: string;
   }>;
+  /** Александр 01.06.2026: некоторые kinds депрекейтнуты — не показываем
+      в селекторе "Добавить отчёт", но если уже подписан — оставляем как есть. */
+  deprecated?: boolean;
 };
 
-/**
- * Все kinds имеют параметр day_of_week (1-7) — день формирования отчёта.
- * Частота отправки (daily/weekly/monthly) хранится отдельной колонкой
- * notification_subscriptions.frequency, а не в params.
- *
- * Для daily частоты day_of_week игнорируется на стороне worker'а, но
- * хранится для возврата если юзер переключит обратно на weekly/monthly.
- */
 const DAY_OF_WEEK_PARAM = {
   key: "day_of_week",
   label: "День отправки",
@@ -53,18 +48,30 @@ const DAY_OF_WEEK_PARAM = {
   hint: "Отчёты на один день приходят в одном Excel-файле разными листами.",
 };
 
+/**
+ * Александр 01.06.2026 (Veloseller_Отчёт.txt) разделил отчёты:
+ * - Еженедельный Excel — операционный (4 листа)
+ * - Месячный PDF — управленческий (автоматически в начале месяца)
+ *
+ * Активные kinds в Excel: weekly_report, underestimated_sku, critical_stock, dead_inventory.
+ * Депрекейтнуто (но не удалено для backward compat):
+ * - low_stock         — дублирует critical_stock
+ * - repeated_stockout — дублирует underestimated_sku
+ * - sync_error        — теперь шлётся отдельным email при ошибке sync
+ *
+ * Депрекейтнутые отображаются у тех у кого они уже есть, но в селектор
+ * "Добавить отчёт" не предлагаются.
+ */
 export const KIND_META: Record<NotificationKind, KindMeta> = {
-  low_stock: {
-    label: "Низкий остаток",
-    description: "Когда покрытие SKU падает до порога — товар скоро закончится.",
-    paramSchema: [
-      {
-        key: "coverage_days_threshold", label: "Порог покрытия",
-        type: "number", default: 7, min: 1, max: 60, suffix: "дн",
-        hint: "Когда coverage_days SKU становится меньше или равно этому числу",
-      },
-      DAY_OF_WEEK_PARAM,
-    ],
+  weekly_report: {
+    label: "Сводка по складу",
+    description: "Excel-сводка по складу: Health Score, потерянная выручка, заморожено, SKU-счётчики, концентрация.",
+    paramSchema: [DAY_OF_WEEK_PARAM],
+  },
+  underestimated_sku: {
+    label: "Потерянные продажи",
+    description: "Товары которые продаются быстро и часто заканчиваются. Каждый день без товара — недополученная выручка.",
+    paramSchema: [DAY_OF_WEEK_PARAM],
   },
   critical_stock: {
     label: "Критический остаток",
@@ -78,20 +85,36 @@ export const KIND_META: Record<NotificationKind, KindMeta> = {
     ],
   },
   dead_inventory: {
-    label: "Неликвид",
-    description: "SKU не продаётся — деньги заморожены в товаре. Расчёт по среднему TVelo за последние 30 дней.",
+    label: "Замороженные остатки",
+    description: "Низкая скорость продаж — деньги заморожены в товаре. Расчёт по среднему TVelo за последние 30 дней.",
     paramSchema: [
       {
         key: "coverage_days_threshold", label: "Порог покрытия",
         type: "number", default: 180, min: 30, max: 365, suffix: "дн",
-        hint: "SKU с coverage больше этого числа = неликвид",
+        hint: "SKU с coverage больше этого числа = замороженные остатки",
+      },
+      DAY_OF_WEEK_PARAM,
+    ],
+  },
+
+  // Депрекейтнутые — показываем как есть если уже подписан, но не предлагаем добавить.
+  low_stock: {
+    label: "Низкий остаток",
+    description: "Когда покрытие SKU падает до порога — товар скоро закончится.",
+    deprecated: true,
+    paramSchema: [
+      {
+        key: "coverage_days_threshold", label: "Порог покрытия",
+        type: "number", default: 7, min: 1, max: 60, suffix: "дн",
+        hint: "Когда coverage_days SKU становится меньше или равно этому числу",
       },
       DAY_OF_WEEK_PARAM,
     ],
   },
   repeated_stockout: {
     label: "Частый out-of-stock",
-    description: "SKU регулярно отсутствует — проблема с поставками. Расчёт за последние 30 дней.",
+    description: "SKU регулярно отсутствует — проблема с поставками.",
+    deprecated: true,
     paramSchema: [
       {
         key: "stockout_days_threshold", label: "Дней OOS",
@@ -100,19 +123,10 @@ export const KIND_META: Record<NotificationKind, KindMeta> = {
       DAY_OF_WEEK_PARAM,
     ],
   },
-  underestimated_sku: {
-    label: "Недооценённый SKU",
-    description: "Скорость SKU выше медианы при out-of-stock — недополучаете выручку. Расчёт по среднему TVelo за последние 30 дней.",
-    paramSchema: [DAY_OF_WEEK_PARAM],
-  },
   sync_error: {
     label: "Ошибка синхронизации",
-    description: "Сводка проблем с подключением к API маркетплейса — ключи истекли, ретраи не помогли.",
-    paramSchema: [DAY_OF_WEEK_PARAM],
-  },
-  weekly_report: {
-    label: "Сводный отчёт",
-    description: "Excel-сводка по всему складу: топ-50 потерь, неликвид, динамика за неделю.",
+    description: "Теперь шлётся отдельным письмом в момент ошибки — отдельный лист в Excel больше не формируется.",
+    deprecated: true,
     paramSchema: [DAY_OF_WEEK_PARAM],
   },
 };
@@ -142,13 +156,13 @@ export function SubscriptionsList({ subscriptions }: { subscriptions: Subscripti
   const router = useRouter();
   const [, startTransition] = useTransition();
 
-  // Фильтруем daily_digest из результатов БД — миграция уже удалила,
-  // но enum-value остался. Defense-in-depth на случай старых записей.
   const cleanSubs = subscriptions.filter(s => s.kind in KIND_META);
 
   const subscribedPairs = new Set(cleanSubs.map(s => `${s.kind}__${s.channel}`));
   const availableToAdd: Array<{ kind: NotificationKind; channel: NotificationChannel }> = [];
   for (const kind of Object.keys(KIND_META) as NotificationKind[]) {
+    // Депрекейтнутые kinds не предлагаем добавить
+    if (KIND_META[kind].deprecated) continue;
     for (const channel of ["email", "telegram"] as NotificationChannel[]) {
       if (!subscribedPairs.has(`${kind}__${channel}`)) {
         availableToAdd.push({ kind, channel });
@@ -246,6 +260,11 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
             <span className="font-display text-base font-medium text-ink">{meta.label}</span>
             <ChannelBadge channel={sub.channel} />
             <FrequencyBadge frequency={currentFreq} />
+            {meta.deprecated && (
+              <span className="inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold text-orange bg-orange/10 border-orange/30">
+                устарел
+              </span>
+            )}
             {!sub.enabled && (
               <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">— отключено</span>
             )}
@@ -254,7 +273,6 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
           {meta.paramSchema.length > 0 && (
             <div className="mt-2 flex items-center gap-3 flex-wrap text-xs">
               {meta.paramSchema.map(param => {
-                // Для daily частоты не показываем day_of_week — он игнорируется worker'ом
                 if (param.key === "day_of_week" && currentFreq === "daily") return null;
                 const val = sub.params[param.key] ?? param.default;
                 let displayVal: string;
@@ -319,8 +337,6 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // day_of_week disabled при daily частоте — worker всё равно его игнорирует.
-  // Сохраняем значение в params чтобы можно было вернуться к weekly/monthly.
   const isDayDisabled = frequency === "daily";
 
   function handleSave() {
@@ -426,7 +442,7 @@ function AddSubscriptionForm({
   onClose: () => void;
   onAdded: () => void;
 }) {
-  const [kind, setKind] = useState<NotificationKind>(availableToAdd[0]?.kind ?? "low_stock");
+  const [kind, setKind] = useState<NotificationKind>(availableToAdd[0]?.kind ?? "weekly_report");
   const [channel, setChannel] = useState<NotificationChannel>(availableToAdd[0]?.channel ?? "email");
   const [frequency, setFrequency] = useState<NotificationFrequency>("weekly");
   const [, startTransition] = useTransition();
