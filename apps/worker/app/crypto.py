@@ -7,10 +7,16 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 from typing import Optional
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+logger = logging.getLogger(__name__)
+
+# iv(12) + минимум 1 байт ciphertext + GCM tag(16)
+_MIN_BLOB_LEN = 12 + 1 + 16
 
 
 def _master_key() -> bytes:
@@ -56,17 +62,41 @@ def decrypt(token: str) -> str:
     return aesgcm.decrypt(iv, ct_with_tag, None).decode("utf-8")
 
 
-def decrypt_if_encrypted(value: Optional[str]) -> Optional[str]:
-    """Удобный helper — если ENV-ключ задан и значение не пустое, расшифровываем.
+def _looks_encrypted(value: str) -> bool:
+    """Эвристика: строка похожа на blob из encrypt() — корректный base64
+    длиной не меньше iv+ciphertext+tag. Нужна, чтобы отличать зашифрованные
+    значения от plaintext (локальный dev / немигрированные строки)."""
+    try:
+        blob = base64.b64decode(value, validate=True)
+    except Exception:
+        return False
+    return len(blob) >= _MIN_BLOB_LEN
 
-    Если ключ не задан (локальный dev без шифрования) — возвращает значение как есть.
+
+def decrypt_if_encrypted(value: Optional[str]) -> Optional[str]:
+    """Расшифровывает значение, если оно похоже на зашифрованный blob.
+
+    fail-closed: если значение выглядит зашифрованным, но расшифровать не удалось
+    (неверный/ротированный ключ, повреждение, подмена) — бросаем исключение, а НЕ
+    возвращаем шифротекст молча (иначе битый секрет тихо уедет в API-вызов и
+    замаскирует проблему с ключом).
+
+    Plaintext-значения (не base64 / короче blob) и режим без ключа (локальный dev)
+    возвращаются как есть.
     """
     if not value:
         return value
     if not os.getenv("SECRET_ENCRYPTION_KEY"):
         return value
+    if not _looks_encrypted(value):
+        # Явно не зашифрованный blob — считаем plaintext, отдаём как есть.
+        return value
     try:
         return decrypt(value)
     except Exception:
-        # Не получилось расшифровать — значит был сохранён без шифрования
-        return value
+        logger.error(
+            "decrypt_if_encrypted: значение похоже на зашифрованное, но расшифровка "
+            "не удалась — проверь SECRET_ENCRYPTION_KEY (возможна ротация ключа или "
+            "повреждение данных)."
+        )
+        raise
