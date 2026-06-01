@@ -68,7 +68,12 @@ export default async function DashboardOverview({ searchParams }: {
   const daysOfWarehouseHistory = oldestSnapshot?.snapshot_time
     ? Math.floor((Date.now() - new Date(oldestSnapshot.snapshot_time).getTime()) / 86400_000)
     : 0;
-  const showDataWarmupBanner = daysOfWarehouseHistory < 14;
+  // Александр 01.06.2026: серый info-баннер «Данных N дней из двух недель»
+  // больше не показываем — эту же информацию даёт блок DayProgress ниже
+  // (День 10 / Подключение X% / TVelo работает). Оставляем баннер ТОЛЬКО
+  // для реально критичных случаев — первые 7 дней, когда цифры приблизительные
+  // и пользователь должен это явно увидеть.
+  const showDataWarmupBanner = daysOfWarehouseHistory <= 7;
 
   const { data: warehouseMetricsRows } = await supabase
     .rpc("get_warehouse_dashboard_metrics", {
@@ -124,9 +129,6 @@ export default async function DashboardOverview({ searchParams }: {
     .order("created_at", { ascending: false })
     .limit(5);
 
-  const showMultiWarehouseBanner = allWarehouses.length > 1;
-  const showHistoryWarmup = usingFallback && allWarehouses.length > 1;
-
   const skusLink = (filter: string) => `/dashboard/skus?period=${period}&filter=${filter}` as any;
 
   // Подпись для тултипов графиков (поверх warehouse vs store fallback).
@@ -159,21 +161,6 @@ export default async function DashboardOverview({ searchParams }: {
 
       {showDataWarmupBanner && (
         <DataWarmupBanner days={daysOfWarehouseHistory} />
-      )}
-
-      {showMultiWarehouseBanner && (
-        <div className="rounded-xl border border-lime-deep/30 bg-lime-soft/40 p-4 flex items-start gap-3">
-          <span className="text-lime-deep mt-0.5 shrink-0 font-mono text-[10px] uppercase tracking-widest font-semibold">i</span>
-          <div className="flex-1 text-sm">
-            <div className="font-medium text-ink">Все цифры — для склада «{currentWarehouseName}»</div>
-            <p className="mt-1 text-ink-muted">
-              Счётчики, деньги, потери и здоровье склада посчитаны только по выбранному складу.
-              {showHistoryWarmup
-                ? " Графики динамики пока показывают весь магазин — данные по складу ещё накапливаются и переключатся автоматически."
-                : " Графики динамики тоже по выбранному складу."} Переключайте склад в правом верхнем углу.
-            </p>
-          </div>
-        </div>
       )}
 
       <DayProgress daysSinceSetup={daysSinceSetup} />
@@ -390,7 +377,10 @@ export default async function DashboardOverview({ searchParams }: {
 }
 
 function DataWarmupBanner({ days }: { days: number }) {
-  let tone: "danger" | "warn" | "soft" = "soft";
+  // Александр 01.06.2026: soft-вариант (8-13 дней) убран как избыточный —
+  // эту же информацию показывает блок DayProgress ниже. Здесь оставлены
+  // только реально критичные предупреждения для первых 7 дней.
+  let tone: "danger" | "warn" = "warn";
   let label = "";
   let detail = "";
 
@@ -400,30 +390,23 @@ function DataWarmupBanner({ days }: { days: number }) {
       ? "По этому складу пока ничего не считалось"
       : `Данных всего ${days} ${pluralize(days, "день", "дня", "дней")}`;
     detail = "Все цифры — приблизительные. Скорость, покрытие, неликвид, потерянная выручка стабилизируются через две недели. Подождите неделю и возвращайтесь — будет принципиально другая картина.";
-  } else if (days <= 7) {
+  } else {
     tone = "warn";
     label = `Данных ${days} ${pluralize(days, "день", "дня", "дней")} — точность низкая`;
     detail = "Расчёты ещё не вышли на плато. Скорость и покрытие могут заметно меняться каждый день. Через две недели цифры станут устойчивыми.";
-  } else {
-    tone = "soft";
-    label = `Данных ${days} ${pluralize(days, "день", "дня", "дней")} из двух недель минимально нужных`;
-    detail = "Уже видно общую картину, но расчёты ещё уточняются. Через несколько дней цифры станут стабильными.";
   }
 
   const classes = {
     danger: "border-rose/30 bg-rose/5",
     warn:   "border-orange/30 bg-orange/5",
-    soft:   "border-azure/30 bg-azure/5",
   }[tone];
   const dotClasses = {
     danger: "bg-rose",
     warn:   "bg-orange",
-    soft:   "bg-azure",
   }[tone];
   const labelClasses = {
     danger: "text-rose",
     warn:   "text-orange",
-    soft:   "text-azure",
   }[tone];
 
   return (
