@@ -454,6 +454,10 @@ function AddSubscriptionForm({
     .filter(a => a.kind === kind)
     .map(a => a.channel);
 
+  // Александр 01.06.2026: в селектор показываем ВСЕ каналы, занятые
+  // блокируем с пометкой "уже подписан" — иначе непонятно почему недоступен.
+  const ALL_CHANNELS: NotificationChannel[] = ["email", "telegram"];
+
   useEffect(() => {
     if (!availableChannelsForKind.includes(channel) && availableChannelsForKind.length > 0) {
       setChannel(availableChannelsForKind[0]);
@@ -461,8 +465,10 @@ function AddSubscriptionForm({
   }, [kind, channel, availableChannelsForKind]);
 
   const meta = KIND_META[kind];
+  const channelIsTaken = !availableChannelsForKind.includes(channel);
 
   function handleAdd() {
+    if (channelIsTaken) return;
     setError(null);
     setSaving(true);
     const params: Record<string, number> = {};
@@ -516,9 +522,15 @@ function AddSubscriptionForm({
             onChange={e => setChannel(e.target.value as NotificationChannel)}
             className="w-full px-2 py-2 border border-line rounded-lg bg-paper text-sm focus:outline-none focus:border-lime-deep min-h-[40px]"
           >
-            {availableChannelsForKind.map(c => (
-              <option key={c} value={c}>{c === "email" ? "Email" : "Telegram"}</option>
-            ))}
+            {ALL_CHANNELS.map(c => {
+              const taken = !availableChannelsForKind.includes(c);
+              const label = c === "email" ? "Email" : "Telegram";
+              return (
+                <option key={c} value={c} disabled={taken}>
+                  {label}{taken ? " — уже подписан" : ""}
+                </option>
+              );
+            })}
           </select>
         </div>
         <div>
@@ -540,13 +552,18 @@ function AddSubscriptionForm({
       <p className="mt-1 text-[11px] text-ink-hush">
         Параметры (порог, день, частоту) можно изменить после создания. Дефолт — понедельник, еженедельно.
       </p>
+      {channelIsTaken && (
+        <p className="mt-2 text-xs text-orange">
+          На этот отчёт уже есть подписка через выбранный канал. Найдите её в списке выше чтобы изменить параметры или удалить.
+        </p>
+      )}
       {error && <p className="mt-3 text-xs text-rose font-mono">{error}</p>}
       <div className="mt-4 flex gap-2 flex-wrap">
         <button
           type="button"
           onClick={handleAdd}
-          disabled={saving}
-          className="flex-1 sm:flex-initial px-4 py-2.5 text-sm bg-ink text-paper rounded-lg hover:bg-ink-soft disabled:opacity-50 transition font-medium min-h-[44px]"
+          disabled={saving || channelIsTaken}
+          className="flex-1 sm:flex-initial px-4 py-2.5 text-sm bg-ink text-paper rounded-lg hover:bg-ink-soft disabled:opacity-50 disabled:cursor-not-allowed transition font-medium min-h-[44px]"
         >
           {saving ? "Добавляется…" : "Добавить"}
         </button>
