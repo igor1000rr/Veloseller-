@@ -2,20 +2,21 @@
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import type { RadarTab } from "./page";
-import { Icons } from "@/app/_components/Icons";
 import { actionToggleFavorite, actionArchiveQuery, actionUnarchiveQuery } from "./actions";
 
+// Radar v2 (29.05.2026): убраны WB/OZON колонки. Suggest больше не
+// используется как источник сигналов — статус new/archived определяется
+// сопоставлением Wordstat-фразы с моделями селлера из radar_price_models.
+// Поля present_in_wb/present_in_ozon остаются в БД (nullable) для
+// возможной англоязычной версии в будущем.
 type QueryRow = {
   id: string;
   brand_id: string;
   brand_name: string;
   query_text: string;
-  status: RadarTab;
+  status: RadarTab | "early";  // "early" — legacy от v1, эффективно = "new"
   current_frequency: number | null;
   trend_pct: number | null;
-  present_in_wb: boolean;
-  present_in_ozon: boolean;
-  in_any_suggest: boolean;
   is_favorite: boolean;
   first_seen_at: string;
   last_updated_at: string;
@@ -60,7 +61,7 @@ export default function RadarTable({
       {filtered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-line bg-paper p-8 text-center text-sm text-ink-muted">
           {queries.length === 0
-            ? `Во вкладке «${currentTabTitle}» пока пусто. Worker проверяет Wordstat раз в 3 дня — данные появятся после следующего опроса.`
+            ? `Во вкладке «${currentTabTitle}» пока пусто. Worker сравнивает Wordstat с вашим прайсом раз в 3 дня — данные появятся после следующего опроса.`
             : "Под фильтр ничего не подходит."}
         </div>
       ) : (
@@ -74,8 +75,6 @@ export default function RadarTable({
                   <Th>Бренд</Th>
                   <Th align="right">Частота</Th>
                   <Th align="center">Тренд</Th>
-                  <Th align="center">WB</Th>
-                  <Th align="center">OZON</Th>
                   <Th align="right">Дней</Th>
                   <Th className="w-24"></Th>
                 </tr>
@@ -141,12 +140,6 @@ function Row({ q, tab }: { q: QueryRow; tab: RadarTab }) {
       <td className={`px-3 py-2.5 text-center tabular font-mono text-xs ${trendColor}`}>
         {q.trend_pct == null ? "—" : `${q.trend_pct > 0 ? "+" : ""}${Math.round(q.trend_pct)}%`}
       </td>
-      <td className="px-3 py-2.5 text-center">
-        <PresenceDot active={q.present_in_wb} />
-      </td>
-      <td className="px-3 py-2.5 text-center">
-        <PresenceDot active={q.present_in_ozon} />
-      </td>
       <td className="px-3 py-2.5 text-right tabular font-mono text-xs text-ink-muted">
         {q.days_since_first_seen ?? "—"}
       </td>
@@ -163,15 +156,6 @@ function Row({ q, tab }: { q: QueryRow; tab: RadarTab }) {
   );
 }
 
-function PresenceDot({ active }: { active: boolean }) {
-  return (
-    <span
-      className={`inline-block size-2.5 rounded-full ${active ? "bg-lime-deep" : "bg-line"}`}
-      title={active ? "Есть в suggest" : "Нет в suggest"}
-    />
-  );
-}
-
 function BrandPicker({
   brands, brandFilter, tab,
 }: {
@@ -181,7 +165,8 @@ function BrandPicker({
 }) {
   const buildHref = (brandId: string | null) => {
     const params = new URLSearchParams();
-    if (tab !== "early") params.set("tab", tab);
+    // Дефолтный таб теперь 'new' (раньше был 'early')
+    if (tab !== "new") params.set("tab", tab);
     if (brandId) params.set("brand", brandId);
     const qs = params.toString();
     return `/dashboard/radar${qs ? `?${qs}` : ""}`;
