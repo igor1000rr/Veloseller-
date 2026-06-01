@@ -8,15 +8,17 @@ import { OnboardingBlock } from "./OnboardingBlock";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-// 4 вкладки Radar — соответствуют status в radar_queries.
-// early    — Wordstat нашёл частоту, но WB/OZON suggest пусто. "Ранние сигналы".
-// new      — впервые появилось в любом suggest за последние 7 дней. "Новые".
-// watching — пользователь добавил в избранное. "Наблюдение".
-// archived — отклонено или закуплено. "Архив".
-export type RadarTab = "early" | "new" | "watching" | "archived";
+// Radar v2 (29.05.2026, план Александра): только 3 вкладки.
+// new      — Wordstat фраза brand+model которой нет в прайсе селлера.
+//             Это кандидат на новинку для закупки.
+// watching — пользователь добавил в избранное.
+// archived — model уже в прайсе селлера (продаёт), или ручной архив,
+//             или автоархив после 30 дней без обновлений.
+// Статус 'early' убран — раньше был для случаев когда Wordstat есть,
+// suggest пусто; теперь suggest WB/Ozon не используется.
+export type RadarTab = "new" | "watching" | "archived";
 
 const TAB_TITLES: Record<RadarTab, string> = {
-  early:    "Ранние сигналы",
   new:      "Новые",
   watching: "Наблюдение",
   archived: "Архив",
@@ -44,7 +46,8 @@ export default async function RadarPage({ searchParams }: {
   searchParams: Promise<{ tab?: string; brand?: string; welcome?: string }>;
 }) {
   const sp = await searchParams;
-  const tab: RadarTab = (["early", "new", "watching", "archived"].includes(sp.tab ?? "") ? sp.tab : "early") as RadarTab;
+  // Дефолтный таб — 'new' (раньше был 'early'). Это самые ценные сигналы.
+  const tab: RadarTab = (["new", "watching", "archived"].includes(sp.tab ?? "") ? sp.tab : "new") as RadarTab;
   const brandFilter = sp.brand || null;
   const isWelcome = sp.welcome === "1";
 
@@ -80,20 +83,24 @@ export default async function RadarPage({ searchParams }: {
   const approvedBrands = brands.filter(b => b.status === "approved");
   const excludedBrands = brands.filter(b => b.status === "excluded");
 
-  // Группируем counts по status одним проходом.
-  const tabCounts: Record<RadarTab, number> = { early: 0, new: 0, watching: 0, archived: 0 };
+  // Группируем counts по status — только 3 вкладки v2.
+  // Старые записи со status='early' (если есть от v1) считаем как 'new'.
+  const tabCounts: Record<RadarTab, number> = { new: 0, watching: 0, archived: 0 };
   for (const row of (countsRes.data ?? []) as any[]) {
-    if (row.status in tabCounts) tabCounts[row.status as RadarTab]++;
+    const status = row.status === "early" ? "new" : row.status;
+    if (status in tabCounts) tabCounts[status as RadarTab]++;
   }
 
   // Selected tab → запрос рядов через view radar_queries_view (с brand_name + derived).
+  // Для tab='new' включаем также legacy 'early' записи (backward compat).
   let queries: any[] = [];
   if (hasAccess && approvedBrands.length > 0) {
+    const statuses = tab === "new" ? ["new", "early"] : [tab];
     let query = supabase
       .from("radar_queries_view")
       .select("*")
       .eq("seller_id", user.id)
-      .eq("status", tab)
+      .in("status", statuses)
       .order("current_frequency", { ascending: false, nullsFirst: false })
       .limit(500);
     if (brandFilter) query = query.eq("brand_id", brandFilter);
@@ -109,8 +116,8 @@ export default async function RadarPage({ searchParams }: {
             Radar
           </h1>
           <p className="mt-1.5 text-sm text-ink-muted max-w-2xl">
-            Wordstat + WB/OZON suggest. Ловит новинки в ассортименте брендов
-            <span className="text-ink"> раньше</span> чем они начнут собирать отзывы.
+            Сопоставляем спрос из Wordstat с вашим прайсом. Показываем
+            <span className="text-ink"> новинки</span>, которых у вас ещё нет — кандидаты для закупки.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -182,7 +189,6 @@ function UntrackedBrandsTeaser({
   const isMaxTier = nextTier.id === "expert" && currentPlan === "expert";
 
   // Показ ограничен до 30 брендов чтобы не было визуального переполнения.
-  // Остальные — счётчик «и ещё N».
   const DISPLAY_LIMIT = 30;
   const visible = excluded.slice(0, DISPLAY_LIMIT);
   const hiddenCount = excluded.length - visible.length;
@@ -228,7 +234,6 @@ function UntrackedBrandsTeaser({
         )}
       </div>
 
-      {/* Сетка бренд-плашек: blurred визуально, кликабельные → детальная страница (там пусто, что усиливает FOMO) */}
       <div className="p-5 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
         {visible.map(b => (
           <Link
@@ -303,9 +308,9 @@ function WelcomeBanner({ plan }: { plan: string }) {
             Добро пожаловать в Radar
           </h3>
           <p className="mt-2 text-sm text-ink leading-relaxed max-w-2xl">
-            Дальше — загрузите прайс или добавьте бренды руками. Worker
-            проснётся раз в 3 дня и начнёт собирать сигналы из Wordstat
-            и подсказок маркетплейсов. Первый дайджест придёт через неделю.
+            Дальше — загрузите прайс. Из него мы возьмём бренды и модели,
+            а worker раз в три дня будет проверять Wordstat и показывать
+            новинки которых у вас ещё нет. Первый дайджест — через неделю.
           </p>
           <Link
             href={"/dashboard/radar" as any}
@@ -328,8 +333,8 @@ function RadarNoAccess({ plan }: { plan: string }) {
       </div>
       <h2 className="font-display text-2xl md:text-3xl font-medium text-ink">Подключите Radar</h2>
       <p className="mx-auto mt-3 max-w-2xl text-ink-muted leading-relaxed">
-        Radar отдельный модуль Veloseller для отслеживания появления новинок
-        в ассортименте брендов через Wordstat + WB/OZON suggest. Trial 14 дней — бесплатно.
+        Radar отдельный модуль Veloseller для отслеживания новинок у брендов
+        через Wordstat и сопоставление с вашим прайсом. Trial 14 дней — бесплатно.
       </p>
       <Link
         href={"/billing" as any}
