@@ -21,45 +21,66 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     .eq("product_id", id).eq("seller_id", user.id).maybeSingle();
   if (!product) notFound();
 
-  const { data: seller } = await supabase
-    .from("sellers").select("default_lead_time_days,default_safety_days").eq("id", user.id).single();
+  // Александр 01.06.2026: карточка SKU иногда таймаутила (statement timeout
+  // в логах postgres) — было 6 запросов подряд через await. Под нагрузкой
+  // recalc-джоба суммарное время превышало 8с лимит. Решение:
+  // 1) Распараллеливаем 5 независимых запросов через Promise.all.
+  // 2) `select *` на tvelo_metrics → конкретные поля (нужно 11 из 25+).
+  const day60Ago = new Date(Date.now() - 60 * 86400_000).toISOString();
+  const day30Ago = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+
+  const [
+    sellerRes,
+    snapshotsRes,
+    metricsRes,
+    elasticityRes,
+    changelogRes,
+  ] = await Promise.all([
+    supabase
+      .from("sellers")
+      .select("default_lead_time_days,default_safety_days")
+      .eq("id", user.id)
+      .single(),
+    supabase
+      .from("inventory_snapshots")
+      .select("snapshot_time,stock_quantity,price,availability")
+      .eq("product_id", id)
+      .gte("snapshot_time", day60Ago)
+      .order("snapshot_time"),
+    // Поля выбраны под потребности UI: KPI блока + buildHealthBreakdown +
+    // buildConfidenceBreakdown + цикл в byDay (period_end, adjusted_velocity).
+    supabase
+      .from("tvelo_metrics")
+      .select("period_end,adjusted_velocity,confidence_score,coverage_days,current_price,current_stock,median_30d_velocity,sku_health_score,stockout_days,in_stock_days,confidence_breakdown")
+      .eq("product_id", id)
+      .order("period_end", { ascending: false })
+      .limit(30),
+    supabase
+      .from("price_elasticity")
+      .select("change_date,previous_price,new_price,price_delta_pct,velocity_before,velocity_after,price_impact_percent,days_before,days_after")
+      .eq("product_id", id)
+      .order("change_date", { ascending: false })
+      .limit(10),
+    // "фиксация всех event_type кроме sales_like". sales_like — обычные
+    // продажи которые засоряют список. Отфильтровываем на уровне запроса.
+    supabase
+      .from("changelog")
+      .select("event_date,event_type,delta_stock,message,confidence_impact")
+      .eq("product_id", id)
+      .neq("event_type", "sales_like")
+      .gte("event_date", day30Ago)
+      .order("event_date", { ascending: false })
+      .limit(60),
+  ]);
+
+  const seller = sellerRes.data;
+  const snapshots = snapshotsRes.data;
+  const metrics = metricsRes.data;
+  const elasticity = elasticityRes.data;
+  const changelog = changelogRes.data;
+
   const leadTime = product.lead_time_days ?? seller?.default_lead_time_days ?? 14;
   const safety = product.safety_days ?? seller?.default_safety_days ?? 7;
-
-  const day60Ago = new Date(Date.now() - 60 * 86400_000).toISOString();
-  const { data: snapshots } = await supabase
-    .from("inventory_snapshots")
-    .select("snapshot_time,stock_quantity,price,availability")
-    .eq("product_id", id)
-    .gte("snapshot_time", day60Ago)
-    .order("snapshot_time");
-
-  const { data: metrics } = await supabase
-    .from("tvelo_metrics")
-    .select("*")
-    .eq("product_id", id)
-    .order("period_end", { ascending: false })
-    .limit(30);
-
-  const { data: elasticity } = await supabase
-    .from("price_elasticity")
-    .select("change_date,previous_price,new_price,price_delta_pct,velocity_before,velocity_after,price_impact_percent,days_before,days_after")
-    .eq("product_id", id)
-    .order("change_date", { ascending: false })
-    .limit(10);
-
-  const day30Ago = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
-  // Александр 01.06.2026: "фиксация всех event_type кроме sales_like".
-  // sales_like — обычные продажи которые засоряют список. Отфильтровываем
-  // на уровне запроса — экономим bytes и парсинг.
-  const { data: changelog } = await supabase
-    .from("changelog")
-    .select("event_date,event_type,delta_stock,message,confidence_impact")
-    .eq("product_id", id)
-    .neq("event_type", "sales_like")
-    .gte("event_date", day30Ago)
-    .order("event_date", { ascending: false })
-    .limit(60);
 
   const latest = metrics?.[0];
 
