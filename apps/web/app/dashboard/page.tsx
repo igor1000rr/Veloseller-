@@ -1,6 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { HealthTrend, LostRevenueTrend, SegmentPie } from "./StoreCharts";
+import { HealthTrend, LostRevenueTrend, SegmentPie, PotentialRevenueChart } from "./StoreCharts";
 import { DayProgress } from "./DayProgress";
 import { PeriodSelector } from "./PeriodSelector";
 import { DeadInventoryChart } from "./StoreCharts";
@@ -58,10 +58,6 @@ export default async function DashboardOverview({ searchParams }: {
   const currency = (seller as any)?.currency ?? "RUB";
   const fmt = (n: number | null | undefined) => formatMoney(n, currency);
 
-  // ПРАВКА 29.05.2026: возраст данных склада для баннера «низкая точность».
-  // Считаем от первого snapshot текущего склада. Если меньше 14 дней —
-  // расчёты ещё нестабильны.
-  // Запрос дешёвый: ORDER ASC LIMIT 1 на indexed колонке.
   const { data: oldestSnapshot } = await supabase
     .from("inventory_snapshots")
     .select("snapshot_time")
@@ -74,7 +70,6 @@ export default async function DashboardOverview({ searchParams }: {
     : 0;
   const showDataWarmupBanner = daysOfWarehouseHistory < 14;
 
-  // ПРАВКА 10 этап 1 (25.05.2026): per-warehouse агрегаты в моменте.
   const { data: warehouseMetricsRows } = await supabase
     .rpc("get_warehouse_dashboard_metrics", {
       p_seller_id: user.id,
@@ -83,18 +78,17 @@ export default async function DashboardOverview({ searchParams }: {
     });
   const wm = (warehouseMetricsRows as any[] | null)?.[0] ?? null;
 
-  // ПРАВКА 10 этап 2 (25.05.2026): per-warehouse история для графиков.
   const [warehouseHistoryRes, storeHistoryRes] = await Promise.all([
     supabase
       .from("warehouse_metrics")
-      .select("period_end,warehouse_health_score,lost_revenue,total_inventory_value,store_frozen_inventory_value,dead_inventory_sku_count")
+      .select("period_end,warehouse_health_score,lost_revenue,total_inventory_value,store_frozen_inventory_value,dead_inventory_sku_count,potential_revenue")
       .eq("seller_id", user.id)
       .eq("connection_id", currentWarehouseId)
       .order("period_end", { ascending: false })
       .limit(14),
     supabase
       .from("store_metrics")
-      .select("period_end,warehouse_health_score,lost_revenue,total_inventory_value,store_frozen_inventory_value,dead_inventory_sku_count")
+      .select("period_end,warehouse_health_score,lost_revenue,total_inventory_value,store_frozen_inventory_value,dead_inventory_sku_count,potential_revenue")
       .eq("seller_id", user.id)
       .order("period_end", { ascending: false })
       .limit(14),
@@ -105,8 +99,6 @@ export default async function DashboardOverview({ searchParams }: {
   const usingFallback = warehouseHistory.length === 0;
   const chartHistory = usingFallback ? storeHistory : warehouseHistory;
 
-  // Оптимизация (2026-05-25): get_dashboard_velocities — DISTINCT ON по
-  // product_id, ~0.5 сек на 3.7k SKU.
   const { data: velRows } = await supabase
     .rpc("get_dashboard_velocities", {
       p_seller_id: user.id,
@@ -124,13 +116,6 @@ export default async function DashboardOverview({ searchParams }: {
   const avgVelocity = velocities.length > 0 ? velocities.reduce((a, b) => a + b, 0) / velocities.length : 0;
   const slowVelocity = velocities.length > 0 ? velocities[Math.floor(velocities.length * 0.1)] : 0;
 
-  const confidenceValues = Array.from(latestByProduct.values())
-    .map(v => v.confidence)
-    .filter((c): c is number => c != null);
-  const avgConfidence = confidenceValues.length > 0
-    ? confidenceValues.reduce((a, b) => a + b, 0) / confidenceValues.length
-    : null;
-
   const { data: alerts } = await supabase
     .from("alerts")
     .select("*")
@@ -144,11 +129,17 @@ export default async function DashboardOverview({ searchParams }: {
 
   const skusLink = (filter: string) => `/dashboard/skus?period=${period}&filter=${filter}` as any;
 
-  // Тултип графиков динамики: если данных по конкретному складу ещё нет,
-  // показываем агрегат по магазину с пометкой об этом.
+  // Подпись для тултипов графиков (поверх warehouse vs store fallback).
   const trendTooltipSuffix = usingFallback
     ? "Пока показано по всему магазину — данные по конкретному складу ещё накапливаются."
     : `Только по складу «${currentWarehouseName}».`;
+
+  // Активные SKU = total_sku - inactive_sku (товары с остатком > 0 ИЛИ
+  // продажами за 30 дней; "inactive" — без остатков И без продаж).
+  // Заменяет блок "Достоверность данных" по правке Александра 01.06.2026.
+  const activeSkuCount = wm
+    ? Math.max(0, Number(wm.total_sku_count ?? 0) - Number(wm.inactive_sku_count ?? 0))
+    : 0;
 
   return (
     <div className="space-y-6">
@@ -192,7 +183,7 @@ export default async function DashboardOverview({ searchParams }: {
         <ActionCard
           href={skusLink("low_stock")}
           label="Низкий остаток"
-          tooltip="Товары которые закончатся быстрее чем за неделю при текущей скорости продаж. Пора заказывать пополнение."
+          tooltip="При текущей скорости продаж товары закончатся в течение 7 дней. Пора пополнять склад."
           value={wm?.low_stock_sku_count ?? "—"}
           sub="закончатся через неделю, нужна поставка"
           tone="warn"
@@ -200,7 +191,7 @@ export default async function DashboardOverview({ searchParams }: {
         <ActionCard
           href={skusLink("lost_revenue")}
           label="Потерянная выручка"
-          tooltip="Сколько денег вы недополучили из-за того что товар закончился на складе. Каждый день без товара — это упущенная выручка."
+          tooltip="Упущенная выручка из-за того, что товар закончился на складе."
           value={fmt(wm?.lost_revenue)}
           sub="недополучено за период из-за отсутствия товара"
           tone="danger"
@@ -208,7 +199,7 @@ export default async function DashboardOverview({ searchParams }: {
         <ActionCard
           href={skusLink("dead_inventory")}
           label="Неликвид"
-          tooltip="Товары которые продаются так медленно, что текущих остатков хватит больше чем на полгода. Деньги фактически заморожены — кандидаты на распродажу."
+          tooltip="С текущей скоростью продаж эти товары будут продаваться более 6 месяцев."
           value={wm?.dead_inventory_sku_count ?? "—"}
           sub="низкая скорость продаж"
           tone="warn"
@@ -217,12 +208,15 @@ export default async function DashboardOverview({ searchParams }: {
 
       {/* ===== ПОЛОСА 2: 2 больших блока ===== */}
       <div className="grid gap-4 md:gap-6 md:grid-cols-2">
-        <HealthScoreBlock score={wm?.warehouse_health_score} />
+        <HealthScoreBlock
+          score={wm?.warehouse_health_score}
+          tooltip="Взвешенная оценка состояния здоровья склада. SKU без активности не участвуют в расчёте."
+        />
 
         <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold flex items-center">
             Денег на остатках
-            <InfoTooltip text={`Сколько ваших ${currency === "RUB" ? "рублей" : "денег"} прямо сейчас лежит на складе в виде товара. Это замороженный оборотный капитал — пока товар не продан, деньги не работают.`} />
+            <InfoTooltip text="Общая стоимость складских запасов по розничной цене." />
           </div>
           <div className="mt-3 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium text-ink tabular break-words">
             {fmt(wm?.total_inventory_value)}
@@ -230,7 +224,7 @@ export default async function DashboardOverview({ searchParams }: {
           <div className="mt-4 rounded-lg border border-orange/20 bg-orange/5 p-3 flex items-center justify-between gap-3 flex-wrap">
             <span className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold flex items-center">
               Заморожено в неликвиде
-              <InfoTooltip text="Деньги вложены в товары которые будут продаваться больше полугода. Эти средства работают плохо — кандидаты на распродажу, возврат поставщику или списание." />
+              <InfoTooltip text="Деньги вложены в товары которые будут продаваться больше полугода." />
             </span>
             <span className="font-display tabular text-lg sm:text-xl text-orange font-medium break-words">
               {fmt(wm?.store_frozen_inventory_value)}
@@ -244,7 +238,7 @@ export default async function DashboardOverview({ searchParams }: {
         <Kpi
           href={"/dashboard/skus" as any}
           label="Всего SKU"
-          tooltip="Сколько разных артикулов у вас на этом складе."
+          tooltip="Общее количество SKU."
           value={wm?.total_sku_count ?? "—"}
         />
         <Kpi
@@ -257,14 +251,16 @@ export default async function DashboardOverview({ searchParams }: {
         <Kpi
           href={skusLink("inactive")}
           label="SKU без активности"
-          tooltip="Товары которые закончились и больше не продаются. Возможно ушли из ассортимента — посмотрите, не пора ли вычистить."
+          tooltip="SKU без остатков, по которым не было движения за последние 30 дней."
           value={wm?.inactive_sku_count ?? "—"}
           tone="muted"
         />
+        {/* Александр 01.06.2026: вместо "Достоверность данных" — "Активные товары" */}
         <Kpi
-          label="Достоверность данных"
-          tooltip="Насколько надёжны расчёты по этому складу. Чем дольше мы собираем данные, тем выше точность. После двух недель работы становится около 90%."
-          value={avgConfidence != null ? `${avgConfidence.toFixed(0)}%` : "—"}
+          href={skusLink("active")}
+          label="Активные товары"
+          tooltip="Товары с остатком больше 0 или активностью за последние 30 дней."
+          value={activeSkuCount > 0 ? activeSkuCount : "—"}
           tone="accent"
         />
       </div>
@@ -274,7 +270,7 @@ export default async function DashboardOverview({ searchParams }: {
         <Link href={skusLink("inventory_concentration")} className="group rounded-2xl border border-line bg-paper p-4 sm:p-5 hover:border-lime-deep/40 hover:shadow-sm transition cursor-pointer">
           <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
             Концентрация остатков
-            <InfoTooltip text="Сколько товаров держат половину всех ваших денег на складе. Маленькое число (например 5 из 1000) — большой риск: потерять 1-2 ключевых артикула значит потерять половину склада." />
+            <InfoTooltip text="Сколько SKU вложены в 50% склада. Желательно равномерно распределять ассортимент." />
           </div>
           <div className="mt-2 font-display text-2xl tabular text-ink font-medium">
             {wm?.inventory_concentration_50 ?? "—"} <span className="text-base text-ink-muted">SKU</span>
@@ -287,7 +283,7 @@ export default async function DashboardOverview({ searchParams }: {
         <Link href={skusLink("demand_concentration")} className="group rounded-2xl border border-line bg-paper p-4 sm:p-5 hover:border-lime-deep/40 hover:shadow-sm transition cursor-pointer">
           <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush flex items-center">
             Концентрация спроса
-            <InfoTooltip text="Сколько товаров приносят половину вашей выручки. Маленькое число — узкое горлышко: эти артикулы критичны, и потеря одного из них сильно ударит по обороту." />
+            <InfoTooltip text="Сколько товаров приносят половину вашей выручки. Маленькое число — узкое горлышко: эти артикулы критичны." />
           </div>
           <div className="mt-2 font-display text-2xl tabular text-ink font-medium">
             {wm?.demand_concentration_50 ?? "—"} <span className="text-base text-ink-muted">SKU</span>
@@ -300,7 +296,7 @@ export default async function DashboardOverview({ searchParams }: {
         <Link href={skusLink("frequently_oos")} className="group rounded-2xl border border-orange/30 bg-orange/5 p-4 sm:p-5 hover:border-orange/50 hover:shadow-sm transition cursor-pointer">
           <div className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold flex items-center">
             Часто отсутствуют на складе
-            <InfoTooltip text="Товары которые за прошлый месяц отсутствовали на складе больше двух недель в сумме. Регулярный дефицит — повод проверить логистику или ритм закупок." />
+            <InfoTooltip text="Товары которые отсутствовали на складе более 2 недель за последний месяц. Регулярный дефицит — повод проверить логистику и ритм закупок." />
           </div>
           <div className="mt-2 font-display text-2xl tabular text-orange font-medium">
             {wm?.frequently_oos_sku_count ?? "—"} <span className="text-base text-orange/70">SKU</span>
@@ -316,7 +312,7 @@ export default async function DashboardOverview({ searchParams }: {
       <div>
         <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3 flex items-center flex-wrap">
           <span>Скорости продаж по SKU склада «{currentWarehouseName}»</span>
-          <InfoTooltip text="Как распределяется скорость продаж по вашим товарам. Видно где бестселлеры, где середняки, а где медленные товары которые тянут вас вниз." />
+          <InfoTooltip text="Как распределяется скорость продаж по вашим товарам. Видно где бестселлеры, где середняки, а где медленные товары." />
         </h3>
         <div className="grid grid-cols-3 gap-2 sm:gap-3">
           <VelocityCard label="Быстрая" value={fastVelocity} sub="топ 10% SKU" tone="fast" tooltip="Скорость ваших бестселлеров — топ-10% самых быстрых товаров. На них держится выручка склада." />
@@ -328,7 +324,7 @@ export default async function DashboardOverview({ searchParams }: {
       {/* ===== ПОЛОСА 6: Графики ===== */}
       <div className="grid gap-4 lg:grid-cols-3">
         <ChartCard
-          title={`Здоровье склада за ${chartHistory.length || 14} ${pluralize(chartHistory.length || 14, "точку", "точки", "точек")}`}
+          title={`Здоровье склада за ${chartHistory.length || 14} ${pluralize(chartHistory.length || 14, "день", "дня", "дней")}`}
           tooltip={`Как меняется общее состояние склада со временем. Чем выше тем лучше: 70+ зелёная зона, 40-70 жёлтая, ниже 40 — внимание. ${trendTooltipSuffix}`}
         >
           <HealthTrend history={chartHistory} />
@@ -339,19 +335,36 @@ export default async function DashboardOverview({ searchParams }: {
         >
           <LostRevenueTrend history={chartHistory} currency={currency} />
         </ChartCard>
-        <ChartCard title="Распределение по сегментам" tooltip="Как разбит ваш ассортимент по характеру спроса: стабильные товары, быстрые, медленные, неликвид и те по которым ещё мало данных.">
+        <ChartCard
+          title="Распределение по сегментам"
+          tooltip="Распределение ассортимента по характеру спроса: стабильные товары, быстрые, медленные, неликвид, мало данных."
+        >
           <SegmentPie distribution={wm?.demand_pattern_distribution as any} />
         </ChartCard>
       </div>
 
-      {/* ===== ПОЛОСА 7: Dead inventory ===== */}
-      <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
-        <h3 className="font-display text-base sm:text-lg font-medium text-ink flex items-center flex-wrap">
-          <span>Неликвид (товары &gt; 6 месяцев)</span>
-          <InfoTooltip text={`Как меняется со временем количество неликвидных товаров и сколько денег в них заморожено. ${trendTooltipSuffix}`} position="bottom" />
-        </h3>
-        <p className="text-xs text-ink-muted mt-1 mb-4">Динамика количества SKU и замороженных денег</p>
-        <DeadInventoryChart history={chartHistory} currency={currency} />
+      {/* ===== ПОЛОСА 7: Неликвид (1/2) + Потенциальная выручка (1/2) =====
+          Александр 01.06.2026: блок Неликвид сделать на пол страницы +
+          добавить блок с графиком "Потенциальная выручка" — SUM(TVelo * Price)
+      */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
+          <h3 className="font-display text-base sm:text-lg font-medium text-ink flex items-center flex-wrap">
+            <span>Неликвид (товары &gt; 6 месяцев)</span>
+            <InfoTooltip text={`Как меняется со временем количество неликвидных товаров и сколько денег в них заморожено. ${trendTooltipSuffix}`} position="bottom" />
+          </h3>
+          <p className="text-xs text-ink-muted mt-1 mb-4">Динамика количества SKU и замороженных денег</p>
+          <DeadInventoryChart history={chartHistory} currency={currency} />
+        </div>
+
+        <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
+          <h3 className="font-display text-base sm:text-lg font-medium text-ink flex items-center flex-wrap">
+            <span>Потенциальная выручка</span>
+            <InfoTooltip text={`Сколько вы можете заработать при текущей скорости продаж за период. Рассчитывается как сумма скорости TVelo × цена по каждому SKU. ${trendTooltipSuffix}`} position="bottom" />
+          </h3>
+          <p className="text-xs text-ink-muted mt-1 mb-4">Динамика возможной выручки по текущей скорости</p>
+          <PotentialRevenueChart history={chartHistory} currency={currency} />
+        </div>
       </div>
 
       {alerts && alerts.length > 0 && (
@@ -376,13 +389,6 @@ export default async function DashboardOverview({ searchParams }: {
   );
 }
 
-/**
- * Баннер «низкая точность данных» — показывается когда у склада < 14 дней истории.
- * Три уровня по дням:
- *   0-3   красный   «практически нет данных»
- *   4-7   оранжевый «данных мало»
- *   8-13  жёлтый    «накапливается»
- */
 function DataWarmupBanner({ days }: { days: number }) {
   let tone: "danger" | "warn" | "soft" = "soft";
   let label = "";
