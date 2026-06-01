@@ -7,6 +7,10 @@ import {
   actionUnarchiveQuery,
 } from "../../actions";
 
+// Radar v2 (29.05.2026): убран статус "early". Тип ужат до трёх живых.
+// Поля present_in_wb/present_in_ozon оставлены опциональными — в БД они
+// есть (nullable) для backward compat и возможной англ. версии, но в UI
+// больше не показываем колонку «В каталогах».
 type Query = {
   id: string;
   brand_id: string;
@@ -14,16 +18,13 @@ type Query = {
   query_text: string;
   current_frequency: number | null;
   trend_pct: number | null;
-  present_in_wb: boolean | null;
-  present_in_ozon: boolean | null;
-  status: "early" | "new" | "watching" | "archived";
+  status: "new" | "watching" | "archived";
   is_favorite: boolean | null;
   first_seen_at: string;
   last_updated_at: string;
 };
 
 const STATUS_TABS = [
-  { id: "early",    label: "Ранние" },
   { id: "new",      label: "Новые" },
   { id: "watching", label: "Наблюдение" },
   { id: "archived", label: "Архив" },
@@ -43,7 +44,12 @@ export default function BrandQueriesPanel({
   const [search, setSearch] = useState("");
 
   const filtered = queries.filter(q => {
-    if (filter !== "all" && q.status !== filter) return false;
+    if (filter !== "all") {
+      // Legacy: status='early' (если ещё не перепрогнал worker) показываем
+      // как 'new' для backward compat.
+      const effective = (q.status as string) === "early" ? "new" : q.status;
+      if (effective !== filter) return false;
+    }
     if (search.trim() && !q.query_text.toLowerCase().includes(search.toLowerCase().trim())) return false;
     return true;
   });
@@ -73,7 +79,11 @@ export default function BrandQueriesPanel({
             Все ({queries.length})
           </button>
           {STATUS_TABS.map(t => {
-            const count = queries.filter(q => q.status === t.id).length;
+            // legacy 'early' тоже считается в 'new'
+            const count = queries.filter(q => {
+              const effective = (q.status as string) === "early" ? "new" : q.status;
+              return effective === t.id;
+            }).length;
             return (
               <button
                 key={t.id}
@@ -109,9 +119,6 @@ export default function BrandQueriesPanel({
               <th className="text-center px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
                 Тренд
               </th>
-              <th className="text-center px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
-                В каталогах
-              </th>
               <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
                 Действия
               </th>
@@ -120,7 +127,7 @@ export default function BrandQueriesPanel({
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-ink-muted text-sm">
+                <td colSpan={4} className="px-4 py-8 text-center text-ink-muted text-sm">
                   Ничего не найдено по фильтрам
                 </td>
               </tr>
@@ -166,18 +173,21 @@ function QueryRow({
     : trend < -5 ? "text-rose"
     : "text-ink-muted";
 
+  // Legacy 'early' эффективно показываем как 'new'
+  const effectiveStatus = (query.status as string) === "early" ? "new" : query.status;
+
   return (
     <tr className={`border-b border-line last:border-0 transition ${
-      query.status === "archived" ? "opacity-50" : "hover:bg-bg-soft/40"
+      effectiveStatus === "archived" ? "opacity-50" : "hover:bg-bg-soft/40"
     }`}>
       <td className="px-4 py-3">
         <div className="font-medium text-ink">{query.query_text}</div>
-        {query.status === "watching" && (
+        {effectiveStatus === "watching" && (
           <span className="font-mono text-[9px] uppercase text-orange tracking-wider mt-0.5 inline-block">
             наблюдение
           </span>
         )}
-        {query.status === "new" && (
+        {effectiveStatus === "new" && (
           <span className="font-mono text-[9px] uppercase text-lime-deep tracking-wider mt-0.5 inline-block">
             новая
           </span>
@@ -187,25 +197,12 @@ function QueryRow({
         {query.current_frequency?.toLocaleString("ru-RU") ?? "—"}
       </td>
       <td className={`px-4 py-3 text-center whitespace-nowrap`}>
-        {/* Sparkline + trend % компактно в одной ячейке */}
         <div className="inline-flex items-center gap-2">
           <MiniSparkline history={history} trendPct={trend} />
           <span className={`tabular text-xs font-mono ${trendColor}`}>
             {trend == null ? "—" : `${trend > 0 ? "+" : ""}${trend.toFixed(0)}%`}
           </span>
         </div>
-      </td>
-      <td className="px-4 py-3 text-center text-xs whitespace-nowrap">
-        <span className={`font-mono uppercase tracking-wider mr-1 ${
-          query.present_in_wb ? "text-lime-deep" : "text-ink-hush"
-        }`}>
-          WB
-        </span>
-        <span className={`font-mono uppercase tracking-wider ${
-          query.present_in_ozon ? "text-lime-deep" : "text-ink-hush"
-        }`}>
-          OZ
-        </span>
       </td>
       <td className="px-4 py-3 text-right whitespace-nowrap">
         <button
@@ -222,9 +219,9 @@ function QueryRow({
           onClick={onArchive}
           disabled={pending}
           className="text-xs font-mono uppercase tracking-wider text-ink-hush hover:text-rose transition"
-          title={query.status === "archived" ? "Вернуть из архива" : "В архив"}
+          title={effectiveStatus === "archived" ? "Вернуть из архива" : "В архив"}
         >
-          {query.status === "archived" ? "восстановить" : "архив"}
+          {effectiveStatus === "archived" ? "восстановить" : "архив"}
         </button>
       </td>
     </tr>
@@ -234,10 +231,7 @@ function QueryRow({
 /**
  * Мини-sparkline для одной строки таблицы — компактный SVG 80×24.
  * Показывает последние 6 точек частоты фразы по месяцам.
- * Цвет линии: зелёный/красный/серый по trend_pct (синхронизирован с
- * текстовым значением рядом).
- *
- * Если history меньше 2 точек — не рендерим вообще (нечего показать).
+ * Цвет линии: зелёный/красный/серый по trend_pct.
  */
 function MiniSparkline({
   history,
@@ -250,7 +244,7 @@ function MiniSparkline({
     return <span className="inline-block w-[80px] h-[24px] text-ink-hush text-xs text-center leading-[24px]">—</span>;
   }
 
-  const points = history.slice(-6);  // последние 6 месяцев
+  const points = history.slice(-6);
   const W = 80;
   const H = 24;
   const PAD = 2;
@@ -279,7 +273,6 @@ function MiniSparkline({
       style={{ verticalAlign: "middle" }}
     >
       <path d={pathD} fill="none" stroke="currentColor" strokeWidth="1.5" />
-      {/* Последняя точка — кружочек для эмфазиса */}
       <circle
         cx={PAD + (points.length - 1) * xStep}
         cy={yScale(points[points.length - 1].freq)}
