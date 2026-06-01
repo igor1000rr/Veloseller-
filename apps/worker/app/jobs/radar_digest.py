@@ -4,8 +4,8 @@
   "С 10 брендов 5 фраз в 2 недели, которые можно себе выписать"
 
 Что в дайджесте:
-  - Новые запросы (status=new) — появились в suggest за последние 7 дней
-  - Ранние сигналы с большим ростом (trend_pct > 50%) — инфоповоды
+  - Новые запросы (status=new) — новинки, которых ещё нет в прайсе селлера
+  - Резко выросшие фразы (trend_pct > 50%) — инфоповоды
   - Общее количество отслеживаемых брендов
 
 Расписание:
@@ -15,6 +15,11 @@
 Анти-спам:
   - Не больше 1 дайджеста в день на селлера
   - Сохраняем факт отправки в radar_actions для дедупа
+
+ВАЖНО (Radar v2): поллер пишет только статусы new/archived/watching (статус
+'early' убран) и НЕ заполняет present_in_wb/present_in_ozon (suggest убран,
+поля остаются nullable). Дайджест опирается на это: «резкий рост» = trend_pct
+по не-archived запросам, маркетплейсы в строке не показываем.
 """
 from __future__ import annotations
 
@@ -32,7 +37,7 @@ logger = logging.getLogger("veloseller.radar.digest")
 _DIGEST_LOOKBACK_DAYS = 7
 _DIGEST_MAX_ITEMS = 10
 _TRENDING_FREQUENCY_THRESHOLD = 50  # мин частота чтобы попасть в дайджест
-_TRENDING_PCT_THRESHOLD = 50.0  # min trend_pct для "раннего сигнала"
+_TRENDING_PCT_THRESHOLD = 50.0  # min trend_pct для "резкого роста"
 
 
 def _app_url() -> str:
@@ -50,21 +55,19 @@ def _format_digest_html(seller_name: str, brands_count: int, new_items: list[dic
     ]
 
     if new_items:
-        lines.append(f"<b>🔥 Новые в suggest ({len(new_items)})</b> — пора закупать")
+        lines.append(f"<b>🔥 Новые запросы ({len(new_items)})</b> — пора закупать")
         for item in new_items[:_DIGEST_MAX_ITEMS]:
             phrase = html.escape(item.get("query_text", "—"))
             brand = html.escape(item.get("brand_name", "—"))
             freq = item.get("current_frequency", 0) or 0
-            wb = "WB" if item.get("present_in_wb") else "—"
-            ozon = "OZON" if item.get("present_in_ozon") else "—"
-            marketplaces = "/".join(filter(lambda x: x != "—", [wb, ozon])) or "—"
+            # present_in_wb/ozon в v2 всегда NULL (suggest убран) — не показываем.
             lines.append(
-                f"  · <code>{phrase}</code> ({brand}) — {freq:,} / мес · {marketplaces}".replace(",", " ")
+                f"  · <code>{phrase}</code> ({brand}) — {freq:,} / мес".replace(",", " ")
             )
         lines.append("")
 
     if trending_items:
-        lines.append(f"<b>📈 Ранние сигналы ({len(trending_items)})</b> — инфоповод")
+        lines.append(f"<b>📈 Резкий рост ({len(trending_items)})</b> — инфоповод")
         for item in trending_items[:_DIGEST_MAX_ITEMS]:
             phrase = html.escape(item.get("query_text", "—"))
             brand = html.escape(item.get("brand_name", "—"))
@@ -97,7 +100,7 @@ def build_seller_digest(sb, seller: dict) -> Optional[str]:
 
     cutoff = (datetime.now(timezone.utc) - timedelta(days=_DIGEST_LOOKBACK_DAYS)).isoformat()
 
-    # Новые в suggest за последнюю неделю (status=new + first_seen или first_suggest_seen за 7 дней)
+    # Новые новинки за последнюю неделю (status=new, частота выше порога)
     new_items = fetch_all(
         sb.table("radar_queries_view")
         .select("*")
@@ -109,18 +112,23 @@ def build_seller_digest(sb, seller: dict) -> Optional[str]:
         .limit(_DIGEST_MAX_ITEMS)
     )
 
-    # Ранние сигналы с большим ростом — только те что выросли резко (инфоповод)
-    trending_items = fetch_all(
+    # Резко выросшие фразы (инфоповод). В v2 статуса 'early' нет, поэтому берём
+    # любые НЕ archived запросы с заметным ростом trend_pct. trend_pct = NULL
+    # (первое появление) отсекается условием gte автоматически.
+    trending_raw = fetch_all(
         sb.table("radar_queries_view")
         .select("*")
         .eq("seller_id", seller_id)
-        .eq("status", "early")
+        .neq("status", "archived")
         .gte("current_frequency", _TRENDING_FREQUENCY_THRESHOLD)
         .gte("trend_pct", _TRENDING_PCT_THRESHOLD)
         .gte("last_updated_at", cutoff)
         .order("trend_pct", desc=True)
         .limit(_DIGEST_MAX_ITEMS)
     )
+    # Дедуп: не дублируем то, что уже показано в блоке «новые».
+    new_ids = {it.get("id") for it in new_items}
+    trending_items = [it for it in trending_raw if it.get("id") not in new_ids]
 
     if not new_items and not trending_items:
         return None  # нечего отправлять — не спамим пустыми дайджестами
