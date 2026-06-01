@@ -14,11 +14,19 @@ type Brand = {
   last_wordstat_at: string | null;
 };
 
-export default function BrandList({ brands }: { brands: Brand[] }) {
+export default function BrandList({
+  brands,
+  approvedCount,
+  brandsLimit,
+}: {
+  brands: Brand[];
+  approvedCount: number;
+  brandsLimit: number;
+}) {
   if (brands.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-line bg-paper p-8 text-center text-sm text-ink-muted">
-        Пока ни одного бренда. Загрузите прайс или добавьте бренд руками выше.
+        Пока ни одного бренда. Загрузите прайс или добавьте бренд вручную выше.
       </div>
     );
   }
@@ -26,15 +34,35 @@ export default function BrandList({ brands }: { brands: Brand[] }) {
   const approved = brands.filter(b => b.status === "approved");
   const excluded = brands.filter(b => b.status === "excluded");
 
+  // Лимит достигнут — кнопка «Восстановить» в excluded должна быть disabled
+  // (баг Александра 01.06.2026: из исключённых можно было восстановить поверх лимита).
+  const limitReached = approvedCount >= brandsLimit;
+
   return (
     <div className="space-y-6">
       <Section title="Активные" brands={approved} />
-      {excluded.length > 0 && <Section title="Исключённые" brands={excluded} muted />}
+      {excluded.length > 0 && (
+        <Section
+          title="Исключённые"
+          brands={excluded}
+          muted
+          restoreDisabled={limitReached}
+          brandsLimit={brandsLimit}
+        />
+      )}
     </div>
   );
 }
 
-function Section({ title, brands, muted }: { title: string; brands: Brand[]; muted?: boolean }) {
+function Section({
+  title, brands, muted, restoreDisabled, brandsLimit,
+}: {
+  title: string;
+  brands: Brand[];
+  muted?: boolean;
+  restoreDisabled?: boolean;
+  brandsLimit?: number;
+}) {
   return (
     <div>
       <h3 className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-3">
@@ -42,22 +70,48 @@ function Section({ title, brands, muted }: { title: string; brands: Brand[]; mut
       </h3>
       <div className="rounded-2xl border border-line bg-paper overflow-hidden">
         {brands.map((b, i) => (
-          <BrandRow key={b.id} brand={b} muted={muted} last={i === brands.length - 1} />
+          <BrandRow
+            key={b.id}
+            brand={b}
+            muted={muted}
+            last={i === brands.length - 1}
+            restoreDisabled={restoreDisabled}
+            brandsLimit={brandsLimit}
+          />
         ))}
       </div>
     </div>
   );
 }
 
-function BrandRow({ brand, muted, last }: { brand: Brand; muted?: boolean; last: boolean }) {
+function BrandRow({
+  brand, muted, last, restoreDisabled, brandsLimit,
+}: {
+  brand: Brand;
+  muted?: boolean;
+  last: boolean;
+  restoreDisabled?: boolean;
+  brandsLimit?: number;
+}) {
   const [pending, startTransition] = useTransition();
+
+  const isExcluded = brand.status === "excluded";
+  // Только для excluded строк, и только если лимит достигнут — блокируем
+  const buttonDisabled = pending || (isExcluded && !!restoreDisabled);
 
   const onAction = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    if (buttonDisabled) return;
     startTransition(async () => {
-      if (brand.status === "approved") await actionExcludeBrand(brand.id);
-      else await actionApproveBrand(brand.id);
+      try {
+        if (brand.status === "approved") await actionExcludeBrand(brand.id);
+        else await actionApproveBrand(brand.id);
+      } catch (err: any) {
+        // server-side проверка лимита в actionApproveBrand даст
+        // понятную ошибку — алертом, без молчаливого падения
+        alert(err?.message ?? "Ошибка");
+      }
     });
   };
 
@@ -67,7 +121,9 @@ function BrandRow({ brand, muted, last }: { brand: Brand; muted?: boolean; last:
         href={`/dashboard/radar/brands/${brand.id}` as any}
         className="flex items-center gap-3 min-w-0 flex-1 group"
       >
-        <span className={`font-medium ${muted ? "text-ink-muted line-through" : "text-ink group-hover:text-lime-deep"} truncate transition`}>
+        {/* line-through убран по правкам Александра 01.06.2026 —
+            достаточно opacity-60 на родителе чтобы выглядело "неактивно" */}
+        <span className={`font-medium ${muted ? "text-ink-muted" : "text-ink group-hover:text-lime-deep"} truncate transition`}>
           {brand.name}
         </span>
         <span className={`font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
@@ -86,8 +142,11 @@ function BrandRow({ brand, muted, last }: { brand: Brand; muted?: boolean; last:
       </Link>
       <button
         onClick={onAction}
-        disabled={pending}
-        className={`text-xs font-mono uppercase tracking-wider px-3 py-1.5 rounded transition ${
+        disabled={buttonDisabled}
+        title={isExcluded && restoreDisabled
+          ? `Лимит исчерпан (${brandsLimit ?? 0} брендов). Исключите другой бренд или перейдите на старший тариф.`
+          : undefined}
+        className={`text-xs font-mono uppercase tracking-wider px-3 py-1.5 rounded transition disabled:opacity-40 disabled:cursor-not-allowed ${
           brand.status === "approved"
             ? "text-ink-muted hover:text-orange border border-line hover:border-orange/40"
             : "text-lime-deep border border-lime-deep/40 hover:bg-lime-soft"
