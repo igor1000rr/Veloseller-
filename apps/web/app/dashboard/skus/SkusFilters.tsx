@@ -11,13 +11,19 @@ export type FilterRanges = {
   oosMax: number;
   lostMin: number;
   lostMax: number;
+  coverageMin: number;
+  coverageMax: number;
 };
 
 /**
  * Серая плашка раскрытых фильтров.
  *
- * Поля «Период» всегда заполнены датами (defaultDateFrom/defaultDateTo).
- * Если передан preHolidayLabel — показываем ярлык предпраздничного периода.
+ * Александр 01.06.2026 (правки 7):
+ *  - "Дней OOS" → "Дней без наличия"
+ *  - "Out-of-stock..." → "Дней без наличия за выбранный период"
+ *  - "velocity × stockout × price" → формула на русском
+ *  - Новый фильтр "Дней до окончания остатков" (по coverage_days)
+ *  - Кнопка «Рассчитать» — psycologically даёт пользователю явный триггер
  */
 export function SkusFilters({
   warehouseCreatedAt,
@@ -34,7 +40,6 @@ export function SkusFilters({
   showInactiveToggle: boolean;
   defaultDateFrom: string;
   defaultDateTo: string;
-  /** Напр. «🎁 Предпраздничный: 14 дней до Нового года». Не показываем если null. */
   preHolidayLabel?: string | null;
 }) {
   const router = useRouter();
@@ -47,6 +52,8 @@ export function SkusFilters({
   const [oosMax, setOosMax] = useState(sp.get("oos_max") ?? "");
   const [lostMin, setLostMin] = useState(sp.get("lost_min") ?? "");
   const [lostMax, setLostMax] = useState(sp.get("lost_max") ?? "");
+  const [coverageMin, setCoverageMin] = useState(sp.get("coverage_min") ?? "");
+  const [coverageMax, setCoverageMax] = useState(sp.get("coverage_max") ?? "");
   const [dateFrom, setDateFrom] = useState(sp.get("date_from") || defaultDateFrom);
   const [dateTo, setDateTo] = useState(sp.get("date_to") || defaultDateTo);
 
@@ -67,6 +74,19 @@ export function SkusFilters({
     debounceRef.current = setTimeout(() => pushUpdate(updates), 350);
   }
 
+  function recalculateNow() {
+    // Принудительно применяем все текущие значения формы — для кнопки "Рассчитать".
+    // Александр 01.06.2026: "психологически понятнее — нажал → получил расчёт".
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    pushUpdate({
+      stock_min: stockMin, stock_max: stockMax,
+      oos_min: oosMin,     oos_max: oosMax,
+      lost_min: lostMin,   lost_max: lostMax,
+      coverage_min: coverageMin, coverage_max: coverageMax,
+      date_from: dateFrom, date_to: dateTo,
+    });
+  }
+
   function toggleInactive() {
     pushUpdate({ include_inactive: includeInactive ? "" : "1" });
   }
@@ -82,6 +102,8 @@ export function SkusFilters({
     setOosMax(sp.get("oos_max") ?? "");
     setLostMin(sp.get("lost_min") ?? "");
     setLostMax(sp.get("lost_max") ?? "");
+    setCoverageMin(sp.get("coverage_min") ?? "");
+    setCoverageMax(sp.get("coverage_max") ?? "");
     setDateFrom(sp.get("date_from") || defaultDateFrom);
     setDateTo(sp.get("date_to") || defaultDateTo);
   }, [sp, defaultDateFrom, defaultDateTo]);
@@ -121,6 +143,13 @@ export function SkusFilters({
               onChange={e => { setDateTo(e.target.value); scheduleUpdate({ date_to: e.target.value }); }}
               className="flex-1 sm:flex-initial min-w-[140px] px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
             />
+            <button
+              type="button"
+              onClick={recalculateNow}
+              className="px-4 py-1.5 rounded-lg bg-ink text-paper font-mono text-xs uppercase tracking-wider font-semibold hover:bg-ink-soft transition min-h-[36px]"
+            >
+              Рассчитать
+            </button>
           </div>
         </div>
 
@@ -150,7 +179,7 @@ export function SkusFilters({
         Период расчёта скорости продаж. По умолчанию — последние 30 дней. Перед праздниками автоматически сужается до предпраздничного окна.
       </p>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
         <RangeField
           label="Наличие"
           hint="Текущий остаток на складе"
@@ -162,8 +191,8 @@ export function SkusFilters({
           onMaxChange={v => { setStockMax(v); scheduleUpdate({ stock_max: v }); }}
         />
         <RangeField
-          label="Дней OOS"
-          hint="Out-of-stock дней за выбранный период"
+          label="Дней без наличия"
+          hint="Дней без наличия за выбранный период"
           minPlaceholder={String(ranges.oosMin)}
           maxPlaceholder={String(ranges.oosMax)}
           minVal={oosMin}
@@ -173,13 +202,25 @@ export function SkusFilters({
         />
         <RangeField
           label="Потерянная выручка, ₽"
-          hint="velocity × stockout × price"
+          hint="Скорость продаж TVelo × Дни без наличия × Цена"
           minPlaceholder={Math.round(ranges.lostMin).toString()}
           maxPlaceholder={Math.round(ranges.lostMax).toString()}
           minVal={lostMin}
           maxVal={lostMax}
           onMinChange={v => { setLostMin(v); scheduleUpdate({ lost_min: v }); }}
           onMaxChange={v => { setLostMax(v); scheduleUpdate({ lost_max: v }); }}
+        />
+        {/* Новый фильтр (Александр 01.06.2026): "Дней до окончания остатков"
+            по столбцу coverage_days. Очень важный для закупок. */}
+        <RangeField
+          label="Дней до окончания остатков"
+          hint="Для расчёта закупки по средней скорости продаж TVelo"
+          minPlaceholder={String(ranges.coverageMin)}
+          maxPlaceholder={String(ranges.coverageMax)}
+          minVal={coverageMin}
+          maxVal={coverageMax}
+          onMinChange={v => { setCoverageMin(v); scheduleUpdate({ coverage_min: v }); }}
+          onMaxChange={v => { setCoverageMax(v); scheduleUpdate({ coverage_max: v }); }}
         />
       </div>
     </div>
