@@ -9,13 +9,6 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 // Radar v2 (29.05.2026, план Александра): только 3 вкладки.
-// new      — Wordstat фраза brand+model которой нет в прайсе селлера.
-//             Это кандидат на новинку для закупки.
-// watching — пользователь добавил в избранное.
-// archived — model уже в прайсе селлера (продаёт), или ручной архив,
-//             или автоархив после 30 дней без обновлений.
-// Статус 'early' убран — раньше был для случаев когда Wordstat есть,
-// suggest пусто; теперь suggest WB/Ozon не используется.
 export type RadarTab = "new" | "watching" | "archived";
 
 const TAB_TITLES: Record<RadarTab, string> = {
@@ -24,9 +17,13 @@ const TAB_TITLES: Record<RadarTab, string> = {
   archived: "Архив",
 };
 
-// Тарифы Radar (rub/мес, лимит брендов).
-// Должны совпадать с PLAN_RADAR_LIMITS в lib/radar-plans.ts (если есть)
-// и с тарифами в Robokassa.
+// Empty state по каждой вкладке. Тексты Александра 01.06.2026.
+const TAB_EMPTY_STATES: Record<RadarTab, string> = {
+  new:      "Во вкладке «Новые» пока пусто. Данные обновляются и сравниваются с вашим прайсом раз в 3 дня.",
+  watching: "Во вкладке «Наблюдение» пока пусто. Вы можете использовать эту вкладку, если хотите отложить решение по новой модели.",
+  archived: "Во вкладке «Архив» пока пусто. Здесь будут храниться уже обработанные запросы.",
+};
+
 const RADAR_TIERS: Array<{ id: string; name: string; limit: number; price: number }> = [
   { id: "trial",  name: "Trial",   limit: 3,   price: 0 },
   { id: "start",  name: "Старт",   limit: 3,   price: 900 },
@@ -36,17 +33,15 @@ const RADAR_TIERS: Array<{ id: string; name: string; limit: number; price: numbe
 ];
 
 function getNextTier(currentLimit: number, untrackedCount: number) {
-  // Ищем минимальный tier который покрывает (current + untracked).
   const needed = currentLimit + untrackedCount;
   return RADAR_TIERS.find(t => t.limit >= needed)
-      ?? RADAR_TIERS[RADAR_TIERS.length - 1];  // если нужно > 100, всё равно ведём на expert
+      ?? RADAR_TIERS[RADAR_TIERS.length - 1];
 }
 
 export default async function RadarPage({ searchParams }: {
   searchParams: Promise<{ tab?: string; brand?: string; welcome?: string }>;
 }) {
   const sp = await searchParams;
-  // Дефолтный таб — 'new' (раньше был 'early'). Это самые ценные сигналы.
   const tab: RadarTab = (["new", "watching", "archived"].includes(sp.tab ?? "") ? sp.tab : "new") as RadarTab;
   const brandFilter = sp.brand || null;
   const isWelcome = sp.welcome === "1";
@@ -55,7 +50,6 @@ export default async function RadarPage({ searchParams }: {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  // Проверяем доступ к Radar — radar_plan != 'none' OR active trial.
   const { data: seller } = await supabase
     .from("sellers")
     .select("radar_plan, radar_brands_limit, radar_active_until, radar_trial_started_at")
@@ -65,13 +59,12 @@ export default async function RadarPage({ searchParams }: {
   const hasAccess = seller && seller.radar_plan && seller.radar_plan !== "none"
     && (!seller.radar_active_until || new Date(seller.radar_active_until) > new Date());
 
-  // Считаем количество брендов и запросов в каждом статусе для бейджей вкладок.
   const [brandsRes, countsRes] = await Promise.all([
     supabase
       .from("radar_brands")
       .select("id, name, status, sku_count, source")
       .eq("seller_id", user.id)
-      .order("status", { ascending: true })  // approved сначала
+      .order("status", { ascending: true })
       .order("sku_count", { ascending: false, nullsFirst: false })
       .order("name"),
     supabase
@@ -83,16 +76,12 @@ export default async function RadarPage({ searchParams }: {
   const approvedBrands = brands.filter(b => b.status === "approved");
   const excludedBrands = brands.filter(b => b.status === "excluded");
 
-  // Группируем counts по status — только 3 вкладки v2.
-  // Старые записи со status='early' (если есть от v1) считаем как 'new'.
   const tabCounts: Record<RadarTab, number> = { new: 0, watching: 0, archived: 0 };
   for (const row of (countsRes.data ?? []) as any[]) {
     const status = row.status === "early" ? "new" : row.status;
     if (status in tabCounts) tabCounts[status as RadarTab]++;
   }
 
-  // Selected tab → запрос рядов через view radar_queries_view (с brand_name + derived).
-  // Для tab='new' включаем также legacy 'early' записи (backward compat).
   let queries: any[] = [];
   if (hasAccess && approvedBrands.length > 0) {
     const statuses = tab === "new" ? ["new", "early"] : [tab];
@@ -116,8 +105,8 @@ export default async function RadarPage({ searchParams }: {
             Radar
           </h1>
           <p className="mt-1.5 text-sm text-ink-muted max-w-2xl">
-            Сопоставляем спрос из Wordstat с вашим прайсом. Показываем
-            <span className="text-ink"> новинки</span>, которых у вас ещё нет — кандидаты для закупки.
+            Отслеживаем новинки по вашим брендам.
+            <span className="text-ink"> Закупайтесь</span> быстрее конкурентов.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -136,8 +125,6 @@ export default async function RadarPage({ searchParams }: {
         </div>
       </div>
 
-      {/* Welcome-баннер после активации триала (?welcome=1).
-          Закрытие — через ссылку на /dashboard/radar без параметра. */}
       {isWelcome && hasAccess && approvedBrands.length === 0 && (
         <WelcomeBanner plan={seller?.radar_plan ?? ""} />
       )}
@@ -158,16 +145,15 @@ export default async function RadarPage({ searchParams }: {
             brands={approvedBrands}
             brandFilter={brandFilter}
             currentTabTitle={TAB_TITLES[tab]}
+            emptyStateMessage={TAB_EMPTY_STATES[tab]}
           />
 
-          {/* Teaser-секция: бренды которые селлер загрузил, но НЕ подключил к
-              отслеживанию (excluded). Фишка Александра 29.05.2026 — даёт FOMO
-              «а не пропускаю ли я что-то по этим брендам». Драйвер апгрейда тарифа. */}
           {excludedBrands.length > 0 && (
             <UntrackedBrandsTeaser
               excluded={excludedBrands}
               currentPlan={seller?.radar_plan ?? ""}
               currentLimit={seller?.radar_brands_limit ?? 0}
+              approvedCount={approvedBrands.length}
             />
           )}
         </>
@@ -180,15 +166,21 @@ function UntrackedBrandsTeaser({
   excluded,
   currentPlan,
   currentLimit,
+  approvedCount,
 }: {
   excluded: Array<{ id: string; name: string; sku_count: number | null; source: string }>;
   currentPlan: string;
   currentLimit: number;
+  /** Сколько approved брендов уже занято — для disabled плашек если лимит исчерпан */
+  approvedCount: number;
 }) {
   const nextTier = getNextTier(currentLimit, excluded.length);
   const isMaxTier = nextTier.id === "expert" && currentPlan === "expert";
+  // Если approved уже >= limit, восстановление поверх лимита запрещено — это
+  // фикс бага Александра 01.06.2026 (из excluded можно было восстановить
+  // даже когда нет свободных слотов).
+  const limitReached = approvedCount >= currentLimit;
 
-  // Показ ограничен до 30 брендов чтобы не было визуального переполнения.
   const DISPLAY_LIMIT = 30;
   const visible = excluded.slice(0, DISPLAY_LIMIT);
   const hiddenCount = excluded.length - visible.length;
@@ -240,7 +232,9 @@ function UntrackedBrandsTeaser({
             key={b.id}
             href={`/dashboard/radar/brands/${b.id}` as any}
             className="group relative rounded-lg border border-line bg-paper/70 px-3 py-2.5 hover:bg-paper hover:border-orange/40 transition"
-            title="Бренд не отслеживается. Подключите тариф чтобы видеть сигналы."
+            title={limitReached
+              ? "Лимит брендов исчерпан. Перейдите на старший тариф или исключите другой бренд."
+              : "Бренд не отслеживается. Подключите тариф чтобы видеть сигналы."}
           >
             <div className="font-medium text-ink-muted group-hover:text-ink text-sm truncate transition">
               {b.name}
