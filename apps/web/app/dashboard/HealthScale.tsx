@@ -8,7 +8,6 @@
  *
  * Правка 4.1 Александра (Правки 4): SKU без активности исключаются
  * из расчёта на бекенде (apps/worker/app/jobs/recalc.py::_write_store_metrics).
- * Информация про это выводится в тултипе HealthScoreBlock.
  */
 import { InfoTooltip } from "../_components/InfoTooltip";
 
@@ -50,20 +49,29 @@ export function HealthScale({
 /**
  * Большой блок здоровья склада: число + бейдж шкалы + визуальная полоска.
  *
- * Mobile-friendly: число адаптивное (2.5rem на мобиле, 3.25rem на десктопе),
- * padding p-4 на мобиле.
+ * tooltip пропом — текст для (i) рядом с заголовком. Если не передан,
+ * фолбэк к стандартному. Александр 01.06.2026 правил формулировку.
  */
-export function HealthScoreBlock({ score }: { score: number | null | undefined }) {
+export function HealthScoreBlock({
+  score,
+  tooltip,
+}: {
+  score: number | null | undefined;
+  tooltip?: string;
+}) {
   const v = score == null ? null : Number(score);
   const tier = v == null ? null : pickTier(v);
   const pct = v == null ? 0 : Math.max(0, Math.min(100, v));
+
+  const tooltipText = tooltip
+    ?? "Взвешенная оценка состояния здоровья склада. SKU без активности не участвуют в расчёте.";
 
   return (
     <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold flex items-center">
           Состояние склада
-          <InfoTooltip text="Взвешенная оценка здоровья склада (0-100): health_score по SKU взвешивается по стоимости остатка, из этого вычитается вес дефицитных SKU. SKU без активности (нет остатка и нет движений за 30 дней) в расчёт не включаются." />
+          <InfoTooltip text={tooltipText} />
         </div>
         <HealthScale score={v} size="md" />
       </div>
@@ -81,7 +89,6 @@ export function HealthScoreBlock({ score }: { score: number | null | undefined }
         <span className="text-ink-hush font-mono text-base sm:text-lg">/100</span>
       </div>
 
-      {/* Шкала-полоска с отметками границ тиров (40/60/75/90) */}
       <div className="mt-5 relative">
         <div className="h-2 rounded-full bg-bg-soft border border-line overflow-hidden">
           <div className="h-full bg-gradient-to-r from-rose via-orange to-lime-deep" style={{ width: "100%" }} />
