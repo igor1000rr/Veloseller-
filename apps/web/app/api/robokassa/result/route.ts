@@ -9,7 +9,7 @@ import {
   type VeloseLLerPlan,
   type RadarPlan,
 } from "@/lib/robokassa";
-import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { enforceRateLimitDurable, RATE_LIMITS } from "@/lib/rate-limit";
 
 /**
  * Result URL для Robokassa — webhook о успешной оплате.
@@ -25,7 +25,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  */
 
 async function handle(req: NextRequest): Promise<Response> {
-  const limited = enforceRateLimit(req, RATE_LIMITS.WEBHOOK);
+  const limited = await enforceRateLimitDurable(req, RATE_LIMITS.WEBHOOK);
   if (limited) return new Response("FAIL: rate limit", { status: 429 });
 
   let outSum: string | null = null;
