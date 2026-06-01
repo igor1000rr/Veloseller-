@@ -52,11 +52,17 @@ export default function AppHeader({
   // - <xl (1280px): бургер меню. На MacBook 13"/14" (1280-1440) navigation из 9 ссылок +
   //   правый блок (selector + PRO + email + ADMIN + logout) не помещаются, всё сжимается и
   //   имя склада обрезается до "T...". С xl+ показываем развёрнутую навигацию.
+  //
+  // 01.06.2026 (Александр): убрал счётчик SKU с пункта "Отчёты". Раньше показывал
+  // unreadAlerts из таблицы alerts старого формата (3272 у Александра) — это сбивало
+  // с толку, потому что "Отчёты" теперь = история отправленных файлов (report_history),
+  // к необработанным алертам отношения не имеет. unreadAlerts проп оставлен в сигнатуре
+  // — может пригодиться для других пунктов меню позже.
   const links = variant === "dashboard"
     ? [
         { href: "/dashboard",           label: "Обзор" },
         { href: "/dashboard/skus",      label: "SKU" },
-        { href: "/dashboard/alerts",    label: "Отчёты", badge: unreadAlerts },
+        { href: "/dashboard/alerts",    label: "Отчёты" },
         { href: "/dashboard/dynamics",  label: "Динамика" },
         { href: "/dashboard/changelog", label: "Журнал" },
         { href: "/dashboard/radar",     label: "Radar", isNew: true },
