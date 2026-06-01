@@ -56,15 +56,28 @@ jobs:
         with:
           node-version: "22"
       - run: npm install --legacy-peer-deps --no-audit --no-fund
-      # TypeScript проверка — раньше не было в CI, а next.config.mjs стоит ignoreBuildErrors: true.
-      # continue-on-error чтобы не блокировать deploy на существующих TS-ошибках —
-      # их Игорь будет постепенно вычищать (видно в Actions Summary).
+      # TypeScript/ESLint пока НЕ блокируют деплой: есть бэклог ошибок, который
+      # чистится постепенно. Здесь считаем число ошибок и пишем в Summary, чтобы
+      # бэклог был виден и его можно было гнать вниз (ratchet).
+      #
+      # КАК СДЕЛАТЬ БЛОКИРУЮЩИМ (когда счётчик дойдёт до 0): убрать у шага
+      # `continue-on-error: true`. ВНИМАНИЕ: deploy.yml гейтится на success CI
+      # (workflow_run → conclusion == 'success'), поэтому блокирующий typecheck
+      # при НЕнулевом бэклоге остановит ВСЕ деплои. Включать только при чистом tsc.
       - name: typecheck (tsc --noEmit)
         continue-on-error: true
-        run: npm run typecheck
+        run: |
+          npm run typecheck 2>&1 | tee /tmp/tsc.log || true
+          ERRORS=$(grep -c "error TS" /tmp/tsc.log || true)
+          echo "## TypeScript: ${ERRORS} ошибок (пока не блокирует)" >> "$GITHUB_STEP_SUMMARY"
+          echo "TS errors: ${ERRORS}"
       - name: lint (next lint)
         continue-on-error: true
-        run: npm run lint
+        run: |
+          npm run lint 2>&1 | tee /tmp/lint.log || true
+          ISSUES=$(grep -cE "Warning:|Error:" /tmp/lint.log || true)
+          echo "## ESLint: ${ISSUES} замечаний (пока не блокирует)" >> "$GITHUB_STEP_SUMMARY"
+          echo "ESLint issues: ${ISSUES}"
       - name: vitest + coverage
         run: npm run test:coverage
       - name: Coverage summary в GitHub Actions Summary
