@@ -4,17 +4,12 @@ import { useState, useTransition } from "react";
 import type { RadarTab } from "./page";
 import { actionToggleFavorite, actionArchiveQuery, actionUnarchiveQuery } from "./actions";
 
-// Radar v2 (29.05.2026): убраны WB/OZON колонки. Suggest больше не
-// используется как источник сигналов — статус new/archived определяется
-// сопоставлением Wordstat-фразы с моделями селлера из radar_price_models.
-// Поля present_in_wb/present_in_ozon остаются в БД (nullable) для
-// возможной англоязычной версии в будущем.
 type QueryRow = {
   id: string;
   brand_id: string;
   brand_name: string;
   query_text: string;
-  status: RadarTab | "early";  // "early" — legacy от v1, эффективно = "new"
+  status: RadarTab | "early";
   current_frequency: number | null;
   trend_pct: number | null;
   is_favorite: boolean;
@@ -24,13 +19,16 @@ type QueryRow = {
 };
 
 export default function RadarTable({
-  queries, tab, brands, brandFilter, currentTabTitle,
+  queries, tab, brands, brandFilter, currentTabTitle, emptyStateMessage,
 }: {
   queries: QueryRow[];
   tab: RadarTab;
   brands: Array<{ id: string; name: string; sku_count: number | null }>;
   brandFilter: string | null;
   currentTabTitle: string;
+  /** Текст empty state передаётся снаружи — у каждой вкладки свой текст
+      (см. TAB_EMPTY_STATES в page.tsx). Если не передан, фолбэк. */
+  emptyStateMessage?: string;
 }) {
   const [search, setSearch] = useState("");
 
@@ -40,9 +38,10 @@ export default function RadarTable({
         q.brand_name.toLowerCase().includes(search.toLowerCase()))
     : queries;
 
+  const defaultEmptyMessage = `Во вкладке «${currentTabTitle}» пока пусто. Данные появятся после следующего опроса.`;
+
   return (
     <div className="space-y-3">
-      {/* Фильтры */}
       <div className="flex items-center gap-2 flex-wrap">
         <input
           type="text"
@@ -57,11 +56,10 @@ export default function RadarTable({
         </div>
       </div>
 
-      {/* Таблица */}
       {filtered.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-line bg-paper p-8 text-center text-sm text-ink-muted">
           {queries.length === 0
-            ? `Во вкладке «${currentTabTitle}» пока пусто. Worker сравнивает Wordstat с вашим прайсом раз в 3 дня — данные появятся после следующего опроса.`
+            ? (emptyStateMessage ?? defaultEmptyMessage)
             : "Под фильтр ничего не подходит."}
         </div>
       ) : (
@@ -165,7 +163,6 @@ function BrandPicker({
 }) {
   const buildHref = (brandId: string | null) => {
     const params = new URLSearchParams();
-    // Дефолтный таб теперь 'new' (раньше был 'early')
     if (tab !== "new") params.set("tab", tab);
     if (brandId) params.set("brand", brandId);
     const qs = params.toString();
