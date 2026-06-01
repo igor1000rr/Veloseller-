@@ -19,6 +19,7 @@ from app.logger import JsonFormatter, setup_logger
 from app.radar.api import router as radar_router
 from app.schemas import SnapshotInput, SourceType
 from app.sources import csv_upload, feed as feed_src, google_sheet, ozon, wildberries
+from app.telegram_link import verify_telegram_link_token
 
 _root = logging.getLogger()
 if not any(isinstance(h.formatter, JsonFormatter) for h in _root.handlers if h.formatter):
@@ -812,19 +813,22 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         return {"ok": True}
     if text.startswith("/start"):
         parts = text.split(maxsplit=1)
-        if len(parts) == 2 and parts[1]:
-            seller_id = parts[1].strip()
-            if _UUID_RE.match(seller_id):
-                try:
-                    sb = get_supabase()
-                    res = sb.table("sellers").update({
-                        "telegram_chat_id": chat_id, "notify_telegram": True,
-                    }).eq("id", seller_id).execute()
-                    if res.data:
-                        send_message(chat_id, "✅ <b>Telegram подключён!</b>\n\nТеперь вы будете получать ежедневный digest по важным уведомлениям.")
-                        return {"ok": True, "linked": True}
-                except Exception:
-                    logger.exception("telegram linking failed", extra={"chat_id": chat_id})
+        # Привязываем ТОЛЬКО по подписанному токену (см. app.telegram_link).
+        # Сырой UUID больше не принимаем — это закрывает hijack чужой привязки:
+        # раньше любой, кто знал seller_id, мог перенаправить чужие уведомления
+        # себе через /start <uuid>.
+        seller_id = verify_telegram_link_token(parts[1].strip()) if len(parts) == 2 and parts[1] else None
+        if seller_id:
+            try:
+                sb = get_supabase()
+                res = sb.table("sellers").update({
+                    "telegram_chat_id": chat_id, "notify_telegram": True,
+                }).eq("id", seller_id).execute()
+                if res.data:
+                    send_message(chat_id, "✅ <b>Telegram подключён!</b>\n\nТеперь вы будете получать ежедневный digest по важным уведомлениям.")
+                    return {"ok": True, "linked": True}
+            except Exception:
+                logger.exception("telegram linking failed", extra={"chat_id": chat_id})
         send_message(chat_id, "Привет! Я бот <b>Veloseller</b>. Чтобы подключить уведомления, откройте Veloseller и нажмите кнопку «Подключить Telegram» в настройках.")
         return {"ok": True, "linked": False}
     return {"ok": True}
