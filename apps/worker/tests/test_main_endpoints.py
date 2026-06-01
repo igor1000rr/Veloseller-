@@ -1,6 +1,9 @@
 """Тесты FastAPI endpoints в app/main.py."""
 from __future__ import annotations
+import hashlib
+import hmac
 import os
+import time
 os.environ["ENABLE_SCHEDULER"] = "false"
 
 from unittest.mock import MagicMock, patch
@@ -18,6 +21,20 @@ SECOND_UUID = "11111111-2222-3333-4444-555555555555"
 
 TELEGRAM_TEST_SECRET = "test-telegram-secret"
 TELEGRAM_TEST_HEADERS = {"X-Telegram-Bot-Api-Secret-Token": TELEGRAM_TEST_SECRET}
+
+TELEGRAM_LINK_TEST_SECRET = "test-link-secret"
+
+
+def _mint_link_token(seller_id: str, ttl: int = 1800, secret: str = TELEGRAM_LINK_TEST_SECRET) -> str:
+    """Генерит валидный подписанный токен привязки — как apps/web/lib/telegram-link.ts.
+
+    Формат: <uuidHex32>_<expHex>_<sigHex16>, sig = HMAC_SHA256(msg, secret)[:16].
+    """
+    uuid_hex = seller_id.replace("-", "").lower()
+    exp_hex = format(int(time.time()) + ttl, "x")
+    msg = f"{uuid_hex}_{exp_hex}"
+    sig = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()[:16]
+    return f"{msg}_{sig}"
 
 
 class TestHealth:
@@ -267,14 +284,20 @@ class TestRecalcJobs:
 
 
 class TestTelegramWebhook:
-    """SECURITY: TELEGRAM_WEBHOOK_SECRET требуется всегда (fail-closed)."""
+    """SECURITY: TELEGRAM_WEBHOOK_SECRET требуется всегда (fail-closed).
+
+    Привязка только по подписанному токену (TELEGRAM_LINK_SECRET) — сырой UUID
+    больше не принимается (закрытый hijack).
+    """
 
     def setup_method(self):
         os.environ["TELEGRAM_WEBHOOK_SECRET"] = TELEGRAM_TEST_SECRET
+        os.environ["TELEGRAM_LINK_SECRET"] = TELEGRAM_LINK_TEST_SECRET
         os.environ.pop("ENV", None)
 
     def teardown_method(self):
         os.environ.pop("TELEGRAM_WEBHOOK_SECRET", None)
+        os.environ.pop("TELEGRAM_LINK_SECRET", None)
         os.environ.pop("ENV", None)
 
     def test_empty_body_returns_ok_false(self):
@@ -298,11 +321,25 @@ class TestTelegramWebhook:
         assert r.json()["linked"] is False
         send.assert_called_once()
 
-    def test_start_with_valid_uuid_links_account(self):
+    def test_start_with_valid_signed_token_links_account(self):
         mock_sb = MagicMock()
         mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
             data=[{"id": VALID_UUID, "telegram_chat_id": "777"}]
         )
+        token = _mint_link_token(VALID_UUID)
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.telegram.send_message", return_value=True):
+            r = client.post(
+                "/telegram/webhook",
+                json={"message": {"text": f"/start {token}", "chat": {"id": 777}}},
+                headers=TELEGRAM_TEST_HEADERS,
+            )
+        assert r.status_code == 200
+        assert r.json()["linked"] is True
+
+    def test_start_with_raw_uuid_rejected(self):
+        """SECURITY: сырой UUID больше не привязывает аккаунт (закрытый hijack)."""
+        mock_sb = MagicMock()
         with patch("app.main.get_supabase", return_value=mock_sb), \
              patch("app.telegram.send_message", return_value=True):
             r = client.post(
@@ -311,7 +348,23 @@ class TestTelegramWebhook:
                 headers=TELEGRAM_TEST_HEADERS,
             )
         assert r.status_code == 200
-        assert r.json()["linked"] is True
+        assert r.json()["linked"] is False
+        mock_sb.table.assert_not_called()
+
+    def test_start_with_expired_token_rejected(self):
+        """Просроченный подписанный токен не привязывает."""
+        mock_sb = MagicMock()
+        token = _mint_link_token(VALID_UUID, ttl=-10)
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.telegram.send_message", return_value=True):
+            r = client.post(
+                "/telegram/webhook",
+                json={"message": {"text": f"/start {token}", "chat": {"id": 777}}},
+                headers=TELEGRAM_TEST_HEADERS,
+            )
+        assert r.status_code == 200
+        assert r.json()["linked"] is False
+        mock_sb.table.assert_not_called()
 
     def test_start_with_invalid_uuid_shows_help(self):
         mock_sb = MagicMock()
