@@ -56,28 +56,28 @@ jobs:
         with:
           node-version: "22"
       - run: npm install --legacy-peer-deps --no-audit --no-fund
-      # TypeScript/ESLint пока НЕ блокируют деплой: есть бэклог ошибок, который
-      # чистится постепенно. Здесь считаем число ошибок и пишем в Summary, чтобы
-      # бэклог был виден и его можно было гнать вниз (ratchet).
-      #
-      # КАК СДЕЛАТЬ БЛОКИРУЮЩИМ (когда счётчик дойдёт до 0): убрать у шага
-      # `continue-on-error: true`. ВНИМАНИЕ: deploy.yml гейтится на success CI
-      # (workflow_run → conclusion == 'success'), поэтому блокирующий typecheck
-      # при НЕнулевом бэклоге остановит ВСЕ деплои. Включать только при чистом tsc.
+      # TypeScript/ESLint теперь БЛОКИРУЮТ CI (ratchet завершён). Шаги по-прежнему
+      # пишут число ошибок в Summary, но падают (exit $STATUS), если ошибки есть.
+      # ВНИМАНИЕ: deploy.yml гейтится на success CI — если в коде остались TS/lint
+      # ошибки, этот PR покраснеет (и мержить его не надо, пока не вычистите).
       - name: typecheck (tsc --noEmit)
-        continue-on-error: true
         run: |
-          npm run typecheck 2>&1 | tee /tmp/tsc.log || true
+          set +e
+          npm run typecheck 2>&1 | tee /tmp/tsc.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
           ERRORS=$(grep -c "error TS" /tmp/tsc.log || true)
-          echo "## TypeScript: ${ERRORS} ошибок (пока не блокирует)" >> "$GITHUB_STEP_SUMMARY"
-          echo "TS errors: ${ERRORS}"
+          echo "## TypeScript: ${ERRORS} ошибок" >> "$GITHUB_STEP_SUMMARY"
+          exit $STATUS
       - name: lint (next lint)
-        continue-on-error: true
         run: |
-          npm run lint 2>&1 | tee /tmp/lint.log || true
+          set +e
+          npm run lint 2>&1 | tee /tmp/lint.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
           ISSUES=$(grep -cE "Warning:|Error:" /tmp/lint.log || true)
-          echo "## ESLint: ${ISSUES} замечаний (пока не блокирует)" >> "$GITHUB_STEP_SUMMARY"
-          echo "ESLint issues: ${ISSUES}"
+          echo "## ESLint: ${ISSUES} замечаний" >> "$GITHUB_STEP_SUMMARY"
+          exit $STATUS
       - name: vitest + coverage
         run: npm run test:coverage
       - name: Coverage summary в GitHub Actions Summary
