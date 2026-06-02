@@ -1,0 +1,63 @@
+/**
+ * Централизованные фича-флаги деплоя Veloseller.
+ *
+ * Один репозиторий — две версии, поведение задаётся env на каждом сервере:
+ *   • veloseller.ru (РФ):  LOCALE=ru,  маркетплейсы Ozon+WB,   Telegram off
+ *   • *.com (СНГ):         LOCALE=en,  маркетплейсы Amazon+Shopify, Telegram on
+ *
+ * ⚠️ ВСЕ ДЕФОЛТЫ = текущее поведение РФ-прода. Если переменная не задана —
+ *    ничего не меняется. .com задаёт переменные явно в своём билде.
+ *
+ * NEXT_PUBLIC_* запекаются в сборку (доступны и на клиенте), поэтому каждый
+ * деплой собирается со своими значениями — менять в рантайме нельзя, только
+ * пересборкой. Это ок: у нас два отдельных билда на двух хостингах.
+ */
+
+export type Locale = "ru" | "en";
+
+/** Язык интерфейса. Дефолт ru. Реальное подключение i18n — отдельная фаза. */
+export const LOCALE: Locale =
+  process.env.NEXT_PUBLIC_LOCALE === "en" ? "en" : "ru";
+
+function parseList(v: string | undefined, fallback: string[]): string[] {
+  if (v === undefined || v === null || v.trim() === "") return fallback;
+  return v.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
+/**
+ * Включённые маркетплейс-интеграции. Дефолт — РФ (ozon, wildberries).
+ * .com задаст NEXT_PUBLIC_ENABLED_MARKETPLACES="amazon,shopify".
+ *
+ * Важно: ручные источники (google_sheet, csv, feed) — НЕ маркетплейсы,
+ * они доступны на любом деплое и здесь не перечисляются (см. marketplaceOfWarehouseKind).
+ */
+export const ENABLED_MARKETPLACES: string[] = parseList(
+  process.env.NEXT_PUBLIC_ENABLED_MARKETPLACES,
+  ["ozon", "wildberries"],
+);
+
+/** Radar-модуль. Дефолт включён (РФ). .com может выключить через "false". */
+export const RADAR_ENABLED: boolean =
+  process.env.NEXT_PUBLIC_RADAR_ENABLED !== "false";
+
+/**
+ * К какому маркетплейсу относится тип склада.
+ * null = не-маркетплейс (ручной источник: Google Sheet / CSV / фид) — доступен всегда.
+ */
+export function marketplaceOfWarehouseKind(kind: string): string | null {
+  if (kind.startsWith("ozon")) return "ozon";
+  if (kind.startsWith("wb")) return "wildberries";
+  if (kind.startsWith("amazon")) return "amazon";
+  if (kind.startsWith("shopify")) return "shopify";
+  return null;
+}
+
+export function isMarketplaceEnabled(marketplace: string): boolean {
+  return ENABLED_MARKETPLACES.includes(marketplace.toLowerCase());
+}
+
+/** Показывать ли этот тип склада в UI. Ручные источники — всегда true. */
+export function isWarehouseKindEnabled(kind: string): boolean {
+  const mp = marketplaceOfWarehouseKind(kind);
+  return mp === null ? true : isMarketplaceEnabled(mp);
+}
