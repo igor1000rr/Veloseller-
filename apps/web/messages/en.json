@@ -5,7 +5,6 @@
   "common.close": "Close",
   "common.loading": "Loading…",
   "common.toHome": "Home",
-
   "nav.overview": "Overview",
   "nav.skus": "SKU",
   "nav.reports": "Reports",
@@ -24,7 +23,6 @@
   "nav.planShort": "Plan: {plan}",
   "nav.toDashboard": "To dashboard",
   "nav.toPersonal": "personal",
-
   "auth.email": "Email",
   "auth.password": "Password",
   "auth.forgotPassword": "Forgot password?",
@@ -49,7 +47,6 @@
   "auth.reset.title": "New password",
   "auth.reset.passwordPlaceholder": "Minimum 8 characters",
   "auth.reset.submit": "Set new password",
-
   "settings.kicker": "Settings",
   "settings.title": "Settings",
   "settings.subtitle": "Profile & notifications",
@@ -68,5 +65,25 @@
   "settings.telegram.manualHintBefore": "Or enter the Chat ID manually. Get it via ",
   "settings.telegram.manualHintAfter": ".",
   "settings.saved": "Saved",
-  "settings.saveError": "Error: {error}"
+  "settings.saveError": "Error: {error}",
+  "error.fallback.title": "Something went wrong",
+  "error.skuLimit.title": "SKU limit exceeded",
+  "error.skuLimit.currentPlan": "current plan",
+  "error.skuLimit.message": "Your «{plan}» plan allows up to {limit} SKUs. You currently have {current}. Upgrade to a higher plan — we'll automatically sync the rest.",
+  "error.action.toBilling": "Go to plans",
+  "error.ozonAuth.title": "Ozon rejected the keys",
+  "error.ozonAuth.message": "Check the Client-Id and API-Key. They must come from an active Ozon Seller account → Settings → API. The key needs at least read-only access.",
+  "error.wbAuth.title": "Wildberries rejected the token",
+  "error.wbAuth.message": "The token is invalid or expired. Get a new statistics token in your WB account → Profile → API access → Statistics.",
+  "error.permission.title": "No access",
+  "error.permission.message": "You don't have permission for this action. Sign in again or contact support.",
+  "error.marketplaceDown.title": "Marketplace temporarily unavailable",
+  "error.marketplaceDown.message": "The marketplace service isn't responding right now. This isn't on our side. Try syncing again in 5–10 minutes.",
+  "error.rateLimit.title": "Rate limit exceeded",
+  "error.rateLimit.message": "Too many requests in a short time. Wait a minute and try again.",
+  "error.network.title": "Couldn't reach the server",
+  "error.network.message": "Check your internet connection. If it's stable, our worker may be temporarily unavailable. Try again in a minute.",
+  "error.validation.title": "Check the fields",
+  "error.validation.message": "One of the fields is filled in incorrectly or left empty.",
+  "error.unknown.message": "An unexpected error occurred. If it persists, contact support."
 }

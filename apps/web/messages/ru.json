@@ -5,7 +5,6 @@
   "common.close": "Закрыть",
   "common.loading": "Загрузка…",
   "common.toHome": "На главную",
-
   "nav.overview": "Обзор",
   "nav.skus": "SKU",
   "nav.reports": "Отчёты",
@@ -24,7 +23,6 @@
   "nav.planShort": "Тариф: {plan}",
   "nav.toDashboard": "В личный кабинет",
   "nav.toPersonal": "личный",
-
   "auth.email": "Email",
   "auth.password": "Пароль",
   "auth.forgotPassword": "Забыли пароль?",
@@ -49,7 +47,6 @@
   "auth.reset.title": "Новый пароль",
   "auth.reset.passwordPlaceholder": "Минимум 8 символов",
   "auth.reset.submit": "Установить новый пароль",
-
   "settings.kicker": "Settings",
   "settings.title": "Настройки",
   "settings.subtitle": "Профиль и уведомления",
@@ -68,5 +65,25 @@
   "settings.telegram.manualHintBefore": "Или введите Chat ID вручную. Получить можно через ",
   "settings.telegram.manualHintAfter": ".",
   "settings.saved": "Сохранено",
-  "settings.saveError": "Ошибка: {error}"
+  "settings.saveError": "Ошибка: {error}",
+  "error.fallback.title": "Что-то пошло не так",
+  "error.skuLimit.title": "Лимит SKU превышен",
+  "error.skuLimit.currentPlan": "текущий план",
+  "error.skuLimit.message": "Тариф «{plan}» позволяет до {limit} SKU. Сейчас у вас {current}. Перейдите на тариф выше — мы автоматически досинхронизируем остальные товары.",
+  "error.action.toBilling": "Перейти к тарифам",
+  "error.ozonAuth.title": "Ozon не принял ключи",
+  "error.ozonAuth.message": "Проверьте Client-Id и API-Key. Они должны быть из активного личного кабинета Ozon Seller → Настройки → API. Ключ должен иметь хотя бы read-only доступ.",
+  "error.wbAuth.title": "Wildberries не принял токен",
+  "error.wbAuth.message": "Токен невалидный или истёк. Получите новый статистический токен в кабинете WB → Профиль → Доступ к API → Статистика.",
+  "error.permission.title": "Нет доступа",
+  "error.permission.message": "У вас нет прав на это действие. Войдите заново или обратитесь в поддержку.",
+  "error.marketplaceDown.title": "Маркетплейс временно недоступен",
+  "error.marketplaceDown.message": "Сервис маркетплейса сейчас не отвечает. Это не на нашей стороне. Попробуйте синхронизировать через 5-10 минут.",
+  "error.rateLimit.title": "Превышен лимит запросов",
+  "error.rateLimit.message": "Слишком много запросов за короткое время. Подождите минуту и попробуйте снова.",
+  "error.network.title": "Не удалось связаться с сервером",
+  "error.network.message": "Проверьте интернет-соединение. Если связь стабильная — возможно, наш worker временно недоступен. Попробуйте через минуту.",
+  "error.validation.title": "Проверьте поля",
+  "error.validation.message": "Одно из полей заполнено неверно или не заполнено.",
+  "error.unknown.message": "Произошла непредвиденная ошибка. Если повторяется — напишите в поддержку."
 }
