@@ -1,0 +1,13 @@
+{
+  "common.save": "Сохранить",
+
+  "settings.kicker": "Settings",
+  "settings.title": "Настройки",
+  "settings.subtitle": "Профиль и уведомления",
+  "settings.section.profile": "Профиль",
+  "settings.section.notifications": "Уведомления",
+  "settings.field.name": "Имя",
+  "settings.field.timezone": "Часовой пояс",
+  "settings.notify.email": "Email — регулярные сводные отчёты",
+  "settings.notify.telegram": "Telegram — регулярные сводные отчёты"
+}
