@@ -32,6 +32,18 @@ class Settings(BaseSettings):
     confidence_floor: float = 40.0
     median_window_days: int = 30
 
+    # --- Деплой-конфиг (мультиверсия: РФ veloseller.ru vs *.com) ------------
+    # Дефолты = поведение РФ-прода. .com задаёт значения явно в своём .env.
+    # Пока поля только хранятся; вшивание в поведение (локаль писем, гейтинг
+    # radar-джоб в scheduler) делается в следующих фазах. Зеркало web/lib/features.ts.
+    locale: str = "ru"
+    enabled_marketplaces: str = "ozon,wildberries"  # CSV; .com задаст "amazon,shopify"
+    radar_enabled: bool = True
+
+    @property
+    def enabled_marketplaces_list(self) -> list[str]:
+        return [m.strip().lower() for m in self.enabled_marketplaces.split(",") if m.strip()]
+
 
 settings = Settings()
 
