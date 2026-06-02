@@ -6,6 +6,7 @@ import { Icons } from "./Icons";
 import LogoutButton from "../dashboard/LogoutButton";
 import WarehouseSelector from "./WarehouseSelector";
 import type { WarehouseListItem } from "@/lib/warehouse-types";
+import { t } from "@/lib/i18n";
 
 const PLAN_LABEL: Record<string, string> = {
   trial: "Trial",
@@ -60,24 +61,24 @@ export default function AppHeader({
   // — может пригодиться для других пунктов меню позже.
   const links = variant === "dashboard"
     ? [
-        { href: "/dashboard",           label: "Обзор" },
-        { href: "/dashboard/skus",      label: "SKU" },
-        { href: "/dashboard/alerts",    label: "Отчёты" },
-        { href: "/dashboard/dynamics",  label: "Динамика" },
-        { href: "/dashboard/changelog", label: "Журнал" },
-        { href: "/dashboard/radar",     label: "Radar", isNew: true },
-        { href: "/connections",         label: "Склады" },
-        { href: "/dashboard/settings",  label: "Настройки" },
-        { href: "/billing",             label: "Тариф" },
+        { href: "/dashboard",           label: t("nav.overview") },
+        { href: "/dashboard/skus",      label: t("nav.skus") },
+        { href: "/dashboard/alerts",    label: t("nav.reports") },
+        { href: "/dashboard/dynamics",  label: t("nav.dynamics") },
+        { href: "/dashboard/changelog", label: t("nav.changelog") },
+        { href: "/dashboard/radar",     label: t("nav.radar"), isNew: true },
+        { href: "/connections",         label: t("nav.warehouses") },
+        { href: "/dashboard/settings",  label: t("nav.settings") },
+        { href: "/billing",             label: t("nav.billing") },
       ]
     : [
-        { href: "/admin",          label: "Обзор" },
-        { href: "/admin/finance",  label: "Финансы" },
-        { href: "/admin/radar",    label: "Radar" },
-        { href: "/admin/health",   label: "Здоровье" },
-        { href: "/admin/sellers",  label: "Селлеры" },
-        { href: "/admin/activity", label: "Активность" },
-        { href: "/admin/settings", label: "Настройки" },
+        { href: "/admin",          label: t("nav.overview") },
+        { href: "/admin/finance",  label: t("nav.admin.finance") },
+        { href: "/admin/radar",    label: t("nav.radar") },
+        { href: "/admin/health",   label: t("nav.admin.health") },
+        { href: "/admin/sellers",  label: t("nav.admin.sellers") },
+        { href: "/admin/activity", label: t("nav.admin.activity") },
+        { href: "/admin/settings", label: t("nav.settings") },
       ];
 
   const planLabel = plan ? PLAN_LABEL[plan] ?? plan : null;
@@ -139,7 +140,7 @@ export default function AppHeader({
           {planLabel && variant === "dashboard" && (
             <Link
               href={"/billing" as any}
-              title={`Текущий тариф: ${planLabel}`}
+              title={t("nav.currentPlan", { plan: planLabel ?? "" })}
               className={`hidden xl:inline-flex items-center gap-1.5 px-2 py-1 rounded-md border ${planClass} hover:opacity-80 transition`}
             >
               <span className="font-mono text-[10px] uppercase tracking-[0.15em] font-semibold">{planLabel}</span>
@@ -163,7 +164,7 @@ export default function AppHeader({
               href={"/dashboard" as any}
               className="hidden xl:inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-line bg-paper text-ink-muted hover:text-ink hover:bg-bg-soft transition"
             >
-              <span className="font-mono text-[10px] uppercase tracking-[0.15em]">личный</span>
+              <span className="font-mono text-[10px] uppercase tracking-[0.15em]">{t("nav.toPersonal")}</span>
             </Link>
           )}
 
@@ -173,7 +174,7 @@ export default function AppHeader({
           <button
             onClick={() => setOpen(true)}
             className="xl:hidden inline-flex items-center justify-center size-9 rounded-lg border border-line bg-paper text-ink hover:bg-bg-soft transition"
-            aria-label="Меню"
+            aria-label={t("common.menu")}
           >
             <Icons.Menu size={20} />
           </button>
@@ -193,7 +194,7 @@ export default function AppHeader({
                 <span className="font-mono text-[9px] text-orange uppercase tracking-[0.18em] font-semibold border border-orange/30 bg-orange/10 px-1.5 py-0.5 rounded">admin</span>
               )}
             </Link>
-            <button onClick={() => setOpen(false)} className="inline-flex items-center justify-center size-9 rounded-lg border border-line bg-paper" aria-label="Закрыть">
+            <button onClick={() => setOpen(false)} className="inline-flex items-center justify-center size-9 rounded-lg border border-line bg-paper" aria-label={t("common.close")}>
               <Icons.Close size={20} />
             </button>
           </div>
@@ -201,7 +202,7 @@ export default function AppHeader({
             {variant === "dashboard" && warehouses && warehouses.length > 0 && (
               <div className="mb-3 px-3 py-2.5 rounded-lg border border-line bg-bg-soft">
                 <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush font-semibold mb-2">
-                  Выбранный склад
+                  {t("nav.selectedWarehouse")}
                 </div>
                 <WarehouseSelector warehouses={warehouses} selectedId={selectedWarehouseId ?? null} forceVisible />
               </div>
@@ -210,7 +211,7 @@ export default function AppHeader({
               <Link href={"/billing" as any} onClick={() => setOpen(false)}
                 className={`flex items-center justify-between py-3 px-3 mb-2 rounded-lg border ${planClass}`}>
                 <span className="font-mono text-[11px] uppercase tracking-[0.18em] font-semibold">
-                  Тариф: {planLabel}
+                  {t("nav.planShort", { plan: planLabel ?? "" })}
                 </span>
                 <Icons.ArrowRight size={14} />
               </Link>
@@ -248,7 +249,7 @@ export default function AppHeader({
             {variant === "admin" && (
               <Link href={"/dashboard" as any} onClick={() => setOpen(false)}
                 className="flex items-center justify-between py-4 border-b border-line text-xl font-display text-ink hover:text-lime-deep transition">
-                <span>В личный кабинет</span>
+                <span>{t("nav.toDashboard")}</span>
                 <Icons.ArrowRight size={16} />
               </Link>
             )}
