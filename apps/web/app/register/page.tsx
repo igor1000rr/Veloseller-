@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Icons } from "../_components/Icons";
+import { t } from "@/lib/i18n";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -25,7 +26,7 @@ export default function RegisterPage() {
     });
     setLoading(false);
     if (error) { setError(error.message); return; }
-    setInfo("Проверь почту — отправили письмо для подтверждения.");
+    setInfo(t("auth.register.checkEmail"));
   }
 
   return (
@@ -47,19 +48,19 @@ export default function RegisterPage() {
             <span className="size-1 rounded-full bg-lime-deep" />
             <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-lime-deep font-semibold">Sign up</span>
           </div>
-          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">Регистрация</h1>
-          <p className="mt-1.5 text-sm text-ink-muted">30 дней бесплатно. Без карты.</p>
+          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">{t("auth.register")}</h1>
+          <p className="mt-1.5 text-sm text-ink-muted">{t("auth.register.subtitle")}</p>
           <form onSubmit={handleSubmit} className="mt-6 space-y-4">
             <div>
-              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Email</label>
+              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">{t("auth.email")}</label>
               <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
                 className="w-full rounded-lg border border-line bg-bg-soft px-4 py-3 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
             </div>
             <div>
-              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Пароль</label>
+              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">{t("auth.password")}</label>
               <input type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-lg border border-line bg-bg-soft px-4 py-3 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
-              <p className="mt-1.5 font-mono text-[10px] text-ink-hush">минимум 8 символов</p>
+              <p className="mt-1.5 font-mono text-[10px] text-ink-hush">{t("auth.register.passwordHint")}</p>
             </div>
             {error && (
               <div className="rounded-lg border border-rose/30 bg-rose/10 p-3 text-sm text-rose flex items-start gap-2">
@@ -73,15 +74,15 @@ export default function RegisterPage() {
             )}
             <button type="submit" disabled={loading}
               className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-ink text-paper px-4 py-3 font-semibold hover:bg-ink-soft disabled:opacity-50 transition">
-              {loading ? "Создаём…" : (<>Создать аккаунт <Icons.ArrowRight /></>)}
+              {loading ? t("auth.register.submitting") : (<>{t("auth.register.submit")} <Icons.ArrowRight /></>)}
             </button>
           </form>
           <div className="mt-5 text-sm text-center text-ink-muted">
-            Уже есть аккаунт? <Link href={"/login" as any} className="text-ink hover:text-lime-deep transition font-medium">Войти</Link>
+            {t("auth.register.haveAccount")}<Link href={"/login" as any} className="text-ink hover:text-lime-deep transition font-medium">{t("auth.login.submit")}</Link>
           </div>
         </div>
         <Link href="/" className="mt-6 text-center text-sm text-ink-hush hover:text-ink transition inline-flex items-center gap-1 justify-center">
-          <span className="rotate-180"><Icons.ArrowRight size={12} /></span> На главную
+          <span className="rotate-180"><Icons.ArrowRight size={12} /></span> {t("common.toHome")}
         </Link>
       </div>
     </main>
