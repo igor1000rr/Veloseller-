@@ -6,6 +6,7 @@ import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { safeRedirect } from "@/lib/safe-redirect";
 import { Icons } from "../_components/Icons";
+import { t } from "@/lib/i18n";
 
 /**
  * БАГ 47 fix: open redirect защита через safeRedirect (lib/safe-redirect.ts).
@@ -38,7 +39,7 @@ function LoginForm() {
   return (
     <form onSubmit={handleSubmit} className="mt-6 space-y-4">
       <div>
-        <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Email</label>
+        <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">{t("auth.email")}</label>
         <input
           type="email"
           required
@@ -48,7 +49,7 @@ function LoginForm() {
         />
       </div>
       <div>
-        <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Пароль</label>
+        <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">{t("auth.password")}</label>
         <input
           type="password"
           required
@@ -68,7 +69,7 @@ function LoginForm() {
         disabled={loading}
         className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-ink text-paper px-4 py-3 font-semibold hover:bg-ink-soft disabled:opacity-50 transition"
       >
-        {loading ? "Входим…" : (<>Войти <Icons.ArrowRight /></>)}
+        {loading ? t("auth.login.submitting") : (<>{t("auth.login.submit")} <Icons.ArrowRight /></>)}
       </button>
     </form>
   );
@@ -94,22 +95,22 @@ export default function LoginPage() {
             <span className="size-1 rounded-full bg-lime-deep" />
             <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-lime-deep font-semibold">Login</span>
           </div>
-          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">С возвращением</h1>
-          <p className="mt-1.5 text-sm text-ink-muted">Войди в личный кабинет</p>
-          <Suspense fallback={<div className="mt-6 text-sm text-ink-hush">Загрузка…</div>}>
+          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">{t("auth.login.title")}</h1>
+          <p className="mt-1.5 text-sm text-ink-muted">{t("auth.login.subtitle")}</p>
+          <Suspense fallback={<div className="mt-6 text-sm text-ink-hush">{t("common.loading")}</div>}>
             <LoginForm />
           </Suspense>
           <div className="mt-5 flex items-center justify-between text-sm">
             <Link href={"/forgot-password" as any} className="text-ink-muted hover:text-lime-deep transition">
-              Забыли пароль?
+              {t("auth.forgotPassword")}
             </Link>
             <Link href={"/register" as any} className="text-ink hover:text-lime-deep transition font-medium">
-              Регистрация
+              {t("auth.register")}
             </Link>
           </div>
         </div>
         <Link href="/" className="mt-6 text-center text-sm text-ink-hush hover:text-ink transition inline-flex items-center gap-1 justify-center">
-          <span className="rotate-180"><Icons.ArrowRight size={12} /></span> На главную
+          <span className="rotate-180"><Icons.ArrowRight size={12} /></span> {t("common.toHome")}
         </Link>
       </div>
     </main>
