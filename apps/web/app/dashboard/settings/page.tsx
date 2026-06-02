@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { signTelegramLinkToken } from "@/lib/telegram-link";
+import { t } from "@/lib/i18n";
 import SettingsForm from "./SettingsForm";
 
 export const dynamic = "force-dynamic";
@@ -26,10 +27,10 @@ export default async function SettingsPage() {
       <header>
         <div className="inline-flex items-center gap-2 mb-2">
           <span className="size-1 rounded-full bg-lime-deep" />
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Settings</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">{t("settings.kicker")}</span>
         </div>
-        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">Настройки</h1>
-        <p className="mt-1 text-ink-muted text-sm">Профиль и уведомления</p>
+        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">{t("settings.title")}</h1>
+        <p className="mt-1 text-ink-muted text-sm">{t("settings.subtitle")}</p>
       </header>
       <SettingsForm initial={seller ?? {}} telegramDeeplink={deeplinkUrl} />
     </div>
