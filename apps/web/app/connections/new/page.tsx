@@ -7,6 +7,7 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Icons } from "../../_components/Icons";
 import { ErrorModal } from "../../_components/ErrorModal";
 import { parseApiError, type ParsedError } from "@/lib/error-parser";
+import { isWarehouseKindEnabled } from "@/lib/features";
 
 /**
  * Multi-warehouse архитектура (май 2026):
@@ -18,6 +19,10 @@ import { parseApiError, type ParsedError } from "@/lib/error-parser";
  * Правка Александра: после согласия на парный склад название склада сбрасывается
  * на пустое — реализовано через key={kind} на KindForm, что монтирует новый
  * экземпляр компонента и сбрасывает локальный useState с name.
+ *
+ * Ф0 (мультиверсия): набор карточек фильтруется isWarehouseKindEnabled по
+ * ENABLED_MARKETPLACES. РФ-дефолт (ozon+wildberries) показывает всё как раньше;
+ * .com скроет Ozon/WB. Google Sheet — ручной источник, доступен везде.
  */
 type WarehouseKind = "ozon_fbo" | "ozon_fbs" | "wb_fbo" | "wb_fbs" | "google_sheet";
 
@@ -91,7 +96,7 @@ export default function NewConnectionPage() {
 
       {!kind ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {WAREHOUSES.map((s) => (
+          {WAREHOUSES.filter((s) => isWarehouseKindEnabled(s.kind)).map((s) => (
             <WarehouseCard key={s.kind} warehouse={s} onClick={() => setKind(s.kind)} />
           ))}
         </div>
