@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Icons } from "../_components/Icons";
+import { t } from "@/lib/i18n";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
@@ -36,19 +37,19 @@ export default function ForgotPasswordPage() {
           </span>
         </Link>
         <div className="rounded-2xl border border-line bg-paper p-7 md:p-8 shadow-[0_20px_50px_-20px_rgba(10,10,8,0.15)]">
-          <h1 className="font-display text-2xl md:text-3xl tracking-tight font-medium">Восстановление пароля</h1>
-          <p className="mt-1.5 text-sm text-ink-muted">Пришлём ссылку на сброс</p>
+          <h1 className="font-display text-2xl md:text-3xl tracking-tight font-medium">{t("auth.forgot.title")}</h1>
+          <p className="mt-1.5 text-sm text-ink-muted">{t("auth.forgot.subtitle")}</p>
           {sent ? (
             <div className="mt-6 rounded-lg border border-lime-deep/30 bg-lime-soft p-4">
               <div className="flex items-center gap-2 text-lime-deep font-semibold">
-                <Icons.Check /> Письмо отправлено
+                <Icons.Check /> {t("auth.forgot.sent")}
               </div>
-              <p className="mt-2 text-sm text-ink-muted">Проверь почту {email}</p>
+              <p className="mt-2 text-sm text-ink-muted">{t("auth.forgot.checkEmail", { email })}</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="mt-6 space-y-4">
               <div>
-                <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Email</label>
+                <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">{t("auth.email")}</label>
                 <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)}
                   className="w-full rounded-lg border border-line bg-bg-soft px-4 py-3 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
               </div>
@@ -59,13 +60,13 @@ export default function ForgotPasswordPage() {
               )}
               <button type="submit" disabled={loading}
                 className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-ink text-paper px-4 py-3 font-semibold hover:bg-ink-soft disabled:opacity-50 transition">
-                {loading ? "Отправляем…" : (<>Прислать ссылку <Icons.ArrowRight /></>)}
+                {loading ? t("auth.forgot.submitting") : (<>{t("auth.forgot.submit")} <Icons.ArrowRight /></>)}
               </button>
             </form>
           )}
           <div className="mt-5 text-center">
             <Link href={"/login" as any} className="text-sm text-ink-muted hover:text-lime-deep transition">
-              Вернуться к входу
+              {t("auth.backToLogin")}
             </Link>
           </div>
         </div>
