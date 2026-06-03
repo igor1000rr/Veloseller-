@@ -2,6 +2,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { Icons } from "../../_components/Icons";
 import { warehouseKindLabel } from "@/lib/warehouse";
+import { t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -27,11 +28,11 @@ export const revalidate = 0;
 type StatusKind = "synced" | "syncing" | "error" | "paused" | "stale";
 
 const STATUS_META: Record<StatusKind, { label: string; cls: string; dot: string }> = {
-  synced:  { label: "Синхронизировано", cls: "text-lime-deep bg-lime-soft border-lime-deep/30", dot: "#84cc16" },
-  syncing: { label: "Синхронизация",    cls: "text-azure bg-azure/10 border-azure/30",          dot: "#0284c7" },
-  error:   { label: "Ошибка",           cls: "text-rose bg-rose/10 border-rose/30",            dot: "#e11d48" },
-  paused:  { label: "На паузе",         cls: "text-ink-soft bg-bg-soft border-line",            dot: "#94a3b8" },
-  stale:   { label: "Давно не было",    cls: "text-orange bg-orange/10 border-orange/30",       dot: "#ea580c" },
+  synced:  { label: t("changelog.status.synced"), cls: "text-lime-deep bg-lime-soft border-lime-deep/30", dot: "#84cc16" },
+  syncing: { label: t("changelog.status.syncing"),    cls: "text-azure bg-azure/10 border-azure/30",          dot: "#0284c7" },
+  error:   { label: t("changelog.status.error"),           cls: "text-rose bg-rose/10 border-rose/30",            dot: "#e11d48" },
+  paused:  { label: t("changelog.status.paused"),         cls: "text-ink-soft bg-bg-soft border-line",            dot: "#94a3b8" },
+  stale:   { label: t("changelog.status.stale"),    cls: "text-orange bg-orange/10 border-orange/30",       dot: "#ea580c" },
 };
 
 function classifyStatus(conn: any): StatusKind {
@@ -81,32 +82,28 @@ export default async function ChangelogPage() {
         <div>
           <div className="inline-flex items-center gap-2 mb-2">
             <span className="size-1 rounded-full bg-lime-deep" />
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Sync log</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">{t("changelog.eyebrow")}</span>
           </div>
-          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink">Журнал синхронизаций</h1>
-          <p className="text-sm text-ink-muted mt-1">Когда и с каких складов мы получали данные за последние 14 дней.</p>
+          <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink">{t("changelog.title")}</h1>
+          <p className="text-sm text-ink-muted mt-1">{t("changelog.subtitle")}</p>
         </div>
       </header>
 
       {(!connections || connections.length === 0) ? (
         <div className="rounded-2xl border border-line bg-paper p-8 md:p-14 text-center">
-          <p className="font-display text-xl text-ink font-medium">Нет подключённых складов</p>
-          <p className="mt-2 text-sm text-ink-muted max-w-md mx-auto">
-            После подключения первого склада здесь появится журнал синхронизаций.
-          </p>
+          <p className="font-display text-xl text-ink font-medium">{t("changelog.empty.title")}</p>
+          <p className="mt-2 text-sm text-ink-muted max-w-md mx-auto">{t("changelog.empty.text")}</p>
           <Link
             href={"/connections/new" as any}
             className="mt-5 inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-5 py-3 text-sm font-semibold hover:bg-ink-soft transition"
           >
-            Подключить склад <Icons.ArrowRight />
+            {t("changelog.empty.btn")} <Icons.ArrowRight />
           </Link>
         </div>
       ) : (
         <>
           <div>
-            <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">
-              Сейчас по складам
-            </h2>
+            <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">{t("changelog.nowHeading")}</h2>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {connections.map((c: any) => {
                 const st = classifyStatus(c);
@@ -130,12 +127,12 @@ export default async function ChangelogPage() {
                     </div>
                     <div className="mt-3 text-xs text-ink-muted">
                       {hoursAgo == null
-                        ? "Ещё не синхронизировался"
+                        ? t("changelog.lastSync.never")
                         : hoursAgo < 1
-                          ? "Синхронизирован < часа назад"
+                          ? t("changelog.lastSync.lessHour")
                           : hoursAgo < 24
-                            ? `Синхронизирован ${hoursAgo}ч назад`
-                            : `Синхронизирован ${Math.floor(hoursAgo / 24)}д назад`
+                            ? t("changelog.lastSync.hours", { n: hoursAgo })
+                            : t("changelog.lastSync.days", { n: Math.floor(hoursAgo / 24) })
                       }
                     </div>
                     {c.last_error && (
@@ -150,16 +147,14 @@ export default async function ChangelogPage() {
           </div>
 
           <div>
-            <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">
-              История за 14 дней
-            </h2>
+            <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">{t("changelog.histHeading")}</h2>
             {historyErr ? (
               <div className="rounded-2xl border border-rose/30 bg-rose/5 p-6 text-sm text-rose font-mono">
-                Не удалось загрузить историю: {historyErr.message}
+                {t("changelog.histError")} {historyErr.message}
               </div>
             ) : history.length === 0 ? (
               <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center text-sm text-ink-muted">
-                За последние 14 дней нет данных по snapshot'ам.
+                {t("changelog.histEmpty")}
               </div>
             ) : (
               /* overflow-x-auto обязателен — 5 колонок на 360px экране не помещаются */
@@ -167,11 +162,11 @@ export default async function ChangelogPage() {
                 <table className="w-full min-w-[640px] text-sm">
                   <thead className="bg-bg-soft border-b border-line">
                     <tr>
-                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Дата</th>
-                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Склад</th>
-                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold hidden sm:table-cell">Тип</th>
-                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Статус</th>
-                      <th className="text-right px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">SKU</th>
+                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">{t("changelog.col.date")}</th>
+                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">{t("changelog.col.warehouse")}</th>
+                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold hidden sm:table-cell">{t("changelog.col.type")}</th>
+                      <th className="text-left px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">{t("changelog.col.status")}</th>
+                      <th className="text-right px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">{t("changelog.col.sku")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">

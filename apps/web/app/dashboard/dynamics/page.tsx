@@ -4,6 +4,7 @@ import { Icons } from "../../_components/Icons";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 import DynamicsSearch from "./DynamicsSearch";
 import { getSelectedWarehouse, listWarehouses, warehouseKindLabel } from "@/lib/warehouse";
+import { t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,9 +29,9 @@ type SkuTrend = {
 // Период агрегации (правка 12 Александра)
 type Period = "day" | "week" | "month";
 const PERIODS: { value: Period; label: string; pointsLimit: number; hint: string; lookbackDays: number }[] = [
-  { value: "day",   label: "День",   pointsLimit: 14, hint: "последние 14 дней",   lookbackDays: 30 },
-  { value: "week",  label: "Неделя", pointsLimit: 12, hint: "последние 12 недель", lookbackDays: 100 },
-  { value: "month", label: "Месяц",  pointsLimit: 6,  hint: "последние 6 месяцев", lookbackDays: 210 },
+  { value: "day",   label: t("dynamics.period.day"),   pointsLimit: 14, hint: t("dynamics.period.dayHint"),   lookbackDays: 30 },
+  { value: "week",  label: t("dynamics.period.week"), pointsLimit: 12, hint: t("dynamics.period.weekHint"), lookbackDays: 100 },
+  { value: "month", label: t("dynamics.period.month"),  pointsLimit: 6,  hint: t("dynamics.period.monthHint"), lookbackDays: 210 },
 ];
 
 function isPeriod(s: string | undefined): s is Period {
@@ -77,12 +78,10 @@ export default async function DynamicsPage({ searchParams }: {
   if (allWarehouses.length === 0) {
     return (
       <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center">
-        <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Подключите первый склад</h1>
-        <p className="mx-auto mt-3 max-w-xl text-ink-muted leading-relaxed">
-          Динамика скоростей требует подключённого склада и хотя бы 7 дней истории.
-        </p>
+        <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">{t("dynamics.empty.title")}</h1>
+        <p className="mx-auto mt-3 max-w-xl text-ink-muted leading-relaxed">{t("dynamics.empty.text")}</p>
         <div className="mt-6 flex gap-3 justify-center flex-wrap">
-          <Link href={"/connections/new" as any} className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition">Добавить склад</Link>
+          <Link href={"/connections/new" as any} className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition">{t("dynamics.empty.btn")}</Link>
         </div>
       </div>
     );
@@ -217,12 +216,10 @@ export default async function DynamicsPage({ searchParams }: {
         <div className="min-w-0">
           <div className="inline-flex items-center gap-2 mb-2">
             <span className="size-1 rounded-full bg-lime-deep" />
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Dynamics</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">{t("dynamics.eyebrow")}</span>
           </div>
-          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">Динамика скоростей</h1>
-          <p className="text-sm text-ink-muted mt-1">
-            Какие SKU ускорились, какие просели — и что делать. Сравнение последних двух периодов агрегации.
-          </p>
+          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">{t("dynamics.title")}</h1>
+          <p className="text-sm text-ink-muted mt-1">{t("dynamics.subtitle")}</p>
           <div className="mt-2 flex items-center gap-2 flex-wrap text-sm text-ink-muted">
             <span className="size-1.5 rounded-full bg-lime-deep shrink-0" />
             <span className="font-medium text-ink truncate max-w-[200px] sm:max-w-none">{currentWarehouseName}</span>
@@ -256,7 +253,7 @@ export default async function DynamicsPage({ searchParams }: {
               href={`/api/export/dynamics?${exportQs.toString()}&format=excel`}
               download
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition"
-              title="Скачать в Excel"
+              title={t("dynamics.exportExcel")}
             >
               <Icons.ArrowRight size={11} /> Excel
             </a>
@@ -264,7 +261,7 @@ export default async function DynamicsPage({ searchParams }: {
               href={`/api/export/dynamics?${exportQs.toString()}&format=csv`}
               download
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition border-l border-line"
-              title="Скачать в CSV"
+              title={t("dynamics.exportCsv")}
             >
               CSV
             </a>
@@ -276,10 +273,9 @@ export default async function DynamicsPage({ searchParams }: {
         <div className="rounded-xl border border-azure/30 bg-azure/5 p-4 flex items-start gap-3">
           <span className="text-azure mt-0.5 shrink-0"><InfoTooltip text="" /></span>
           <div className="flex-1 text-sm">
-            <div className="font-medium text-ink">У вас несколько складов</div>
+            <div className="font-medium text-ink">{t("dynamics.multiWh.title")}</div>
             <p className="mt-1 text-ink-muted">
-              Динамика показана для выбранного склада <b>{currentWarehouseName}</b>.
-              Переключитесь на другой склад через селектор в правом верхнем углу.
+              {t("dynamics.multiWh.pre")} <b>{currentWarehouseName}</b>{t("dynamics.multiWh.post")}
             </p>
           </div>
         </div>
@@ -290,9 +286,9 @@ export default async function DynamicsPage({ searchParams }: {
           <div className="size-12 mx-auto rounded-full bg-lime-soft flex items-center justify-center text-lime-deep mb-4">
             <Icons.Health />
           </div>
-          <p className="font-display text-xl text-ink font-medium">Накапливается история</p>
+          <p className="font-display text-xl text-ink font-medium">{t("dynamics.noData.title")}</p>
           <p className="mt-2 text-sm text-ink-muted max-w-md mx-auto">
-            Чтобы видеть динамику, нужно минимум два пересчёта в выбранной агрегации ({periodMeta.hint}). Дашборд начнёт работать через несколько дней регулярных синков.
+            {t("dynamics.noData.text", { hint: periodMeta.hint })}
           </p>
         </div>
       ) : (
@@ -300,8 +296,8 @@ export default async function DynamicsPage({ searchParams }: {
           {/* Тренд магазина */}
           <div className="rounded-2xl border border-line bg-paper p-6">
             <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold flex items-center">
-              Средняя скорость по магазину · {periodMeta.hint}
-              <InfoTooltip text="Среднее adjusted_velocity по всем SKU за каждый период агрегации. Подъём = магазин в целом разгоняется, спад = охлаждается." />
+              {t("dynamics.storeAvg")} · {periodMeta.hint}
+              <InfoTooltip text={t("dynamics.storeAvgTip")} />
             </h2>
             <div className="mt-3 flex items-end gap-3 flex-wrap">
               <div className="font-display text-3xl md:text-4xl tabular font-medium text-ink">
@@ -314,7 +310,7 @@ export default async function DynamicsPage({ searchParams }: {
                 const d = ((last - prev) / prev) * 100;
                 return <DeltaBadge value={d} />;
               })()}
-              <span className="text-xs text-ink-muted font-mono">шт/день</span>
+              <span className="text-xs text-ink-muted font-mono">{t("dynamics.perDay")}</span>
             </div>
             <div className="mt-4">
               <Sparkline values={storeTrend.map(s => s.avg)} />
@@ -327,20 +323,20 @@ export default async function DynamicsPage({ searchParams }: {
 
           <div className="grid gap-6 lg:grid-cols-2">
             <TrendList
-              title="Что разогналось"
-              subtitle="Скорости выросли >10% за последний период"
-              tooltip="Кандидаты на пополнение склада: спрос растёт, важно не уйти в OOS. Топ-10 по росту adjusted_velocity."
+              title={t("dynamics.surge.title")}
+              subtitle={t("dynamics.surge.subtitle")}
+              tooltip={t("dynamics.surge.tip")}
               items={surging}
               tone="good"
-              emptyText="Никто не разогнался — спрос стабильный или падает."
+              emptyText={t("dynamics.surge.empty")}
             />
             <TrendList
-              title="Что просело"
-              subtitle="Скорости упали >10% за последний период"
-              tooltip="Что случилось? Закончился сезон, проблема с листингом, выросла цена? Топ-10 по падению adjusted_velocity."
+              title={t("dynamics.slide.title")}
+              subtitle={t("dynamics.slide.subtitle")}
+              tooltip={t("dynamics.slide.tip")}
               items={sliding}
               tone="bad"
-              emptyText="Никто не просел — все SKU стабильны."
+              emptyText={t("dynamics.slide.empty")}
             />
           </div>
 
@@ -348,30 +344,30 @@ export default async function DynamicsPage({ searchParams }: {
             <div className="px-5 py-4 border-b border-line bg-bg-soft flex items-center justify-between flex-wrap gap-3">
               <div>
                 <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold flex items-center">
-                  Все изменения
-                  <InfoTooltip text="Топ-50 SKU отсортированы по абсолютной величине изменения скорости. SKU без активности скрыты по умолчанию." />
+                  {t("dynamics.all.title")}
+                  <InfoTooltip text={t("dynamics.all.tip")} />
                 </h2>
                 <p className="text-xs text-ink-muted mt-1">
-                  Отсортировано по силе изменения · {all.length} SKU всего, показано {allLimited.length}
+                  {t("dynamics.all.count", { total: all.length, shown: allLimited.length })}
                 </p>
               </div>
               <DynamicsSearch initial={search} />
             </div>
             {allLimited.length === 0 ? (
               <div className="p-10 text-center text-sm text-ink-muted">
-                {search ? `По запросу «${search}» ничего не найдено.` : "Нет данных для отображения."}
+                {search ? t("dynamics.all.noMatch", { q: search }) : t("dynamics.all.noRows")}
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="min-w-full text-sm">
                   <thead className="border-b border-line">
                     <tr>
-                      <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">SKU</th>
-                      <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Название</th>
-                      <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Было</th>
-                      <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Стало</th>
-                      <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Δ</th>
-                      <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Тренд</th>
+                      <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">{t("dynamics.col.sku")}</th>
+                      <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">{t("dynamics.col.name")}</th>
+                      <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">{t("dynamics.col.was")}</th>
+                      <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">{t("dynamics.col.became")}</th>
+                      <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">{t("dynamics.col.delta")}</th>
+                      <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">{t("dynamics.col.trend")}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-line">

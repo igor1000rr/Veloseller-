@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { t } from "@/lib/i18n";
 
 /**
  * Настройки уведомлений и часового пояса.
@@ -14,18 +15,18 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 // Часовые пояса России и СНГ — в формате IANA, метки показывают UTC offset.
 // Используется sellers.timezone (IANA string) — pytz.timezone() в worker'е.
 const TIMEZONES = [
-  { value: "Europe/Kaliningrad", label: "UTC+2 (Калининград)" },
-  { value: "Europe/Moscow",      label: "UTC+3 (Москва, Санкт-Петербург)" },
-  { value: "Europe/Minsk",       label: "UTC+3 (Минск)" },
-  { value: "Europe/Samara",      label: "UTC+4 (Самара, Ижевск)" },
-  { value: "Asia/Yekaterinburg", label: "UTC+5 (Екатеринбург, Челябинск, Уфа)" },
-  { value: "Asia/Omsk",          label: "UTC+6 (Омск)" },
-  { value: "Asia/Krasnoyarsk",   label: "UTC+7 (Красноярск, Новосибирск)" },
-  { value: "Asia/Irkutsk",       label: "UTC+8 (Иркутск)" },
-  { value: "Asia/Yakutsk",       label: "UTC+9 (Якутск, Чита)" },
-  { value: "Asia/Vladivostok",   label: "UTC+10 (Владивосток, Хабаровск)" },
-  { value: "Asia/Magadan",       label: "UTC+11 (Магадан)" },
-  { value: "Asia/Kamchatka",     label: "UTC+12 (Камчатка)" },
+  { value: "Europe/Kaliningrad", label: t("account.tz.kaliningrad") },
+  { value: "Europe/Moscow",      label: t("account.tz.moscow") },
+  { value: "Europe/Minsk",       label: t("account.tz.minsk") },
+  { value: "Europe/Samara",      label: t("account.tz.samara") },
+  { value: "Asia/Yekaterinburg", label: t("account.tz.yekaterinburg") },
+  { value: "Asia/Omsk",          label: t("account.tz.omsk") },
+  { value: "Asia/Krasnoyarsk",   label: t("account.tz.krasnoyarsk") },
+  { value: "Asia/Irkutsk",       label: t("account.tz.irkutsk") },
+  { value: "Asia/Yakutsk",       label: t("account.tz.yakutsk") },
+  { value: "Asia/Vladivostok",   label: t("account.tz.vladivostok") },
+  { value: "Asia/Magadan",       label: t("account.tz.magadan") },
+  { value: "Asia/Kamchatka",     label: t("account.tz.kamchatka") },
 ];
 
 export function NotificationSettings({ initial }: {
@@ -50,7 +51,7 @@ export function NotificationSettings({ initial }: {
       setTimeout(() => setStatus("idle"), 2000);
     } catch (e: any) {
       setStatus("error");
-      setErrMsg(e?.message || "Не удалось сохранить");
+      setErrMsg(e?.message || t("account.notif.errSave"));
     } finally {
       setBusy(false);
     }
@@ -59,14 +60,12 @@ export function NotificationSettings({ initial }: {
   return (
     <section className="rounded-2xl border border-line bg-paper p-6 space-y-6">
       <div>
-        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">
-          Уведомления и часовой пояс
-        </h2>
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">{t("account.notif.title")}</h2>
       </div>
 
       {/* Часовой пояс */}
       <div>
-        <label className="block text-sm font-medium text-ink mb-1.5">Часовой пояс</label>
+        <label className="block text-sm font-medium text-ink mb-1.5">{t("account.notif.tzLabel")}</label>
         <select
           value={timezone}
           onChange={(e) => {
@@ -81,15 +80,13 @@ export function NotificationSettings({ initial }: {
             <option key={tz.value} value={tz.value}>{tz.label}</option>
           ))}
         </select>
-        <p className="mt-1.5 text-xs text-ink-hush">
-          Например UTC+4 (MSK+1), UTC+5 (MSK+2) и так далее. По умолчанию — UTC+3 (Москва).
-        </p>
+        <p className="mt-1.5 text-xs text-ink-hush">{t("account.notif.tzHint")}</p>
       </div>
 
       {/* Email ежедневный обзор */}
       <ToggleRow
-        label="Email — ежедневный обзор"
-        description="Получать сводный отчёт по складу на email каждое утро по выбранному часовому поясу."
+        label={t("account.notif.emailLabel")}
+        description={t("account.notif.emailDesc")}
         checked={notifyEmail}
         disabled={busy}
         onChange={(v) => {
@@ -100,8 +97,8 @@ export function NotificationSettings({ initial }: {
 
       {/* Telegram ежедневный обзор */}
       <ToggleRow
-        label="Telegram — ежедневный обзор"
-        description="Получать сводный отчёт в Telegram каждое утро. Подключите бота в дашборде."
+        label={t("account.notif.tgLabel")}
+        description={t("account.notif.tgDesc")}
         checked={notifyTelegram}
         disabled={busy}
         onChange={(v) => {
@@ -112,10 +109,10 @@ export function NotificationSettings({ initial }: {
 
       {/* Статус сохранения */}
       {status === "saved" && (
-        <p className="text-xs text-lime-deep font-mono">✓ Сохранено</p>
+        <p className="text-xs text-lime-deep font-mono">{t("account.notif.saved")}</p>
       )}
       {status === "error" && (
-        <p className="text-xs text-rose font-mono">Ошибка: {errMsg}</p>
+        <p className="text-xs text-rose font-mono">{t("account.notif.errPrefix")} {errMsg}</p>
       )}
     </section>
   );
