@@ -2,6 +2,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { Icons } from "../../_components/Icons";
 import { InfoTooltip } from "../../_components/InfoTooltip";
+import { t } from "@/lib/i18n";
+import { LOCALE } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -20,13 +22,13 @@ export const revalidate = 0;
  */
 
 const KIND_LABELS: Record<string, string> = {
-  critical_stock:     "Критический остаток",
-  low_stock:          "Низкий остаток",
-  dead_inventory:     "Неликвид",
-  repeated_stockout:  "Частый out-of-stock",
-  underestimated_sku: "Недооценённый SKU",
-  sync_error:         "Ошибки синхронизации",
-  weekly_report:      "Сводка по складу",
+  critical_stock:     t("report.kind.criticalStock"),
+  low_stock:          t("report.kind.lowStock"),
+  dead_inventory:     t("report.kind.deadInventory"),
+  repeated_stockout:  t("report.kind.repeatedStockout"),
+  underestimated_sku: t("report.kind.underestimatedSku"),
+  sync_error:         t("report.kind.syncError"),
+  weekly_report:      t("report.kind.weeklyReport"),
 };
 
 const KIND_TONE: Record<string, string> = {
@@ -40,9 +42,9 @@ const KIND_TONE: Record<string, string> = {
 };
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
-  sent:    { label: "Отправлен", cls: "text-lime-deep border-lime-deep/30 bg-lime-soft" },
-  failed:  { label: "Ошибка",    cls: "text-rose border-rose/30 bg-rose/10" },
-  skipped: { label: "Пропущен",  cls: "text-ink-hush border-line bg-bg-soft" },
+  sent:    { label: t("report.status.sent"),    cls: "text-lime-deep border-lime-deep/30 bg-lime-soft" },
+  failed:  { label: t("report.status.failed"),  cls: "text-rose border-rose/30 bg-rose/10" },
+  skipped: { label: t("report.status.skipped"), cls: "text-ink-hush border-line bg-bg-soft" },
 };
 
 type ReportHistoryRow = {
@@ -58,23 +60,25 @@ type ReportHistoryRow = {
   error_message: string | null;
 };
 
+const LOC = LOCALE === "ru" ? "ru-RU" : "en-US";
+
 function formatBytes(n: number | null): string {
   if (n == null || n <= 0) return "—";
-  if (n < 1024) return `${n} Б`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} КБ`;
-  return `${(n / (1024 * 1024)).toFixed(2)} МБ`;
+  if (n < 1024) return `${n} ${t("unit.bytes.b")}`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} ${t("unit.bytes.kb")}`;
+  return `${(n / (1024 * 1024)).toFixed(2)} ${t("unit.bytes.mb")}`;
 }
 
-function formatDateRu(iso: string): string {
+function formatDate(iso: string): string {
   const d = new Date(iso);
-  return d.toLocaleDateString("ru-RU", {
+  return d.toLocaleDateString(LOC, {
     day: "numeric", month: "long", year: "numeric",
     weekday: "long",
   });
 }
 
-function formatTimeRu(iso: string): string {
-  return new Date(iso).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+function formatTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString(LOC, { hour: "2-digit", minute: "2-digit" });
 }
 
 export default async function ReportsPage() {
@@ -120,13 +124,13 @@ export default async function ReportsPage() {
             </span>
           </div>
           <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink flex items-center flex-wrap">
-            <span>Отчёты</span>
-            <InfoTooltip text="История отправленных Excel-файлов. Отчёты формируются по расписанию из ваших подписок — день недели задаётся в настройках. Несколько отчётов на один день объединяются в один файл с разными листами." />
+            <span>{t("report.title")}</span>
+            <InfoTooltip text={t("report.titleTip")} />
           </h1>
           <p className="text-ink-muted text-sm mt-1">
             {rows.length > 0
-              ? <>Всего отправлено: <strong className="text-ink tabular">{rows.length}</strong></>
-              : <>Здесь будет история отправленных Excel-отчётов</>
+              ? <>{t("report.totalSentLabel")} <strong className="text-ink tabular">{rows.length}</strong></>
+              : <>{t("report.emptyHint")}</>
             }
           </p>
         </div>
@@ -136,7 +140,7 @@ export default async function ReportsPage() {
             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-line bg-paper text-sm text-ink-muted hover:text-ink hover:bg-bg-soft hover:border-lime-deep/40 transition min-h-[36px]"
           >
             <span aria-hidden="true">⚙</span>
-            <span>Настройка отчётов</span>
+            <span>{t("report.settingsLink")}</span>
             {subsCount != null && subsCount > 0 && (
               <span className="font-mono text-[10px] text-ink-hush">({subsCount})</span>
             )}
@@ -151,7 +155,7 @@ export default async function ReportsPage() {
           {Array.from(groups.entries()).map(([dateKey, dayRows]) => (
             <div key={dateKey} className="space-y-3">
               <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold border-b border-line pb-2">
-                {formatDateRu(dayRows[0].sent_at)}
+                {formatDate(dayRows[0].sent_at)}
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {dayRows.map(r => (
@@ -173,11 +177,11 @@ function EmptyState({ subsCount }: { subsCount: number }) {
         <Icons.ArrowRight size={20} />
       </div>
       <div className="space-y-2 max-w-md mx-auto">
-        <h2 className="font-display text-xl font-medium text-ink">Отчётов пока не было</h2>
+        <h2 className="font-display text-xl font-medium text-ink">{t("report.empty.title")}</h2>
         <p className="text-sm text-ink-muted">
           {subsCount > 0
-            ? <>У вас настроено <b className="text-ink">{subsCount}</b> подписок. Первый отчёт придёт в указанный день недели в 12:00 МСК.</>
-            : <>Настройте подписки — выберите какие отчёты получать и в какой день недели. По умолчанию у вас уже добавлены все 7 типов отчётов на понедельник.</>
+            ? <>{t("report.empty.hasSubsPre")} <b className="text-ink">{subsCount}</b> {t("report.empty.hasSubsPost")}</>
+            : <>{t("report.empty.noSubs")}</>
           }
         </p>
       </div>
@@ -186,7 +190,7 @@ function EmptyState({ subsCount }: { subsCount: number }) {
           href={"/dashboard/alerts/subscriptions" as any}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-ink text-paper text-sm font-medium hover:bg-ink-soft transition min-h-[40px]"
         >
-          Открыть настройки <Icons.ArrowRight size={12} />
+          {t("report.empty.openSettings")} <Icons.ArrowRight size={12} />
         </Link>
       </div>
     </div>
@@ -209,7 +213,7 @@ function ReportCard({ row }: { row: ReportHistoryRow }) {
             {status.label}
           </span>
           <span className="font-mono text-[11px] text-ink-hush">
-            {formatTimeRu(row.sent_at)}
+            {formatTime(row.sent_at)}
           </span>
         </div>
         {row.file_size_bytes != null && row.status === "sent" && (
@@ -261,7 +265,7 @@ function ReportCard({ row }: { row: ReportHistoryRow }) {
         <div className="mt-3 pt-3 border-t border-line">
           <p className="font-mono text-[11px] text-ink-hush">
             {row.error_message === "no data"
-              ? "За этот день не было данных по выбранным фильтрам"
+              ? t("report.skippedNoData")
               : row.error_message}
           </p>
         </div>
