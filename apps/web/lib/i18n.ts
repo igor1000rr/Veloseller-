@@ -20,6 +20,7 @@ import ruError from "@/messages/ru/error.json";
 import ruUnit from "@/messages/ru/unit.json";
 import ruDashboard from "@/messages/ru/dashboard.json";
 import ruReport from "@/messages/ru/report.json";
+import ruSku from "@/messages/ru/sku.json";
 import enCommon from "@/messages/en/common.json";
 import enNav from "@/messages/en/nav.json";
 import enAuth from "@/messages/en/auth.json";
@@ -28,12 +29,13 @@ import enError from "@/messages/en/error.json";
 import enUnit from "@/messages/en/unit.json";
 import enDashboard from "@/messages/en/dashboard.json";
 import enReport from "@/messages/en/report.json";
+import enSku from "@/messages/en/sku.json";
 import { LOCALE } from "@/lib/features";
 
 type Messages = Record<string, string>;
 
-const ru: Messages = { ...ruCommon, ...ruNav, ...ruAuth, ...ruSettings, ...ruError, ...ruUnit, ...ruDashboard, ...ruReport };
-const en: Messages = { ...enCommon, ...enNav, ...enAuth, ...enSettings, ...enError, ...enUnit, ...enDashboard, ...enReport };
+const ru: Messages = { ...ruCommon, ...ruNav, ...ruAuth, ...ruSettings, ...ruError, ...ruUnit, ...ruDashboard, ...ruReport, ...ruSku };
+const en: Messages = { ...enCommon, ...enNav, ...enAuth, ...enSettings, ...enError, ...enUnit, ...enDashboard, ...enReport, ...enSku };
 
 const CATALOGS: Record<string, Messages> = { ru, en };
 
