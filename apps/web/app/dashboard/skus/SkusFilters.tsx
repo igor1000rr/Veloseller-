@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { InfoTooltip } from "../../_components/InfoTooltip";
+import { t } from "@/lib/i18n";
 
 export type FilterRanges = {
   stockMin: number;
@@ -117,7 +118,7 @@ export function SkusFilters({
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-1.5 flex-wrap">
             <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
-              Период
+              {t("sku.filters.period")}
             </label>
             {preHolidayLabel && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-orange/40 bg-orange/10 text-orange font-mono text-[10px] uppercase tracking-wider font-semibold">
@@ -148,7 +149,7 @@ export function SkusFilters({
               onClick={recalculateNow}
               className="px-4 py-1.5 rounded-lg bg-ink text-paper font-mono text-xs uppercase tracking-wider font-semibold hover:bg-ink-soft transition min-h-[36px]"
             >
-              Рассчитать
+              {t("sku.filters.calc")}
             </button>
           </div>
         </div>
@@ -163,26 +164,26 @@ export function SkusFilters({
               <span className={`size-5 rounded border ${includeInactive ? "bg-ink border-ink" : "bg-paper border-line"} flex items-center justify-center transition shrink-0`}>
                 {includeInactive && <span className="text-paper text-[11px]">✓</span>}
               </span>
-              <span>Включить SKU без активности</span>
+              <span>{t("sku.filters.includeInactive")}</span>
             </button>
-            <InfoTooltip text="Товары с нулевым остатком и без движений за последние 30 дней. По умолчанию скрыты — их не нужно учитывать в большинстве сценариев." />
+            <InfoTooltip text={t("sku.filters.inactiveHint")} />
           </div>
         )}
       </div>
 
       {minDate && (
         <p className="text-[11px] text-ink-hush font-mono">
-          данные с {new Date(minDate).toLocaleDateString("ru-RU")}
+          {t("sku.filters.dataSince", { date: new Date(minDate).toLocaleDateString("ru-RU") })}
         </p>
       )}
       <p className="text-[11px] text-ink-hush leading-relaxed">
-        Период расчёта скорости продаж. По умолчанию — последние 30 дней. Перед праздниками автоматически сужается до предпраздничного окна.
+        {t("sku.filters.periodHelp")}
       </p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
         <RangeField
-          label="Наличие"
-          hint="Текущий остаток на складе"
+          label={t("sku.filters.stock.label")}
+          hint={t("sku.filters.stock.hint")}
           minPlaceholder={String(ranges.stockMin)}
           maxPlaceholder={String(ranges.stockMax)}
           minVal={stockMin}
@@ -191,8 +192,8 @@ export function SkusFilters({
           onMaxChange={v => { setStockMax(v); scheduleUpdate({ stock_max: v }); }}
         />
         <RangeField
-          label="Дней без наличия"
-          hint="Дней без наличия за выбранный период"
+          label={t("sku.filters.oos.label")}
+          hint={t("sku.filters.oos.hint")}
           minPlaceholder={String(ranges.oosMin)}
           maxPlaceholder={String(ranges.oosMax)}
           minVal={oosMin}
@@ -201,8 +202,8 @@ export function SkusFilters({
           onMaxChange={v => { setOosMax(v); scheduleUpdate({ oos_max: v }); }}
         />
         <RangeField
-          label="Потерянная выручка, ₽"
-          hint="Скорость продаж TVelo × Дни без наличия × Цена"
+          label={t("sku.filters.lost.label")}
+          hint={t("sku.filters.lost.hint")}
           minPlaceholder={Math.round(ranges.lostMin).toString()}
           maxPlaceholder={Math.round(ranges.lostMax).toString()}
           minVal={lostMin}
@@ -213,8 +214,8 @@ export function SkusFilters({
         {/* Новый фильтр (Александр 01.06.2026): "Дней до окончания остатков"
             по столбцу coverage_days. Очень важный для закупок. */}
         <RangeField
-          label="Дней до окончания остатков"
-          hint="Для расчёта закупки по средней скорости продаж TVelo"
+          label={t("sku.filters.coverage.label")}
+          hint={t("sku.filters.coverage.hint")}
           minPlaceholder={String(ranges.coverageMin)}
           maxPlaceholder={String(ranges.coverageMax)}
           minVal={coverageMin}
@@ -229,7 +230,7 @@ export function SkusFilters({
 
 function RangeField({
   label, hint, minVal, maxVal, onMinChange, onMaxChange,
-  minPlaceholder = "от", maxPlaceholder = "до",
+  minPlaceholder = t("sku.filters.from"), maxPlaceholder = t("sku.filters.to"),
 }: {
   label: string;
   hint: string;

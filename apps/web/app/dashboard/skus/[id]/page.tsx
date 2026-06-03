@@ -6,6 +6,7 @@ import { ReorderPanel } from "./ReorderPanel";
 import { HealthKpi, buildHealthBreakdown, buildConfidenceBreakdown } from "./HealthTooltip";
 import { Icons } from "../../../_components/Icons";
 import { InfoTooltip } from "../../../_components/InfoTooltip";
+import { t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -115,7 +116,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     if (med > 0 && adj > 0) {
       const diffPct = ((adj - med) / med) * 100;
       const sign = diffPct >= 0 ? "+" : "";
-      adjVsMedian = `${sign}${diffPct.toFixed(0)}% от медианы`;
+      adjVsMedian = t("sku.detail.fromMedian", { pct: `${sign}${diffPct.toFixed(0)}` });
     }
   }
 
@@ -133,7 +134,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     <div className="space-y-6">
       <header>
         <Link href="/dashboard/skus" className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition py-1">
-          <span className="rotate-180"><Icons.ArrowRight size={12} /></span> Все SKU
+          <span className="rotate-180"><Icons.ArrowRight size={12} /></span> {t("sku.detail.allSku")}
         </Link>
         <div className="mt-3 flex items-baseline gap-2 sm:gap-3 flex-wrap">
           <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink break-words">{product.product_name}</h1>
@@ -149,49 +150,49 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
       {latest && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 sm:gap-3">
           <HealthKpi
-            label="Health Score"
+            label={t("sku.detail.kpi.health")}
             value={`${Number(latest.sku_health_score ?? 0).toFixed(0)}/100`}
             breakdown={buildHealthBreakdown(latest)}
             accent="violet"
           />
           <Kpi
-            label="TVelo (3 мес)"
+            label={t("sku.detail.kpi.tvelo")}
             value={tvelo.toFixed(2)}
-            sub={adjVsMedian || "шт/день"}
+            sub={adjVsMedian || t("sku.detail.unit.perDay")}
           />
           <Kpi
-            label="Покрытие"
-            value={latest.coverage_days != null ? `${Number(latest.coverage_days).toFixed(0)} д.` : "—"}
-            sub="дней до конца остатков"
+            label={t("sku.detail.kpi.coverage")}
+            value={latest.coverage_days != null ? t("sku.daysShort", { n: Number(latest.coverage_days).toFixed(0) }) : "—"}
+            sub={t("sku.detail.kpi.coverageSub")}
           />
           <HealthKpi
-            label="Достоверность"
+            label={t("sku.detail.kpi.confidence")}
             value={`${Number(latest.confidence_score ?? 0).toFixed(0)}%`}
             breakdown={buildConfidenceBreakdown(latest)}
             accent="blue"
           />
           <Kpi
-            label="Дней без наличия"
+            label={t("sku.detail.kpi.oos")}
             value={stockoutDays > 0 ? `${stockoutDays}` : "0"}
-            sub="за последний месяц"
+            sub={t("sku.detail.kpi.oosSub")}
             tone={stockoutDays > 0 ? "warn" : undefined}
           />
           <Kpi
-            label="Упущенная выручка"
+            label={t("sku.detail.kpi.lost")}
             value={lostRevenue > 0 ? Math.round(lostRevenue).toLocaleString("ru-RU") : "0"}
-            sub={lostRevenue > 0 ? `${lostUnits} шт × TVelo × OOS × цена` : "товар не уходил в ноль"}
+            sub={lostRevenue > 0 ? t("sku.detail.kpi.lostSub", { units: lostUnits }) : t("sku.detail.kpi.lostNone")}
             tone={lostRevenue > 0 ? "danger" : undefined}
           />
           <Kpi
-            label="Рекомендуемая закупка"
+            label={t("sku.detail.kpi.reorder")}
             value={recommendedReorder30 > 0 ? recommendedReorder30.toLocaleString("ru-RU") : "—"}
-            sub="на 30 дней (TVelo × 30)"
+            sub={t("sku.detail.kpi.reorderSub")}
             tone={recommendedReorder30 > 0 ? "accent" : undefined}
           />
           <Kpi
-            label="Остаток"
+            label={t("sku.detail.kpi.stock")}
             value={latest.current_stock != null ? Number(latest.current_stock).toLocaleString("ru-RU") : "—"}
-            sub={price > 0 ? `× ${price.toLocaleString("ru-RU")} ₽` : undefined}
+            sub={price > 0 ? t("sku.detail.kpi.stockSub", { price: price.toLocaleString("ru-RU") }) : undefined}
           />
         </div>
       )}
@@ -199,9 +200,9 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
       {/* Основной график — TVelo (зелёная), Цена (красная), Остаток/OOS (серые столбцы, красный bg).
           Использует существующий SkuAnalysisChart — он уже рисует то что описал Александр. */}
       <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
-        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-4">Анализ SKU</h2>
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-4">{t("sku.detail.analysis")}</h2>
         {chartData.length < 2 ? (
-          <p className="text-sm text-ink-muted">Недостаточно данных для графика (нужно 2+ дня)</p>
+          <p className="text-sm text-ink-muted">{t("sku.detail.chartEmpty")}</p>
         ) : (
           <SkuAnalysisChart data={chartData} changelogByDate={changelogByDate} />
         )}
@@ -219,9 +220,9 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
 
       {(elasticity ?? []).length > 0 && (
         <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
-          <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">Price elasticity</h2>
-          <h3 className="font-display text-base sm:text-lg font-medium text-ink mt-1">Влияние цены на скорость</h3>
-          <p className="text-sm text-ink-muted mb-4">Velocity до и после смены цены (минимум 7 in-stock дней с каждой стороны)</p>
+          <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">{t("sku.detail.elasticity.title")}</h2>
+          <h3 className="font-display text-base sm:text-lg font-medium text-ink mt-1">{t("sku.detail.elasticity.h")}</h3>
+          <p className="text-sm text-ink-muted mb-4">{t("sku.detail.elasticity.sub")}</p>
           <div className="grid gap-3">
             {(elasticity ?? []).map((e: any, i: number) => {
               const impact = Number(e.price_impact_percent);
@@ -232,7 +233,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
                     {new Date(e.change_date).toLocaleDateString("ru-RU")}
                   </div>
                   <div className="text-sm">
-                    <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Цена:</span>{" "}
+                    <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("sku.detail.priceColon")}</span>{" "}
                     <span className="font-mono text-ink-soft">{Number(e.previous_price).toFixed(2)}</span>
                     {" → "}
                     <span className="font-mono font-semibold text-ink">{Number(e.new_price).toFixed(2)}</span>
@@ -241,7 +242,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
                     </span>
                   </div>
                   <div className="text-sm flex-1 min-w-[180px]">
-                    <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Velocity:</span>{" "}
+                    <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("sku.detail.velocityColon")}</span>{" "}
                     <span className="font-mono text-ink-soft">{Number(e.velocity_before).toFixed(2)}</span>
                     {" → "}
                     <span className="font-mono font-semibold text-ink">{Number(e.velocity_after).toFixed(2)}</span>
@@ -262,13 +263,13 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
           Включает изменения цены (отображаются как replenishment_like с price diff)
           и аномалии. sales_like засорял список. */}
       <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
-        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">События</h2>
+        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">{t("sku.detail.events.title")}</h2>
         <h3 className="font-display text-base sm:text-lg font-medium text-ink mt-1 mb-4">
-          Последние события за 30 дней
-          <InfoTooltip text="Все события кроме обычных продаж. Здесь видны пополнения, аномалии, пересчёты — то что повлияло на расчёт скорости." />
+          {t("sku.detail.events.h")}
+          <InfoTooltip text={t("sku.detail.events.hint")} />
         </h3>
         {(changelog ?? []).length === 0 ? (
-          <p className="text-sm text-ink-muted">За последний месяц значимых событий не было</p>
+          <p className="text-sm text-ink-muted">{t("sku.detail.events.empty")}</p>
         ) : (
           <ul className="divide-y divide-line">
             {(changelog ?? []).map((e: any, i: number) => (
@@ -295,12 +296,12 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
 }
 
 const TYPE_LABELS: Record<string, string> = {
-  first_snapshot: "Старт",
-  replenishment_like: "Пополнение",
-  anomaly_like: "Аномалия",
-  missing_data: "Нет данных",
-  recount_like: "Пересчёт",
-  price_change: "Изменение цены",
+  first_snapshot: t("sku.eventType.first"),
+  replenishment_like: t("sku.eventType.replenishment"),
+  anomaly_like: t("sku.eventType.anomaly"),
+  missing_data: t("sku.eventType.missing"),
+  recount_like: t("sku.eventType.recount"),
+  price_change: t("sku.eventType.priceChange"),
 };
 
 const TYPE_STYLES: Record<string, string> = {

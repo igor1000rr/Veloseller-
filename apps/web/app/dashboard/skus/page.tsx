@@ -10,15 +10,16 @@ import { SearchInput } from "./SearchInput";
 import { NotesCell } from "./NotesCell";
 import { DashFilterChip } from "./DashFilterChip";
 import { ColumnsPicker } from "./ColumnsPicker";
+import { t } from "@/lib/i18n";
 
 const PAGE_SIZE = 50;
 
 const SEGMENTS = [
-  { value: "",                    label: "Все" },
-  { value: "fast_movers",         label: "Быстрые" },
-  { value: "stable",              label: "Стабильные" },
-  { value: "slow_movers",         label: "Медленные" },
-  { value: "dead_inventory_risk", label: "Неликвид" },
+  { value: "",                    label: t("sku.segment.all") },
+  { value: "fast_movers",         label: t("sku.segment.fast") },
+  { value: "stable",              label: t("sku.segment.stable") },
+  { value: "slow_movers",         label: t("sku.segment.slow") },
+  { value: "dead_inventory_risk", label: t("sku.segment.dead") },
 ];
 
 type DashboardFilter =
@@ -147,7 +148,7 @@ export default async function SkusPage({ searchParams }: {
   if (preHoliday) {
     defaultDateTo = isoDate(today);
     defaultDateFrom = preHoliday.windowStart;
-    preHolidayLabel = `🎁 Предпраздничный: ${preHoliday.daysBefore} дней до ${preHoliday.holidayName}`;
+    preHolidayLabel = t("sku.preHoliday.label", { days: preHoliday.daysBefore, holiday: preHoliday.holidayName });
   } else {
     defaultDateTo = isoDate(today);
     defaultDateFrom = daysAgo(periodDays);
@@ -448,7 +449,7 @@ export default async function SkusPage({ searchParams }: {
         <div className="min-w-0">
           <div className="inline-flex items-center gap-2 mb-2">
             <span className="size-1 rounded-full bg-lime-deep" />
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Inventory</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">{t("sku.list.eyebrow")}</span>
           </div>
           <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink">SKU</h1>
           {selected && (
@@ -462,13 +463,13 @@ export default async function SkusPage({ searchParams }: {
           )}
         </div>
         <form className="flex items-center gap-2 text-sm">
-          <label className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Закупка на</label>
+          <label className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("sku.list.reorderFor")}</label>
           <input
             type="number" name="reorder_days" defaultValue={reorderDays} min={1} max={365}
             inputMode="numeric"
             className="w-16 sm:w-20 px-2 py-1.5 border border-line rounded-lg text-center bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
           />
-          <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">дней</span>
+          <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("unit.days.many")}</span>
           {segmentFilter && <input type="hidden" name="segment" value={segmentFilter} />}
           {dashFilter && <input type="hidden" name="filter" value={dashFilter} />}
           {customThreshold !== null && <input type="hidden" name="threshold" value={customThreshold} />}
@@ -533,7 +534,7 @@ export default async function SkusPage({ searchParams }: {
               href={`/api/export/metrics?${exportQS}&format=excel`}
               download
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition min-h-[32px]"
-              title={activeFilterCount > 0 ? `Скачать метрики в Excel (с фильтрами: ${activeFilterCount})` : "Скачать метрики в Excel"}
+              title={activeFilterCount > 0 ? t("sku.list.exportExcelFiltered", { n: activeFilterCount }) : t("sku.list.exportExcel")}
             >
               <Icons.ArrowRight size={11} /> Excel
             </a>
@@ -541,7 +542,7 @@ export default async function SkusPage({ searchParams }: {
               href={`/api/export/metrics?${exportQS}&format=csv`}
               download
               className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-md text-ink-muted hover:text-ink hover:bg-bg-soft transition border-l border-line min-h-[32px]"
-              title={activeFilterCount > 0 ? `Скачать метрики в CSV (с фильтрами: ${activeFilterCount})` : "Скачать метрики в CSV"}
+              title={activeFilterCount > 0 ? t("sku.list.exportCsvFiltered", { n: activeFilterCount }) : t("sku.list.exportCsv")}
             >
               CSV
             </a>
@@ -553,12 +554,12 @@ export default async function SkusPage({ searchParams }: {
         <div className="rounded-xl border border-orange/30 bg-orange/5 p-4 flex items-start gap-3">
           <span className="text-orange mt-0.5 shrink-0">⛔️</span>
           <div className="flex-1 text-sm">
-            <div className="font-medium text-ink">Ни одного склада не подключено</div>
+            <div className="font-medium text-ink">{t("sku.list.noWarehouse.title")}</div>
             <p className="mt-1 text-ink-muted">
               <Link href={"/connections/new" as any} className="text-lime-deep underline hover:no-underline">
-                Подключите первый склад
+                {t("sku.list.noWarehouse.link")}
               </Link>{" "}
-              чтобы начать собирать данные по SKU.
+              {t("sku.list.noWarehouse.tail")}
             </p>
           </div>
         </div>
@@ -568,36 +569,36 @@ export default async function SkusPage({ searchParams }: {
         <table className="min-w-full text-sm">
           <thead className="bg-bg-soft border-b border-line">
             <tr>
-              <Th col="sku">SKU</Th>
-              <Th col="name">Название</Th>
-              <Th col="stock" align="right">Остаток</Th>
-              <Th col="price" align="right">Цена</Th>
-              <Th col="tvelo" align="right">TVelo</Th>
-              <Th col="trend" align="center">Тренд</Th>
-              <Th col="coverage" align="right">Покрытие</Th>
+              <Th col="sku">{t("sku.col.sku")}</Th>
+              <Th col="name">{t("sku.col.name")}</Th>
+              <Th col="stock" align="right">{t("sku.col.stock")}</Th>
+              <Th col="price" align="right">{t("sku.col.price")}</Th>
+              <Th col="tvelo" align="right">{t("sku.col.tvelo")}</Th>
+              <Th col="trend" align="center">{t("sku.col.trend")}</Th>
+              <Th col="coverage" align="right">{t("sku.col.coverage")}</Th>
               {/* Александр 01.06.2026: "OOS" → "Дней без наличия" */}
-              <Th col="oos" align="right">Дней без наличия ({displayPeriodDays}д)</Th>
+              <Th col="oos" align="right">{t("sku.col.oosDays", { n: displayPeriodDays })}</Th>
               <Th col="sales" align="right">
                 <span className="inline-flex items-center">
-                  Продажи
-                  <InfoTooltip text="Фактические продажи за период. В дни поступления товаров или аномальных данных продажи не учитываются. В эти дни считается средняя TVelo." />
+                  {t("sku.col.sales")}
+                  <InfoTooltip text={t("sku.list.salesTip")} />
                 </span>
               </Th>
-              <Th col="reorder" align="right">Закупка ({reorderDays}д)</Th>
+              <Th col="reorder" align="right">{t("sku.col.reorderDays", { n: reorderDays })}</Th>
               <Th col="confidence" align="right" accent>
                 <span className="inline-flex items-center">
-                  ДСТ
-                  <InfoTooltip text="Достоверность данных за указанный период. Чем больше дней для расчёта, тем выше качество предоставляемой информации. Учитывайте этот показатель для совершения действий." />
+                  {t("sku.col.confidence")}
+                  <InfoTooltip text={t("sku.list.confTip")} />
                 </span>
               </Th>
-              <Th col="health" align="right">Health</Th>
+              <Th col="health" align="right">{t("sku.col.health")}</Th>
               <Th col="lost_revenue" align="right">
                 <span className="inline-flex items-center">
-                  Потерянная выручка
-                  <InfoTooltip text="Потерянная выручка из-за отсутствия товара на складе." />
+                  {t("sku.col.lostRevenue")}
+                  <InfoTooltip text={t("sku.list.lostTip")} />
                 </span>
               </Th>
-              <Th col="notes">Заметки</Th>
+              <Th col="notes">{t("sku.col.notes")}</Th>
             </tr>
           </thead>
           <tbody className="divide-y divide-line">
@@ -644,7 +645,7 @@ export default async function SkusPage({ searchParams }: {
                       {p.product_name}
                     </Link>
                     {isUnderestimated && (
-                      <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">недооценён</span>
+                      <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">{t("sku.list.underestimated")}</span>
                     )}
                   </td>
                   <td className="col-skucol-stock px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{currentStock ?? "—"}</td>
@@ -654,16 +655,16 @@ export default async function SkusPage({ searchParams }: {
                   </td>
                   <td className="col-skucol-trend px-3 sm:px-4 py-3"><VelocitySparkline points={sparkData[p.product_id] ?? []} /></td>
                   <td className="col-skucol-coverage px-3 sm:px-4 py-3 text-right tabular text-ink-soft">
-                    {coverageDays != null ? `${coverageDays.toFixed(0)} д.` : "—"}
+                    {coverageDays != null ? t("sku.daysShort", { n: coverageDays.toFixed(0) }) : "—"}
                   </td>
-                  <td className="col-skucol-oos px-3 sm:px-4 py-3 text-right tabular" title="Дней без наличия за выбранный период">
+                  <td className="col-skucol-oos px-3 sm:px-4 py-3 text-right tabular" title={t("sku.filters.oos.hint")}>
                     {stockoutDays > 0 ? (
                       <span className="text-orange font-semibold">{stockoutDays}</span>
                     ) : (
                       <span className="text-ink-soft">0</span>
                     )}
                   </td>
-                  <td className="col-skucol-sales px-3 sm:px-4 py-3 text-right tabular text-ink-soft" title="Фактические продажи за период">
+                  <td className="col-skucol-sales px-3 sm:px-4 py-3 text-right tabular text-ink-soft" title={t("sku.list.salesTitle")}>
                     {salesUnits > 0 ? salesUnits : "—"}
                   </td>
                   <td className="col-skucol-reorder px-3 sm:px-4 py-3 text-right font-semibold tabular text-lime-deep">
@@ -683,7 +684,7 @@ export default async function SkusPage({ searchParams }: {
                       <span className="text-rose font-semibold whitespace-nowrap">
                         {Math.round(lostRev).toLocaleString("ru-RU")}
                         {lostUnits > 0 && (
-                          <span className="ml-1 text-rose/60 font-normal text-xs">({lostUnits} шт)</span>
+                          <span className="ml-1 text-rose/60 font-normal text-xs">{t("sku.list.unitsParen", { n: lostUnits })}</span>
                         )}
                       </span>
                     ) : (
@@ -700,8 +701,8 @@ export default async function SkusPage({ searchParams }: {
               <tr>
                 <td colSpan={14} className="px-3 sm:px-4 py-12 text-center text-ink-muted text-sm">
                   {selected
-                    ? `Пока нет данных по складу «${selected.name}». Дождитесь первой синхронизации или проверьте фильтры.`
-                    : "Пока нет данных или ничего не подходит под фильтр."}
+                    ? t("sku.list.emptySelected", { name: selected.name })
+                    : t("sku.list.emptyNone")}
                 </td>
               </tr>
             )}
@@ -712,19 +713,19 @@ export default async function SkusPage({ searchParams }: {
       {totalPages > 1 && (
         <div className="flex items-center justify-between text-sm flex-wrap gap-3">
           <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
-            Всего: <span className="text-ink-soft tabular">{count ?? 0}</span> SKU · страница <span className="text-ink-soft tabular">{page}</span> из <span className="text-ink-soft tabular">{totalPages}</span>
+            {t("sku.list.total")} <span className="text-ink-soft tabular">{count ?? 0}</span> {t("sku.list.pageLabel")} <span className="text-ink-soft tabular">{page}</span> {t("sku.list.of")} <span className="text-ink-soft tabular">{totalPages}</span>
           </span>
           <div className="flex gap-2">
             {page > 1 && (
               <Link href={`?${buildQs({ page: page - 1 })}` as any}
                     className="inline-flex items-center gap-1 px-3 py-2 border border-line rounded-lg text-ink-muted hover:text-ink hover:bg-bg-soft transition text-xs min-h-[36px]">
-                <span className="rotate-180"><Icons.ArrowRight size={11} /></span> Назад
+                <span className="rotate-180"><Icons.ArrowRight size={11} /></span> {t("sku.list.prev")}
               </Link>
             )}
             {page < totalPages && (
               <Link href={`?${buildQs({ page: page + 1 })}` as any}
                     className="inline-flex items-center gap-1 px-3 py-2 border border-line rounded-lg text-ink-muted hover:text-ink hover:bg-bg-soft transition text-xs min-h-[36px]">
-                Вперёд <Icons.ArrowRight size={11} />
+                {t("sku.list.next")} <Icons.ArrowRight size={11} />
               </Link>
             )}
           </div>
