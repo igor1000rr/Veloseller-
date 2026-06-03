@@ -3,6 +3,7 @@
   "unit.days.few": "дня",
   "unit.days.many": "дней",
   "unit.days.other": "дней",
+  "unit.dayShort": "дн",
   "unit.bytes.b": "Б",
   "unit.bytes.kb": "КБ",
   "unit.bytes.mb": "МБ"
