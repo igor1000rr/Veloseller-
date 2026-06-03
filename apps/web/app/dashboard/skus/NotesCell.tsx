@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { saveUserNotes } from "./actions";
+import { t } from "@/lib/i18n";
 
 type Status = "idle" | "saving" | "saved" | "error";
 
@@ -79,9 +80,9 @@ export function NotesCell({ productId, initial }: { productId: string; initial: 
         type="button"
         onClick={() => setEditing(true)}
         className="text-left text-xs text-ink-soft hover:text-ink hover:bg-bg-soft px-2 py-2 -mx-2 -my-1 rounded max-w-[200px] truncate block w-full transition min-h-[32px]"
-        title={value || "Кликните чтобы добавить заметку"}
+        title={value || t("sku.notes.addHint")}
       >
-        {value || <span className="text-ink-hush italic">+ заметка</span>}
+        {value || <span className="text-ink-hush italic">{t("sku.notes.addBtn")}</span>}
       </button>
     );
   }
@@ -108,13 +109,13 @@ export function NotesCell({ productId, initial }: { productId: string; initial: 
         }}
         rows={2}
         maxLength={2000}
-        placeholder="например: взять 200 шт у поставщика X"
+        placeholder={t("sku.notes.placeholder")}
         className="w-full px-2 py-1.5 text-xs border border-lime-deep/40 rounded resize-y min-h-[48px] bg-paper focus:outline-none focus:border-lime-deep font-sans"
       />
       <div className="absolute -bottom-4 right-0 font-mono text-[9px] uppercase tracking-wider">
-        {status === "saving" && <span className="text-ink-hush">сохраняется…</span>}
-        {status === "saved" && <span className="text-lime-deep">сохранено</span>}
-        {status === "error" && <span className="text-rose">ошибка</span>}
+        {status === "saving" && <span className="text-ink-hush">{t("sku.notes.saving")}</span>}
+        {status === "saved" && <span className="text-lime-deep">{t("sku.notes.saved")}</span>}
+        {status === "error" && <span className="text-rose">{t("sku.notes.error")}</span>}
       </div>
     </div>
   );

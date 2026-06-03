@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { t } from "@/lib/i18n";
 
 export function HealthKpi({
   label,
@@ -35,7 +36,7 @@ export function HealthKpi({
 
       {open && breakdown.length > 0 && (
         <div className="absolute z-10 left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg p-3 w-64 text-sm">
-          <div className="text-xs font-semibold text-slate-700 mb-2">Причины</div>
+          <div className="text-xs font-semibold text-slate-700 mb-2">{t("sku.health.reasons")}</div>
           <ul className="space-y-1.5">
             {breakdown.map((b, i) => (
               <li key={i} className="flex justify-between gap-3 text-xs">
@@ -64,27 +65,27 @@ export function buildHealthBreakdown(m: any): BreakdownRow[] {
   const periodDays = Number(m.in_stock_days ?? 0) + Number(m.stockout_days ?? 0);
   if (m.stockout_days != null && m.stockout_days > 0 && periodDays > 0) {
     const penalty = Math.min(40, (Number(m.stockout_days) / periodDays) * 40);
-    rows.push({ label: `Stockout (${m.stockout_days}/${periodDays} дн)`, value: `−${penalty.toFixed(1)}`, tone: "bad" });
+    rows.push({ label: t("sku.health.bd.stockout", { days: m.stockout_days, period: periodDays }), value: `−${penalty.toFixed(1)}`, tone: "bad" });
   }
   if (m.coverage_days != null && Number(m.coverage_days) <= 7) {
     const cov = Number(m.coverage_days);
     const penalty = Math.max(0, ((7 - cov) / 7) * 25);
-    rows.push({ label: `Низкое покрытие (${cov.toFixed(0)} дн)`, value: `−${penalty.toFixed(1)}`, tone: "warn" });
+    rows.push({ label: t("sku.health.bd.lowCoverage", { days: cov.toFixed(0) }), value: `−${penalty.toFixed(1)}`, tone: "warn" });
   }
   if (m.coverage_days != null && Number(m.coverage_days) > 180) {
     const cov = Number(m.coverage_days);
     const penalty = Math.min(25, ((cov - 180) / 180) * 25);
-    rows.push({ label: `Неликвид (${cov.toFixed(0)} дн)`, value: `−${penalty.toFixed(1)}`, tone: "warn" });
+    rows.push({ label: t("sku.health.bd.illiquid", { days: cov.toFixed(0) }), value: `−${penalty.toFixed(1)}`, tone: "warn" });
   }
   if (m.confidence_score != null) {
     const conf = Number(m.confidence_score);
     const penalty = (100 - conf) * 0.2;
     if (penalty > 0) {
-      rows.push({ label: `Confidence (${conf.toFixed(0)}%)`, value: `−${penalty.toFixed(1)}`, tone: "neutral" });
+      rows.push({ label: t("sku.health.bd.confidence", { pct: conf.toFixed(0) }), value: `−${penalty.toFixed(1)}`, tone: "neutral" });
     }
   }
   if (rows.length === 0) {
-    rows.push({ label: "Всё в порядке", value: "0", tone: "neutral" });
+    rows.push({ label: t("sku.health.bd.allGood"), value: "0", tone: "neutral" });
   }
   return rows;
 }
@@ -103,10 +104,10 @@ export function buildConfidenceBreakdown(m: any): BreakdownRow[] {
   if (!cb || typeof cb !== "object") return [];
   const rows: BreakdownRow[] = [];
   const labels: Array<[string, string]> = [
-    ["replenishment_like", "Пополнения"],
-    ["anomaly_like",       "Аномалии"],
-    ["missing_data",       "Нет данных"],
-    ["low_history",        "Мало истории"],
+    ["replenishment_like", t("sku.conf.replenishment")],
+    ["anomaly_like",       t("sku.conf.anomaly")],
+    ["missing_data",       t("sku.conf.missingData")],
+    ["low_history",        t("sku.conf.lowHistory")],
   ];
   for (const [key, label] of labels) {
     const v = Number(cb[key] ?? 0);
@@ -114,6 +115,6 @@ export function buildConfidenceBreakdown(m: any): BreakdownRow[] {
       rows.push({ label, value: `−${v.toFixed(1)}%`, tone: "warn" });
     }
   }
-  if (rows.length === 0) rows.push({ label: "Все события чистые", value: "0%", tone: "neutral" });
+  if (rows.length === 0) rows.push({ label: t("sku.conf.allClean"), value: "0%", tone: "neutral" });
   return rows;
 }

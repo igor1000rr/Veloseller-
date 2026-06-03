@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { InfoTooltip } from "../../_components/InfoTooltip";
+import { t } from "@/lib/i18n";
 
 // Расширено (правка 4): добавлены frequently_oos / inventory_concentration /
 // demand_concentration для трёх блоков полосы 4 на /dashboard.
@@ -17,25 +18,25 @@ type DashFilter =
   | "demand_concentration";
 
 const FILTER_LABELS: Record<DashFilter, string> = {
-  low_stock:               "Низкий остаток",
-  lost_revenue:            "Потерянная выручка",
-  dead_inventory:          "Неликвид",
-  oos:                     "Нет в наличии",
-  inactive:                "SKU без активности",
-  frequently_oos:          "Часто отсутствуют",
-  inventory_concentration: "Концентрация остатков",
-  demand_concentration:    "Концентрация спроса",
+  low_stock:               t("sku.filter.lowStock.label"),
+  lost_revenue:            t("sku.filter.lostRevenue.label"),
+  dead_inventory:          t("sku.filter.dead.label"),
+  oos:                     t("sku.filter.oos.label"),
+  inactive:                t("sku.filter.inactive.label"),
+  frequently_oos:          t("sku.filter.frequentOos.label"),
+  inventory_concentration: t("sku.filter.invConc.label"),
+  demand_concentration:    t("sku.filter.demandConc.label"),
 };
 
 const FILTER_DESCRIPTIONS: Record<DashFilter, (threshold: number) => string> = {
-  low_stock:               (t) => `покрытие ≤ ${t} дней`,
-  lost_revenue:            () => "была недополучка из-за OOS",
-  dead_inventory:          (t) => `покрытие > ${t} дней`,
-  oos:                     () => "активные SKU (с движением за 30 дней)",
-  inactive:                () => "0 остаток + нет движений",
-  frequently_oos:          (t) => `OOS > ${t} дней за период`,
-  inventory_concentration: () => "топ-N держат 50% денег в остатках",
-  demand_concentration:    () => "топ-N дают 50% спроса",
+  low_stock:               (n) => t("sku.filter.lowStock.desc", { n }),
+  lost_revenue:            () => t("sku.filter.lostRevenue.desc"),
+  dead_inventory:          (n) => t("sku.filter.dead.desc", { n }),
+  oos:                     () => t("sku.filter.oos.desc"),
+  inactive:                () => t("sku.filter.inactive.desc"),
+  frequently_oos:          (n) => t("sku.filter.frequentOos.desc", { n }),
+  inventory_concentration: () => t("sku.filter.invConc.desc"),
+  demand_concentration:    () => t("sku.filter.demandConc.desc"),
 };
 
 function hasThreshold(filter: DashFilter): boolean {
@@ -92,20 +93,20 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
 
   // Префикс для подписи рядом с input — зависит от фильтра.
   const thresholdPrefix =
-    filter === "low_stock" ? "покрытие ≤" :
-    filter === "dead_inventory" ? "покрытие >" :
-    filter === "frequently_oos" ? "OOS >" :
+    filter === "low_stock" ? t("sku.filter.prefix.coverageLe") :
+    filter === "dead_inventory" ? t("sku.filter.prefix.coverageGt") :
+    filter === "frequently_oos" ? t("sku.filter.prefix.oosGt") :
     "";
 
   const thresholdSuffix =
-    filter === "frequently_oos" ? "дней за период" : "дней";
+    filter === "frequently_oos" ? t("sku.filter.suffix.daysPeriod") : t("unit.days.many");
 
   return (
     <div className="rounded-xl border border-lime-deep/30 bg-lime-soft p-3">
       {/* Верхняя строка: метка фильтра */}
       <div className="flex items-center gap-2 flex-wrap mb-2">
         <span className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold shrink-0">
-          фильтр с обзора
+          {t("sku.filter.fromOverview")}
         </span>
         <span className="text-sm text-ink font-medium">
           {FILTER_LABELS[filter]}
@@ -135,7 +136,7 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
               className="w-20 px-2 py-1.5 border border-line rounded bg-paper text-center font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
             />
             {thresholdSuffix}
-            <InfoTooltip text="Измените порог чтобы пересчитать список. Нажмите Enter или кликните вне поля для применения." />
+            <InfoTooltip text={t("sku.filter.thresholdHint")} />
           </span>
         ) : (
           <span className="text-sm text-ink-soft">{description}</span>
@@ -145,7 +146,7 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
       {/* Нижняя строка: период + сбросить, separator-line на мобиле */}
       <div className="mt-3 pt-3 border-t border-lime-deep/20 flex items-center justify-between gap-3 flex-wrap">
         <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
-          период {periodDays} дней
+          {t("sku.filter.periodDays", { n: periodDays })}
         </span>
         <button
           type="button"
@@ -156,7 +157,7 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
           }}
           className="text-xs font-medium text-ink-muted hover:text-ink underline underline-offset-2 transition py-1"
         >
-          сбросить
+          {t("sku.filter.reset")}
         </button>
       </div>
     </div>

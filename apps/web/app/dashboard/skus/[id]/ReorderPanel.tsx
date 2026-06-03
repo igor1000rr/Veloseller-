@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { t } from "@/lib/i18n";
 
 type Props = {
   productId: string;
@@ -38,42 +39,42 @@ export function ReorderPanel({ productId, adjustedVelocity, currentStock, leadTi
 
   return (
     <div className="bg-white border border-slate-200 rounded-2xl p-6">
-      <h2 className="text-lg font-semibold text-slate-900 mb-1">Закупка</h2>
-      <p className="text-sm text-slate-500 mb-4">Когда заказывать и сколько с учётом срока поставки</p>
+      <h2 className="text-lg font-semibold text-slate-900 mb-1">{t("sku.reorder.title")}</h2>
+      <p className="text-sm text-slate-500 mb-4">{t("sku.reorder.subtitle")}</p>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <label className="block">
-          <span className="text-xs font-medium text-slate-700">Lead time (дней)</span>
+          <span className="text-xs font-medium text-slate-700">{t("sku.reorder.leadTimeLabel")}</span>
           <input type="number" value={leadTime} onChange={e => setLeadTime(parseInt(e.target.value) || 0)}
                  className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg" min={0} max={365}/>
         </label>
         <label className="block">
-          <span className="text-xs font-medium text-slate-700">Safety days</span>
+          <span className="text-xs font-medium text-slate-700">{t("sku.reorder.safetyDaysLabel")}</span>
           <input type="number" value={safety} onChange={e => setSafety(parseInt(e.target.value) || 0)}
                  className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg" min={0} max={365}/>
         </label>
         <label className="block">
-          <span className="text-xs font-medium text-slate-700">Закупить на (дней)</span>
+          <span className="text-xs font-medium text-slate-700">{t("sku.reorder.reorderForLabel")}</span>
           <input type="number" value={reorderFor} onChange={e => setReorderFor(parseInt(e.target.value) || 0)}
                  className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg" min={1} max={365}/>
         </label>
       </div>
 
       <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label="Safety stock" value={safetyStock} />
-        <Stat label="Reorder point" value={reorderPoint} accent="blue" />
-        <Stat label="До заказа" value={daysUntilReorder == null ? "—" : `${daysUntilReorder} дн`}
+        <Stat label={t("sku.reorder.safetyStock")} value={safetyStock} />
+        <Stat label={t("sku.reorder.reorderPoint")} value={reorderPoint} accent="blue" />
+        <Stat label={t("sku.reorder.untilReorder")} value={daysUntilReorder == null ? "—" : `${daysUntilReorder} ${t("unit.dayShort")}`}
               accent={daysUntilReorder != null && daysUntilReorder <= 0 ? "red" : daysUntilReorder != null && daysUntilReorder <= 7 ? "amber" : "slate"} />
-        <Stat label={`Заказать сейчас`} value={recommendedQty} accent="violet" />
+        <Stat label={t("sku.reorder.orderNow")} value={recommendedQty} accent="violet" />
       </div>
 
       <div className="mt-4 flex items-center gap-3">
         <button onClick={save} disabled={saving}
                 className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm rounded-lg disabled:opacity-50">
-          {saving ? "Сохранение…" : "Сохранить lead/safety"}
+          {saving ? t("common.saving") : t("sku.reorder.saveBtn")}
         </button>
         {daysUntilReorder != null && daysUntilReorder === 0 && (
-          <span className="text-sm text-red-700 font-medium">⚠ Пора заказывать</span>
+          <span className="text-sm text-red-700 font-medium">⚠ {t("sku.reorder.timeToReorder")}</span>
         )}
       </div>
     </div>

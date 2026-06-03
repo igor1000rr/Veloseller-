@@ -3,6 +3,7 @@ import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, ReferenceDot, ReferenceLine, Area,
 } from "recharts";
+import { t } from "@/lib/i18n";
 
 export type ChartPoint = {
   date: string;
@@ -20,12 +21,12 @@ export type ChangelogByDate = Record<string, Array<{
 }>>;
 
 const TYPE_LABELS: Record<string, string> = {
-  first_snapshot: "Старт",
-  sales_like: "Продажа",
-  replenishment_like: "Пополнение",
-  anomaly_like: "Аномалия",
-  missing_data: "Нет данных",
-  recount_like: "Recount",
+  first_snapshot: t("sku.eventType.first"),
+  sales_like: t("sku.eventType.sale"),
+  replenishment_like: t("sku.eventType.replenishment"),
+  anomaly_like: t("sku.eventType.anomaly"),
+  missing_data: t("sku.eventType.missing"),
+  recount_like: t("sku.eventType.recount"),
 };
 
 export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]; changelogByDate?: ChangelogByDate }) {
@@ -63,13 +64,13 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
         <div className="font-display font-medium text-ink mb-2">{p.dateLabel}</div>
         <div className="space-y-1 font-mono text-xs">
           <Row label="TVelo" value={Number(p.velocity).toFixed(2)} color="#3f6212" />
-          <Row label="Цена" value={Number(p.price).toFixed(2)} color="#7c3aed" />
-          <Row label="Остаток" value={String(p.stock)} />
-          <Row label="Доступность" value={p.availability ? "в наличии" : "OOS"} color={p.availability ? "#3f6212" : "#e11d48"} />
+          <Row label={t("sku.chart.price")} value={Number(p.price).toFixed(2)} color="#7c3aed" />
+          <Row label={t("sku.chart.stock")} value={String(p.stock)} />
+          <Row label={t("sku.chart.availability")} value={p.availability ? t("sku.chart.inStock") : "OOS"} color={p.availability ? "#3f6212" : "#e11d48"} />
         </div>
         {pc && (
           <div className="mt-3 pt-2 border-t border-line">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-violet-700 font-semibold mb-1">изменение цены</div>
+            <div className="font-mono text-[10px] uppercase tracking-widest text-violet-700 font-semibold mb-1">{t("sku.chart.priceChange")}</div>
             <div className="text-xs text-ink-soft font-mono">
               {pc.prev.toFixed(2)} → {pc.price.toFixed(2)}{" "}
               <span className={pc.pct > 0 ? "text-orange font-semibold" : "text-lime-deep font-semibold"}>
@@ -80,7 +81,7 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
         )}
         {events.length > 0 && (
           <div className="mt-3 pt-2 border-t border-line">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1">журнал</div>
+            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1">{t("sku.chart.journal")}</div>
             {events.map((e, i) => (
               <div key={i} className="text-xs text-ink-muted mb-1 leading-snug">
                 <span className="inline-block font-mono px-1.5 py-0.5 rounded bg-bg-soft border border-line text-[10px] text-ink-soft uppercase tracking-wider mr-1.5">
@@ -104,18 +105,18 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
         <CartesianGrid strokeDasharray="3 3" stroke="#e6e3d4" vertical={false} />
         <XAxis dataKey="dateLabel" stroke="#8a8a7e" fontSize={11} tickLine={false} />
         <YAxis yAxisId="velocity" stroke="#3f6212" fontSize={11} tickLine={false}
-               label={{ value: "TVelo / Остаток", angle: -90, position: "insideLeft", fill: "#3f6212", fontSize: 11 }} />
+               label={{ value: t("sku.chart.axisLeft"), angle: -90, position: "insideLeft", fill: "#3f6212", fontSize: 11 }} />
         <YAxis yAxisId="price" orientation="right" stroke="#7c3aed" fontSize={11} tickLine={false}
-               label={{ value: "Цена", angle: 90, position: "insideRight", fill: "#7c3aed", fontSize: 11 }} />
+               label={{ value: t("sku.chart.price"), angle: 90, position: "insideRight", fill: "#7c3aed", fontSize: 11 }} />
         <Tooltip content={<CustomTooltip />} />
         <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" />
 
         {/* OOS-полосы (availability=0) */}
         <Area yAxisId="velocity" type="step" dataKey={(d: any) => d.availability === 0 ? 100 : 0}
-              fill="#fecaca" stroke="none" name="Out of stock" isAnimationActive={false} />
+              fill="#fecaca" stroke="none" name={t("sku.chart.oosLegend")} isAnimationActive={false} />
 
         {/* Остаток — бары */}
-        <Bar yAxisId="velocity" dataKey="stock" fill="#a5ada3" name="Остаток" opacity={0.55} />
+        <Bar yAxisId="velocity" dataKey="stock" fill="#a5ada3" name={t("sku.chart.stock")} opacity={0.55} />
 
         {/* TVelo (Rule 5.3) */}
         <Line yAxisId="velocity" type="monotone" dataKey="velocity" stroke="#3f6212"
@@ -123,7 +124,7 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
 
         {/* Цена (Rule 12.2 — точки изменения) */}
         <Line yAxisId="price" type="monotone" dataKey="price" stroke="#7c3aed"
-              strokeWidth={2} strokeDasharray="4 4" dot={false} name="Цена" />
+              strokeWidth={2} strokeDasharray="4 4" dot={false} name={t("sku.chart.price")} />
 
         {/* Rule 12.2 — vertical markers на каждое изменение цены */}
         {priceChanges.map((pc, i) => (

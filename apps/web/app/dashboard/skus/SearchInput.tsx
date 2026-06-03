@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { t } from "@/lib/i18n";
 
 /**
  * Отдельный поиск SKU. Вынесен из SkusFilters в свой компонент чтобы
@@ -45,7 +46,7 @@ export function SearchInput() {
         type="text"
         value={value}
         onChange={e => onChange(e.target.value)}
-        placeholder="Например, название бренда"
+        placeholder={t("sku.search.placeholder")}
         className="w-full px-3 py-2 pl-9 border border-line rounded-lg text-sm bg-paper focus:outline-none focus:border-lime-deep transition min-h-[40px]"
       />
       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-hush text-sm">⌕</span>

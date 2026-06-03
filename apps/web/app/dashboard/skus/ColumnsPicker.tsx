@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { t } from "@/lib/i18n";
 
 /**
  * Регулировка видимости столбцов в таблице SKU.
@@ -24,20 +25,20 @@ export type ColumnKey =
   | "lost_revenue" | "notes";
 
 export const ALL_COLUMNS: { key: ColumnKey; label: string; required?: boolean }[] = [
-  { key: "sku",          label: "SKU",                required: true },
-  { key: "name",         label: "Название",           required: true },
-  { key: "stock",        label: "Остаток" },
-  { key: "price",        label: "Цена" },
-  { key: "tvelo",        label: "TVelo" },
-  { key: "trend",        label: "Тренд" },
-  { key: "coverage",     label: "Покрытие" },
-  { key: "oos",          label: "OOS" },
-  { key: "sales",        label: "Продажи" },
-  { key: "reorder",      label: "Закупка" },
-  { key: "confidence",   label: "ДСТ" },
-  { key: "health",       label: "Health" },
-  { key: "lost_revenue", label: "Потерянная выручка" },
-  { key: "notes",        label: "Заметки" },
+  { key: "sku",          label: t("sku.col.sku"),                required: true },
+  { key: "name",         label: t("sku.col.name"),           required: true },
+  { key: "stock",        label: t("sku.col.stock") },
+  { key: "price",        label: t("sku.col.price") },
+  { key: "tvelo",        label: t("sku.col.tvelo") },
+  { key: "trend",        label: t("sku.col.trend") },
+  { key: "coverage",     label: t("sku.col.coverage") },
+  { key: "oos",          label: t("sku.col.oos") },
+  { key: "sales",        label: t("sku.col.sales") },
+  { key: "reorder",      label: t("sku.col.reorder") },
+  { key: "confidence",   label: t("sku.col.confidence") },
+  { key: "health",       label: t("sku.col.health") },
+  { key: "lost_revenue", label: t("sku.col.lostRevenue") },
+  { key: "notes",        label: t("sku.col.notes") },
 ];
 
 const STORAGE_KEY = "veloseller-sku-columns";
@@ -150,9 +151,9 @@ export function ColumnsPicker() {
           type="button"
           onClick={() => setOpen(o => !o)}
           className="inline-flex items-center gap-2 px-3 py-2 text-xs font-medium rounded-lg border border-line bg-paper text-ink-muted hover:text-ink hover:border-lime-deep/40 transition min-h-[36px]"
-          title="Регулировка столбцов"
+          title={t("sku.cols.btnTitle")}
         >
-          <span>☰ Столбцы</span>
+          <span>☰ {t("sku.cols.btn")}</span>
           {hiddenCount > 0 && (
             <span className="font-mono text-[10px] text-lime-deep font-semibold">
               {visible.size}/{ALL_COLUMNS.length}
@@ -164,32 +165,32 @@ export function ColumnsPicker() {
           <div className="absolute right-0 mt-2 z-20 w-[calc(100vw-2rem)] max-w-xs sm:w-64 rounded-xl border border-line bg-paper shadow-lg p-3">
             <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
               <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
-                Видимые столбцы
+                {t("sku.cols.heading")}
               </span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={showAll}
                   className="text-[10px] font-mono uppercase tracking-wider text-lime-deep hover:text-ink transition"
-                  title="Показать все"
+                  title={t("sku.cols.showAllTitle")}
                 >
-                  все
+                  {t("sku.cols.all")}
                 </button>
                 <button
                   type="button"
                   onClick={showMobileOnly}
                   className="text-[10px] font-mono uppercase tracking-wider text-ink-muted hover:text-ink transition"
-                  title="Преcет для мобильного — только важные"
+                  title={t("sku.cols.mobileTitle")}
                 >
-                  мобильно
+                  {t("sku.cols.mobile")}
                 </button>
                 <button
                   type="button"
                   onClick={clearAll}
                   className="text-[10px] font-mono uppercase tracking-wider text-ink-muted hover:text-ink transition"
-                  title="Скрыть всё необязательное"
+                  title={t("sku.cols.collapseTitle")}
                 >
-                  свернуть
+                  {t("sku.cols.collapse")}
                 </button>
               </div>
             </div>
@@ -215,7 +216,7 @@ export function ColumnsPicker() {
                       />
                       <span className="text-ink-soft">{col.label}</span>
                       {col.required && (
-                        <span className="ml-auto font-mono text-[9px] uppercase tracking-widest text-ink-hush">обяз.</span>
+                        <span className="ml-auto font-mono text-[9px] uppercase tracking-widest text-ink-hush">{t("sku.cols.required")}</span>
                       )}
                     </label>
                   </li>
@@ -223,7 +224,7 @@ export function ColumnsPicker() {
               })}
             </ul>
             <p className="mt-3 pt-2 border-t border-line text-[10px] text-ink-hush font-mono">
-              Настройка сохраняется в этом браузере
+              {t("sku.cols.persistNote")}
             </p>
           </div>
         )}
