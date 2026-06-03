@@ -1,0 +1,23 @@
+{
+  "report.title": "Отчёты",
+  "report.titleTip": "История отправленных Excel-файлов. Отчёты формируются по расписанию из ваших подписок — день недели задаётся в настройках. Несколько отчётов на один день объединяются в один файл с разными листами.",
+  "report.totalSentLabel": "Всего отправлено:",
+  "report.emptyHint": "Здесь будет история отправленных Excel-отчётов",
+  "report.settingsLink": "Настройка отчётов",
+  "report.empty.title": "Отчётов пока не было",
+  "report.empty.hasSubsPre": "У вас настроено",
+  "report.empty.hasSubsPost": "подписок. Первый отчёт придёт в указанный день недели в 12:00 МСК.",
+  "report.empty.noSubs": "Настройте подписки — выберите какие отчёты получать и в какой день недели. По умолчанию у вас уже добавлены все 7 типов отчётов на понедельник.",
+  "report.empty.openSettings": "Открыть настройки",
+  "report.skippedNoData": "За этот день не было данных по выбранным фильтрам",
+  "report.kind.criticalStock": "Критический остаток",
+  "report.kind.lowStock": "Низкий остаток",
+  "report.kind.deadInventory": "Неликвид",
+  "report.kind.repeatedStockout": "Частый out-of-stock",
+  "report.kind.underestimatedSku": "Недооценённый SKU",
+  "report.kind.syncError": "Ошибки синхронизации",
+  "report.kind.weeklyReport": "Сводка по складу",
+  "report.status.sent": "Отправлен",
+  "report.status.failed": "Ошибка",
+  "report.status.skipped": "Пропущен"
+}

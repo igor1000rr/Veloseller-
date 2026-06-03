@@ -6,15 +6,34 @@
  * build-time константой LOCALE (см. lib/features.ts), словарь выбирается
  * статически. t() одинаково работает и в серверных, и в "use client" компонентах.
  *
- * Миграция строк — постепенная: страницы переводим на t() пачками, каждый раз
- * сверяя значение в ru.json с фактическим текстом страницы (чтобы РФ-текст
- * не поехал). Пропущенный ключ возвращается как есть — сразу видно в UI.
+ * Словари разбиты по неймспейсам (messages/{ru,en}/<namespace>.json) и
+ * склеиваются здесь spread'ом. При миграции страницы ключи добавляются только
+ * в свой неймспейс — пуш маленький, общий словарь целиком больше не трогаем.
+ * Ключи плоские с префиксом неймспейса ("dashboard.title"), коллизий между
+ * файлами нет. Пропущенный ключ возвращается как есть — сразу видно в UI.
  */
-import ru from "@/messages/ru.json";
-import en from "@/messages/en.json";
+import ruCommon from "@/messages/ru/common.json";
+import ruNav from "@/messages/ru/nav.json";
+import ruAuth from "@/messages/ru/auth.json";
+import ruSettings from "@/messages/ru/settings.json";
+import ruError from "@/messages/ru/error.json";
+import ruUnit from "@/messages/ru/unit.json";
+import ruDashboard from "@/messages/ru/dashboard.json";
+import ruReport from "@/messages/ru/report.json";
+import enCommon from "@/messages/en/common.json";
+import enNav from "@/messages/en/nav.json";
+import enAuth from "@/messages/en/auth.json";
+import enSettings from "@/messages/en/settings.json";
+import enError from "@/messages/en/error.json";
+import enUnit from "@/messages/en/unit.json";
+import enDashboard from "@/messages/en/dashboard.json";
+import enReport from "@/messages/en/report.json";
 import { LOCALE } from "@/lib/features";
 
 type Messages = Record<string, string>;
+
+const ru: Messages = { ...ruCommon, ...ruNav, ...ruAuth, ...ruSettings, ...ruError, ...ruUnit, ...ruDashboard, ...ruReport };
+const en: Messages = { ...enCommon, ...enNav, ...enAuth, ...enSettings, ...enError, ...enUnit, ...enDashboard, ...enReport };
 
 const CATALOGS: Record<string, Messages> = { ru, en };
 

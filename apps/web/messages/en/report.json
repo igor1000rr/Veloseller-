@@ -1,0 +1,23 @@
+{
+  "report.title": "Reports",
+  "report.titleTip": "History of sent Excel files. Reports are generated on schedule from your subscriptions — the weekday is set in settings. Several reports for one day are combined into a single file with separate sheets.",
+  "report.totalSentLabel": "Total sent:",
+  "report.emptyHint": "Your sent Excel report history will appear here",
+  "report.settingsLink": "Report settings",
+  "report.empty.title": "No reports yet",
+  "report.empty.hasSubsPre": "You have",
+  "report.empty.hasSubsPost": "subscriptions. The first report will arrive on the chosen weekday at 12:00 MSK.",
+  "report.empty.noSubs": "Set up subscriptions — choose which reports to receive and on which weekday. By default, all 7 report types are already added for Monday.",
+  "report.empty.openSettings": "Open settings",
+  "report.skippedNoData": "There was no data for that day with the selected filters",
+  "report.kind.criticalStock": "Critical stock",
+  "report.kind.lowStock": "Low stock",
+  "report.kind.deadInventory": "Dead stock",
+  "report.kind.repeatedStockout": "Frequent out-of-stock",
+  "report.kind.underestimatedSku": "Underestimated SKU",
+  "report.kind.syncError": "Sync errors",
+  "report.kind.weeklyReport": "Warehouse summary",
+  "report.status.sent": "Sent",
+  "report.status.failed": "Error",
+  "report.status.skipped": "Skipped"
+}

@@ -1,0 +1,21 @@
+{
+  "settings.kicker": "Settings",
+  "settings.title": "Настройки",
+  "settings.subtitle": "Профиль и уведомления",
+  "settings.section.profile": "Профиль",
+  "settings.section.notifications": "Уведомления",
+  "settings.field.name": "Имя",
+  "settings.field.namePlaceholder": "Как к вам обращаться",
+  "settings.field.timezone": "Часовой пояс",
+  "settings.field.timezonePlaceholder": "Europe/Moscow",
+  "settings.field.timezoneHint": "IANA tz. Примеры: Europe/Moscow (UTC+3, MSK), Europe/Samara (UTC+4, MSK+1), Asia/Yekaterinburg (UTC+5, MSK+2), Asia/Krasnoyarsk (UTC+7, MSK+4), Asia/Vladivostok (UTC+10, MSK+7)",
+  "settings.notify.email": "Email — регулярные сводные отчёты",
+  "settings.notify.telegram": "Telegram — регулярные сводные отчёты",
+  "settings.telegram.chatIdLabel": "Telegram Chat ID",
+  "settings.telegram.chatIdPlaceholder": "Привяжется автоматически",
+  "settings.telegram.connectAuto": "Подключить Telegram автоматически",
+  "settings.telegram.manualHintBefore": "Или введите Chat ID вручную. Получить можно через ",
+  "settings.telegram.manualHintAfter": ".",
+  "settings.saved": "Сохранено",
+  "settings.saveError": "Ошибка: {error}"
+}

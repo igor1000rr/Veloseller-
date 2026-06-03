@@ -1,0 +1,21 @@
+{
+  "settings.kicker": "Settings",
+  "settings.title": "Settings",
+  "settings.subtitle": "Profile & notifications",
+  "settings.section.profile": "Profile",
+  "settings.section.notifications": "Notifications",
+  "settings.field.name": "Name",
+  "settings.field.namePlaceholder": "How should we address you",
+  "settings.field.timezone": "Timezone",
+  "settings.field.timezonePlaceholder": "America/New_York",
+  "settings.field.timezoneHint": "IANA tz. Examples: America/New_York (UTC−5), Europe/London (UTC±0), Europe/Berlin (UTC+1), Asia/Dubai (UTC+4), Asia/Tokyo (UTC+9)",
+  "settings.notify.email": "Email — regular summary reports",
+  "settings.notify.telegram": "Telegram — regular summary reports",
+  "settings.telegram.chatIdLabel": "Telegram Chat ID",
+  "settings.telegram.chatIdPlaceholder": "Will link automatically",
+  "settings.telegram.connectAuto": "Connect Telegram automatically",
+  "settings.telegram.manualHintBefore": "Or enter the Chat ID manually. Get it via ",
+  "settings.telegram.manualHintAfter": ".",
+  "settings.saved": "Saved",
+  "settings.saveError": "Error: {error}"
+}

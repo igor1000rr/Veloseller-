@@ -1,0 +1,9 @@
+{
+  "unit.days.one": "day",
+  "unit.days.few": "days",
+  "unit.days.many": "days",
+  "unit.days.other": "days",
+  "unit.bytes.b": "B",
+  "unit.bytes.kb": "KB",
+  "unit.bytes.mb": "MB"
+}

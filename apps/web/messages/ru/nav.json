@@ -1,0 +1,20 @@
+{
+  "nav.overview": "Обзор",
+  "nav.skus": "SKU",
+  "nav.reports": "Отчёты",
+  "nav.dynamics": "Динамика",
+  "nav.changelog": "Журнал",
+  "nav.radar": "Radar",
+  "nav.warehouses": "Склады",
+  "nav.settings": "Настройки",
+  "nav.billing": "Тариф",
+  "nav.admin.finance": "Финансы",
+  "nav.admin.health": "Здоровье",
+  "nav.admin.sellers": "Селлеры",
+  "nav.admin.activity": "Активность",
+  "nav.currentPlan": "Текущий тариф: {plan}",
+  "nav.selectedWarehouse": "Выбранный склад",
+  "nav.planShort": "Тариф: {plan}",
+  "nav.toDashboard": "В личный кабинет",
+  "nav.toPersonal": "личный"
+}

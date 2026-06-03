@@ -1,0 +1,9 @@
+{
+  "unit.days.one": "день",
+  "unit.days.few": "дня",
+  "unit.days.many": "дней",
+  "unit.days.other": "дней",
+  "unit.bytes.b": "Б",
+  "unit.bytes.kb": "КБ",
+  "unit.bytes.mb": "МБ"
+}
