@@ -28,5 +28,13 @@
   "billing.err.createPayment": "Failed to create payment",
   "billing.err.network": "Network error",
   "billing.manageNote": "Renewal is manual: select your plan again when the 30 days are up.",
-  "billing.manageNoteStub": "To renew or change your plan, email us."
+  "billing.manageNoteStub": "To renew or change your plan, email us.",
+  "billing.builder.title": "Builder",
+  "billing.builder.sub": "Build a plan for your volume",
+  "billing.builder.wh": "Warehouses",
+  "billing.builder.sku": "SKUs per warehouse",
+  "billing.builder.pricing": "Warehouse — 1,000 ₽/mo, every 1,000 SKUs — 500 ₽/mo",
+  "billing.builder.period": "₽/mo",
+  "billing.builder.buy": "Pay for builder plan",
+  "billing.builder.renew": "Renew builder plan"
 }
