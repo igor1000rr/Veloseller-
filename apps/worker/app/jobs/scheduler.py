@@ -68,10 +68,26 @@ def _job_sync_active_connections() -> None:
                 elif conn.get("marketplace") == "ozon":
                     client_id = decrypt_if_encrypted(cfg.get("client_id"))
                     api_key = decrypt_if_encrypted(cfg.get("api_key"))
-                    snaps = ozon.fetch_snapshots(client_id, api_key)
+                    # 04.06.2026: крон звал fetch_snapshots БЕЗ kind — оба ozon-склада
+                    # каждую ночь перезаписывались СУММОЙ всех типов остатков
+                    # (вторая причина «FBO и FBS одинаковые»). Маппинг дублирует
+                    # main._ozon_kind_from_warehouse — импорт из main дал бы цикл.
+                    warehouse_kind = conn.get("warehouse_kind")
+                    if warehouse_kind == "ozon_fbo":
+                        kind = "fbo"
+                    elif warehouse_kind == "ozon_fbs":
+                        kind = "fbs"
+                    else:
+                        kind = None
+                    snaps = ozon.fetch_snapshots(client_id, api_key, kind=kind)
                 elif conn.get("marketplace") == "wildberries":
                     token = decrypt_if_encrypted(cfg.get("token") or cfg.get("api_key"))
-                    snaps = wildberries.fetch_snapshots(token)
+                    # 04.06.2026: тот же класс бага — крон игнорировал wb_fbs и писал
+                    # в fbs-склад FBO-остатки. Ветвление как в main._run_wb_sync_bg.
+                    if conn.get("warehouse_kind") == "wb_fbs":
+                        snaps = wildberries.fetch_fbs_snapshots(token)
+                    else:
+                        snaps = wildberries.fetch_snapshots(token)
                 else:
                     continue
                 _persist_via_main(conn["seller_id"], conn["id"], conn["source"], snaps)
