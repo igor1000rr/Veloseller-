@@ -17,7 +17,10 @@
   "sku.reorder.currentStock": "Текущее наличие",
   "sku.reorder.untilReorder": "До заказа",
   "sku.reorder.orderNow": "Заказать сейчас",
-  "sku.reorder.saveBtn": "Сохранить срок поставки",
+  "sku.reorder.saveBtn": "Сохранить в Заметки",
+  "sku.reorder.savedToNotes": "сохранено в заметки",
+  "sku.reorder.noteTemplate": "{date} · закупка: {qty} шт на {days} дн, поставка {lead} дн",
+  "sku.reorder.noteInTransit": ", в пути {n} шт",
   "sku.reorder.timeToReorder": "Пора заказывать",
 
   "sku.health.reasons": "Причины",
