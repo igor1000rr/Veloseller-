@@ -110,6 +110,10 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     changelogByDate[day].push(e);
   }
 
+  // Александр 04.06.2026: дни «нет данных» не показываем в списке событий —
+  // они забивали блок (13 из 14 строк). В тултипе графика журнал остаётся полным.
+  const visibleEvents = (changelog ?? []).filter((e: any) => e.event_type !== "missing_data");
+
   let adjVsMedian = "";
   if (latest && latest.median_30d_velocity != null) {
     const adj = Number(latest.adjusted_velocity);
@@ -198,8 +202,8 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         </div>
       )}
 
-      {/* Основной график — TVelo (зелёная), Цена (красная), Остаток/OOS (серые столбцы, красный bg).
-          Использует существующий SkuAnalysisChart — он уже рисует то что описал Александр. */}
+      {/* Основной график — TVelo (зелёная), Цена (фиолетовая), Остаток/OOS по нижней
+          секции на скрытых шкалах (Александр 04.06.2026, см. SkuAnalysisChart). */}
       <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
         <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-4">{t("sku.detail.analysis")}</h2>
         {chartData.length < 2 ? (
@@ -262,30 +266,31 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
 
       {/* "Последние события" — фиксация всех event_type кроме sales_like.
           Включает изменения цены (отображаются как replenishment_like с price diff)
-          и аномалии. sales_like засорял список. */}
+          и аномалии. sales_like засорял список.
+          Александр 04.06.2026: блок вдвое компактнее, дни «нет данных» скрыты. */}
       <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
         <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">{t("sku.detail.events.title")}</h2>
-        <h3 className="font-display text-base sm:text-lg font-medium text-ink mt-1 mb-4">
+        <h3 className="font-display text-base font-medium text-ink mt-1 mb-3">
           {t("sku.detail.events.h")}
           <InfoTooltip text={t("sku.detail.events.hint")} />
         </h3>
-        {(changelog ?? []).length === 0 ? (
+        {visibleEvents.length === 0 ? (
           <p className="text-sm text-ink-muted">{t("sku.detail.events.empty")}</p>
         ) : (
           <ul className="divide-y divide-line">
-            {(changelog ?? []).map((e: any, i: number) => (
-              <li key={i} className="py-2.5 flex flex-col sm:flex-row sm:items-start gap-1.5 sm:gap-4 text-sm">
-                <div className="flex items-center gap-2 sm:gap-4 shrink-0">
-                  <span className="text-ink-hush text-xs whitespace-nowrap sm:w-24 font-mono">
+            {visibleEvents.map((e: any, i: number) => (
+              <li key={i} className="py-1 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-xs">
+                <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+                  <span className="text-ink-hush text-[11px] whitespace-nowrap sm:w-20 font-mono">
                     {new Date(e.event_date).toLocaleDateString("ru-RU")}
                   </span>
-                  <span className={`inline-flex items-center justify-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold sm:w-32 whitespace-nowrap ${TYPE_STYLES[e.event_type] ?? "text-ink-soft bg-bg-soft border-line"}`}>
+                  <span className={`inline-flex items-center justify-center font-mono text-[9px] uppercase tracking-widest px-1.5 py-px rounded border font-semibold sm:w-28 whitespace-nowrap ${TYPE_STYLES[e.event_type] ?? "text-ink-soft bg-bg-soft border-line"}`}>
                     {TYPE_LABELS[e.event_type] ?? e.event_type}
                   </span>
                 </div>
                 <span className="text-ink-soft flex-1 break-words">{e.message}</span>
                 {e.confidence_impact != null && Number(e.confidence_impact) !== 0 && (
-                  <span className="font-mono text-xs text-orange whitespace-nowrap shrink-0">−{Math.abs(Number(e.confidence_impact)).toFixed(1)}%</span>
+                  <span className="font-mono text-[11px] text-orange whitespace-nowrap shrink-0">−{Math.abs(Number(e.confidence_impact)).toFixed(1)}%</span>
                 )}
               </li>
             ))}
