@@ -4,17 +4,20 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import {
   buildPaymentUrl,
   checkRobokassaConfig,
-  isValidPlan,
-  PLAN_PRICES,
-  PLAN_LABELS,
-  productKindOf,
+  isPayablePlan,
+  planPriceOf,
+  planLabelOf,
+  productKindOfPlan,
 } from "@/lib/robokassa";
 
 /**
  * POST /api/robokassa/create-payment — создаёт invoice в БД + URL для оплаты на Robokassa.
  *
- * Body: { plan: "starter" | "growth" | "pro" | "radar_start" | "radar_seller" | "radar_pro" | "radar_expert" }
+ * Body: { plan: "starter" | "growth" | "pro" | "radar_*" | "custom_{wh}x{sku}" }
  * Response: { url: string, inv_id: number }
+ *
+ * Конструктор (Александр 04.06.2026): plan вида custom_5x2000. Сумма считается
+ * ТОЛЬКО на сервере из кодировки (planPriceOf) — клиентская цена не принимается.
  *
  * Frontend делает window.location.href = url — юзер переходит на Robokassa,
  * оплачивает, возвращается по Success/Fail URL.
@@ -44,16 +47,16 @@ export async function POST(req: NextRequest) {
   }
 
   const plan = body?.plan;
-  if (!plan || typeof plan !== "string" || !isValidPlan(plan)) {
+  if (!plan || typeof plan !== "string" || !isPayablePlan(plan)) {
     return NextResponse.json(
       { error: "Неизвестный тариф" },
       { status: 400 },
     );
   }
 
-  const amount = PLAN_PRICES[plan];
-  const productKind = productKindOf(plan);
-  const planLabel = PLAN_LABELS[plan];
+  const amount = planPriceOf(plan)!;
+  const productKind = productKindOfPlan(plan);
+  const planLabel = planLabelOf(plan);
   const description = productKind === "radar"
     ? `Veloseller Radar — тариф ${planLabel} (месяц)`
     : `Veloseller — тариф ${planLabel} (месяц)`;
