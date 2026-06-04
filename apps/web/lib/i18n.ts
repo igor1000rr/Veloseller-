@@ -24,6 +24,7 @@ import ruSku from "@/messages/ru/sku.json";
 import ruAccount from "@/messages/ru/account.json";
 import ruDynamics from "@/messages/ru/dynamics.json";
 import ruChangelog from "@/messages/ru/changelog.json";
+import ruSubs from "@/messages/ru/subs.json";
 import enCommon from "@/messages/en/common.json";
 import enNav from "@/messages/en/nav.json";
 import enAuth from "@/messages/en/auth.json";
@@ -36,12 +37,13 @@ import enSku from "@/messages/en/sku.json";
 import enAccount from "@/messages/en/account.json";
 import enDynamics from "@/messages/en/dynamics.json";
 import enChangelog from "@/messages/en/changelog.json";
+import enSubs from "@/messages/en/subs.json";
 import { LOCALE } from "@/lib/features";
 
 type Messages = Record<string, string>;
 
-const ru: Messages = { ...ruCommon, ...ruNav, ...ruAuth, ...ruSettings, ...ruError, ...ruUnit, ...ruDashboard, ...ruReport, ...ruSku, ...ruAccount, ...ruDynamics, ...ruChangelog };
-const en: Messages = { ...enCommon, ...enNav, ...enAuth, ...enSettings, ...enError, ...enUnit, ...enDashboard, ...enReport, ...enSku, ...enAccount, ...enDynamics, ...enChangelog };
+const ru: Messages = { ...ruCommon, ...ruNav, ...ruAuth, ...ruSettings, ...ruError, ...ruUnit, ...ruDashboard, ...ruReport, ...ruSku, ...ruAccount, ...ruDynamics, ...ruChangelog, ...ruSubs };
+const en: Messages = { ...enCommon, ...enNav, ...enAuth, ...enSettings, ...enError, ...enUnit, ...enDashboard, ...enReport, ...enSku, ...enAccount, ...enDynamics, ...enChangelog, ...enSubs };
 
 const CATALOGS: Record<string, Messages> = { ru, en };
 

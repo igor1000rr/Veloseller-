@@ -11,6 +11,7 @@ import {
   type NotificationChannel,
   type NotificationFrequency,
 } from "./actions";
+import { t } from "@/lib/i18n";
 
 export type KindMeta = {
   label: string;
@@ -33,19 +34,19 @@ export type KindMeta = {
 
 const DAY_OF_WEEK_PARAM = {
   key: "day_of_week",
-  label: "День отправки",
+  label: t("subs.param.dayOfWeek"),
   type: "select" as const,
   default: 1,
   options: [
-    { value: 1, label: "Понедельник" },
-    { value: 2, label: "Вторник" },
-    { value: 3, label: "Среда" },
-    { value: 4, label: "Четверг" },
-    { value: 5, label: "Пятница" },
-    { value: 6, label: "Суббота" },
-    { value: 7, label: "Воскресенье" },
+    { value: 1, label: t("subs.day.mon") },
+    { value: 2, label: t("subs.day.tue") },
+    { value: 3, label: t("subs.day.wed") },
+    { value: 4, label: t("subs.day.thu") },
+    { value: 5, label: t("subs.day.fri") },
+    { value: 6, label: t("subs.day.sat") },
+    { value: 7, label: t("subs.day.sun") },
   ],
-  hint: "Отчёты на один день приходят в одном Excel-файле разными листами.",
+  hint: t("subs.param.dayHint"),
 };
 
 /**
@@ -64,34 +65,34 @@ const DAY_OF_WEEK_PARAM = {
  */
 export const KIND_META: Record<NotificationKind, KindMeta> = {
   weekly_report: {
-    label: "Сводка по складу",
-    description: "Excel-сводка по складу: Health Score, потерянная выручка, заморожено, SKU-счётчики, концентрация.",
+    label: t("subs.kind.weeklyReport"),
+    description: t("subs.kind.weeklyReportDesc"),
     paramSchema: [DAY_OF_WEEK_PARAM],
   },
   underestimated_sku: {
-    label: "Потерянные продажи",
-    description: "Товары которые продаются быстро и часто заканчиваются. Каждый день без товара — недополученная выручка.",
+    label: t("subs.kind.underestimated"),
+    description: t("subs.kind.underestimatedDesc"),
     paramSchema: [DAY_OF_WEEK_PARAM],
   },
   critical_stock: {
-    label: "Критический остаток",
-    description: "Совсем мало товара — закупка нужна срочно.",
+    label: t("subs.kind.critical"),
+    description: t("subs.kind.criticalDesc"),
     paramSchema: [
       {
-        key: "coverage_days_threshold", label: "Порог покрытия",
-        type: "number", default: 3, min: 1, max: 14, suffix: "дн",
+        key: "coverage_days_threshold", label: t("subs.param.coverage"),
+        type: "number", default: 3, min: 1, max: 14, suffix: t("subs.unit.dn"),
       },
       DAY_OF_WEEK_PARAM,
     ],
   },
   dead_inventory: {
-    label: "Замороженные остатки",
-    description: "Низкая скорость продаж — деньги заморожены в товаре. Расчёт по среднему TVelo за последние 30 дней.",
+    label: t("subs.kind.dead"),
+    description: t("subs.kind.deadDesc"),
     paramSchema: [
       {
-        key: "coverage_days_threshold", label: "Порог покрытия",
-        type: "number", default: 180, min: 30, max: 365, suffix: "дн",
-        hint: "SKU с coverage больше этого числа = замороженные остатки",
+        key: "coverage_days_threshold", label: t("subs.param.coverage"),
+        type: "number", default: 180, min: 30, max: 365, suffix: t("subs.unit.dn"),
+        hint: t("subs.param.deadHint"),
       },
       DAY_OF_WEEK_PARAM,
     ],
@@ -99,46 +100,46 @@ export const KIND_META: Record<NotificationKind, KindMeta> = {
 
   // Депрекейтнутые — показываем как есть если уже подписан, но не предлагаем добавить.
   low_stock: {
-    label: "Низкий остаток",
-    description: "Когда покрытие SKU падает до порога — товар скоро закончится.",
+    label: t("subs.kind.low"),
+    description: t("subs.kind.lowDesc"),
     deprecated: true,
     paramSchema: [
       {
-        key: "coverage_days_threshold", label: "Порог покрытия",
-        type: "number", default: 7, min: 1, max: 60, suffix: "дн",
-        hint: "Когда coverage_days SKU становится меньше или равно этому числу",
+        key: "coverage_days_threshold", label: t("subs.param.coverage"),
+        type: "number", default: 7, min: 1, max: 60, suffix: t("subs.unit.dn"),
+        hint: t("subs.param.lowHint"),
       },
       DAY_OF_WEEK_PARAM,
     ],
   },
   repeated_stockout: {
-    label: "Частый out-of-stock",
-    description: "SKU регулярно отсутствует — проблема с поставками.",
+    label: t("subs.kind.stockout"),
+    description: t("subs.kind.stockoutDesc"),
     deprecated: true,
     paramSchema: [
       {
-        key: "stockout_days_threshold", label: "Дней OOS",
-        type: "number", default: 3, min: 1, max: 30, suffix: "дн",
+        key: "stockout_days_threshold", label: t("subs.param.oosDays"),
+        type: "number", default: 3, min: 1, max: 30, suffix: t("subs.unit.dn"),
       },
       DAY_OF_WEEK_PARAM,
     ],
   },
   sync_error: {
-    label: "Ошибка синхронизации",
-    description: "Теперь шлётся отдельным письмом в момент ошибки — отдельный лист в Excel больше не формируется.",
+    label: t("subs.kind.syncError"),
+    description: t("subs.kind.syncErrorDesc"),
     deprecated: true,
     paramSchema: [DAY_OF_WEEK_PARAM],
   },
 };
 
 const FREQUENCY_OPTIONS: Array<{ value: NotificationFrequency; label: string; hint: string }> = [
-  { value: "daily",   label: "Каждый день", hint: "Каждый день — день недели игнорируется" },
-  { value: "weekly",  label: "Еженедельно", hint: "Каждую неделю в выбранный день" },
-  { value: "monthly", label: "Ежемесячно",  hint: "В первый выбранный день недели каждого месяца" },
+  { value: "daily",   label: t("subs.freq.daily"), hint: t("subs.freq.dailyHint") },
+  { value: "weekly",  label: t("subs.freq.weekly"), hint: t("subs.freq.weeklyHint") },
+  { value: "monthly", label: t("subs.freq.monthly"),  hint: t("subs.freq.monthlyHint") },
 ];
 
 function frequencyLabel(f: NotificationFrequency): string {
-  return FREQUENCY_OPTIONS.find(o => o.value === f)?.label ?? "Еженедельно";
+  return FREQUENCY_OPTIONS.find(o => o.value === f)?.label ?? t("subs.freq.weekly");
 }
 
 export type Subscription = {
@@ -174,10 +175,8 @@ export function SubscriptionsList({ subscriptions }: { subscriptions: Subscripti
     <div className="space-y-3">
       {cleanSubs.length === 0 && !adding && (
         <div className="rounded-2xl border border-line bg-paper p-8 md:p-10 text-center">
-          <p className="font-display text-lg text-ink font-medium">У вас пока нет подписок</p>
-          <p className="mt-2 text-sm text-ink-muted max-w-md mx-auto">
-            Добавьте отчёты чтобы получать Excel-файлы со списками SKU по важным событиям склада.
-          </p>
+          <p className="font-display text-lg text-ink font-medium">{t("subs.empty.title")}</p>
+          <p className="mt-2 text-sm text-ink-muted max-w-md mx-auto">{t("subs.empty.text")}</p>
         </div>
       )}
 
@@ -200,12 +199,10 @@ export function SubscriptionsList({ subscriptions }: { subscriptions: Subscripti
           onClick={() => setAdding(true)}
           className="w-full inline-flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-line bg-paper p-4 text-ink-muted hover:text-ink hover:border-lime-deep/40 hover:bg-bg-soft transition font-medium min-h-[56px]"
         >
-          <Icons.ArrowRight size={14} /> Добавить отчёт
+          <Icons.ArrowRight size={14} /> {t("subs.addBtn")}
         </button>
       ) : (
-        <div className="text-xs text-ink-hush text-center py-2">
-          Все возможные отчёты уже подписаны
-        </div>
+        <div className="text-xs text-ink-hush text-center py-2">{t("subs.allSubscribed")}</div>
       )}
     </div>
   );
@@ -224,17 +221,17 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
     setError(null);
     startTransition(async () => {
       const res = await toggleSubscription(sub.id, !sub.enabled);
-      if (!res.ok) setError(res.error ?? "ошибка");
+      if (!res.ok) setError(res.error ?? t("subs.err.generic"));
       else router.refresh();
     });
   }
 
   function handleDelete() {
-    if (!confirm(`Удалить отчёт «${meta.label}»?`)) return;
+    if (!confirm(t("subs.confirmDelete", { name: meta.label }))) return;
     setError(null);
     startTransition(async () => {
       const res = await deleteSubscription(sub.id);
-      if (!res.ok) setError(res.error ?? "ошибка");
+      if (!res.ok) setError(res.error ?? t("subs.err.generic"));
       else router.refresh();
     });
   }
@@ -250,7 +247,7 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
           className={`shrink-0 mt-1 size-6 rounded border flex items-center justify-center transition ${
             sub.enabled ? "bg-lime-deep border-lime-deep" : "bg-paper border-line hover:border-ink-muted"
           }`}
-          title={sub.enabled ? "Включено — нажмите чтобы выключить" : "Выключено — нажмите чтобы включить"}
+          title={sub.enabled ? t("subs.toggleOn") : t("subs.toggleOff")}
         >
           {sub.enabled && <span className="text-paper text-[14px] leading-none">✓</span>}
         </button>
@@ -261,12 +258,10 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
             <ChannelBadge channel={sub.channel} />
             <FrequencyBadge frequency={currentFreq} />
             {meta.deprecated && (
-              <span className="inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold text-orange bg-orange/10 border-orange/30">
-                устарел
-              </span>
+              <span className="inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold text-orange bg-orange/10 border-orange/30">{t("subs.deprecated")}</span>
             )}
             {!sub.enabled && (
-              <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">— отключено</span>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("subs.disabledSuffix")}</span>
             )}
           </div>
           <p className="text-xs text-ink-muted mt-1">{meta.description}</p>
@@ -288,7 +283,7 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
                 );
               })}
               <span className="font-mono text-ink-soft">
-                <span className="text-ink-hush">Частота:</span> <span className="font-semibold">{frequencyLabel(currentFreq)}</span>
+                <span className="text-ink-hush">{t("subs.freqLabel")}</span> <span className="font-semibold">{frequencyLabel(currentFreq)}</span>
               </span>
             </div>
           )}
@@ -303,15 +298,15 @@ function SubscriptionRow({ sub }: { sub: Subscription }) {
             onClick={() => setEditing(e => !e)}
             className="flex-1 sm:flex-initial text-xs px-3 py-2 rounded-lg border border-line text-ink-muted hover:text-ink hover:bg-bg-soft transition font-medium min-h-[36px]"
           >
-            {editing ? "Закрыть" : "Изменить"}
+            {editing ? t("subs.close") : t("subs.edit")}
           </button>
           <button
             type="button"
             onClick={handleDelete}
             className="flex-1 sm:flex-initial text-xs px-3 py-2 rounded-lg border border-rose/30 text-rose hover:bg-rose/5 transition font-medium min-h-[36px]"
-            title="Удалить подписку"
+            title={t("subs.deleteTip")}
           >
-            Удалить
+            {t("subs.delete")}
           </button>
         </div>
       </div>
@@ -346,7 +341,7 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
       const res = await upsertSubscription(sub.kind, sub.channel, sub.enabled, params, frequency);
       setSaving(false);
       if (!res.ok) {
-        setError(res.error ?? "ошибка сохранения");
+        setError(res.error ?? t("subs.err.save"));
       } else {
         onClose();
         router.refresh();
@@ -363,7 +358,7 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
             <div key={p.key} className={disabled ? "opacity-50" : ""}>
               <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
                 {p.label}
-                {disabled && <span className="ml-1 normal-case text-ink-hush"> · не используется при «каждый день»</span>}
+                {disabled && <span className="ml-1 normal-case text-ink-hush"> {t("subs.param.dayUnused")}</span>}
               </label>
               {p.type === "select" && p.options ? (
                 <select
@@ -396,9 +391,7 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
           );
         })}
         <div>
-          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
-            Частота отправки
-          </label>
+          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">{t("subs.param.frequency")}</label>
           <select
             value={frequency}
             onChange={e => setFrequency(e.target.value as NotificationFrequency)}
@@ -421,14 +414,14 @@ function EditParamsForm({ sub, meta, onClose }: { sub: Subscription; meta: KindM
           disabled={saving}
           className="flex-1 sm:flex-initial px-4 py-2 text-sm bg-ink text-paper rounded-lg hover:bg-ink-soft disabled:opacity-50 transition font-medium min-h-[40px]"
         >
-          {saving ? "Сохраняется…" : "Сохранить"}
+          {saving ? t("subs.saving") : t("subs.save")}
         </button>
         <button
           type="button"
           onClick={onClose}
           className="flex-1 sm:flex-initial px-4 py-2 text-sm border border-line text-ink-muted hover:text-ink hover:bg-paper rounded-lg transition min-h-[40px]"
         >
-          Отмена
+          {t("subs.cancel")}
         </button>
       </div>
     </div>
@@ -478,7 +471,7 @@ function AddSubscriptionForm({
       const res = await upsertSubscription(kind, channel, true, params, frequency);
       setSaving(false);
       if (!res.ok) {
-        setError(res.error ?? "ошибка");
+        setError(res.error ?? t("subs.err.generic"));
       } else {
         onAdded();
       }
@@ -488,21 +481,19 @@ function AddSubscriptionForm({
   return (
     <div className="rounded-2xl border-2 border-lime-deep/40 bg-lime-soft p-3 sm:p-4">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="font-display text-base font-medium text-ink">Новый отчёт</h3>
+        <h3 className="font-display text-base font-medium text-ink">{t("subs.add.title")}</h3>
         <button
           type="button"
           onClick={onClose}
           className="text-ink-hush hover:text-ink text-base px-2 py-1"
-          aria-label="Закрыть"
+          aria-label={t("subs.close")}
         >
           ✕
         </button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
-          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
-            Тип отчёта
-          </label>
+          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">{t("subs.add.kind")}</label>
           <select
             value={kind}
             onChange={e => setKind(e.target.value as NotificationKind)}
@@ -514,9 +505,7 @@ function AddSubscriptionForm({
           </select>
         </div>
         <div>
-          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
-            Канал доставки
-          </label>
+          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">{t("subs.add.channel")}</label>
           <select
             value={channel}
             onChange={e => setChannel(e.target.value as NotificationChannel)}
@@ -527,16 +516,14 @@ function AddSubscriptionForm({
               const label = c === "email" ? "Email" : "Telegram";
               return (
                 <option key={c} value={c} disabled={taken}>
-                  {label}{taken ? " — уже подписан" : ""}
+                  {label}{taken ? t("subs.add.taken") : ""}
                 </option>
               );
             })}
           </select>
         </div>
         <div>
-          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
-            Частота
-          </label>
+          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">{t("subs.add.frequency")}</label>
           <select
             value={frequency}
             onChange={e => setFrequency(e.target.value as NotificationFrequency)}
@@ -549,13 +536,9 @@ function AddSubscriptionForm({
         </div>
       </div>
       <p className="mt-3 text-xs text-ink-muted">{meta.description}</p>
-      <p className="mt-1 text-[11px] text-ink-hush">
-        Параметры (порог, день, частоту) можно изменить после создания. Дефолт — понедельник, еженедельно.
-      </p>
+      <p className="mt-1 text-[11px] text-ink-hush">{t("subs.add.note")}</p>
       {channelIsTaken && (
-        <p className="mt-2 text-xs text-orange">
-          На этот отчёт уже есть подписка через выбранный канал. Найдите её в списке выше чтобы изменить параметры или удалить.
-        </p>
+        <p className="mt-2 text-xs text-orange">{t("subs.add.takenWarn")}</p>
       )}
       {error && <p className="mt-3 text-xs text-rose font-mono">{error}</p>}
       <div className="mt-4 flex gap-2 flex-wrap">
@@ -565,14 +548,14 @@ function AddSubscriptionForm({
           disabled={saving || channelIsTaken}
           className="flex-1 sm:flex-initial px-4 py-2.5 text-sm bg-ink text-paper rounded-lg hover:bg-ink-soft disabled:opacity-50 disabled:cursor-not-allowed transition font-medium min-h-[44px]"
         >
-          {saving ? "Добавляется…" : "Добавить"}
+          {saving ? t("subs.adding") : t("subs.addShort")}
         </button>
         <button
           type="button"
           onClick={onClose}
           className="flex-1 sm:flex-initial px-4 py-2.5 text-sm border border-line text-ink-muted hover:text-ink hover:bg-paper rounded-lg transition min-h-[44px]"
         >
-          Отмена
+          {t("subs.cancel")}
         </button>
       </div>
     </div>
