@@ -1,7 +1,7 @@
 /**
  * Мелкие UI-блоки лендинга, перенесены из page.tsx без изменений разметки.
  * PricingCard: цена по локали — РФ «2 500 ₽ /мес» (1:1 со старым рендером),
- * en «$29 /mo» через formatPlanPrice.
+ * en «$29 /mo» через formatPlanPrice. fromPrice — приставка «от» для Конструктора.
  */
 import Link from "next/link";
 import { Icons } from "../_components/Icons";
@@ -41,7 +41,7 @@ export function BentoCard({ idx, icon, title, text, accent }: {
   );
 }
 
-export function PricingCard({ name, price, highlight, perks, isAuthed }: LandingPlan & { isAuthed: boolean }) {
+export function PricingCard({ name, price, highlight, perks, fromPrice, isAuthed }: LandingPlan & { isAuthed: boolean }) {
   return (
     <div className={`relative rounded-2xl p-5 sm:p-6 md:p-8 transition ${
       highlight
@@ -55,6 +55,9 @@ export function PricingCard({ name, price, highlight, perks, isAuthed }: Landing
       )}
       <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">{name}</div>
       <div className="mt-4 flex items-baseline gap-1 flex-wrap">
+        {fromPrice && (
+          <span className="text-ink-muted text-xl">{isEn ? "from" : "от"}</span>
+        )}
         {isEn ? (
           <>
             <span className="font-display text-4xl sm:text-5xl md:text-6xl tracking-tight text-ink tabular font-medium">{formatPlanPrice(price)}</span>
