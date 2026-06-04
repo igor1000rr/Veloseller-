@@ -17,7 +17,10 @@
   "sku.reorder.currentStock": "Current stock",
   "sku.reorder.untilReorder": "Until reorder",
   "sku.reorder.orderNow": "Order now",
-  "sku.reorder.saveBtn": "Save lead time",
+  "sku.reorder.saveBtn": "Save to Notes",
+  "sku.reorder.savedToNotes": "saved to notes",
+  "sku.reorder.noteTemplate": "{date} · purchase: {qty} units for {days} d, lead {lead} d",
+  "sku.reorder.noteInTransit": ", {n} units in transit",
   "sku.reorder.timeToReorder": "Time to reorder",
 
   "sku.health.reasons": "Reasons",
