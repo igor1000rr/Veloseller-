@@ -6,12 +6,13 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 /**
  * POST /api/connections — создание склада (data_connection).
  *
- * Multi-warehouse архитектура (май 2026): UI шлёт `warehouse_kind` из 5 значений,
- * сервер выводит из него source+marketplace для совместимости с существующими enum.
+ * Multi-warehouse архитектура (май 2026): UI шлёт `warehouse_kind`, сервер
+ * выводит из него source+marketplace для совместимости с существующими enum.
  *
  * Шифруются sensitive поля config (если SECRET_ENCRYPTION_KEY задан):
  *   - ozon_fbo / ozon_fbs: client_id, api_key
  *   - wb_fbo / wb_fbs: token
+ *   - shopify: access_token
  *
  * Лимит складов берётся из sellers.plan_warehouses_limit (зависит от тарифа):
  *   trial=15, starter=2, growth=6, pro=15
@@ -23,10 +24,11 @@ const SENSITIVE_KEYS_BY_KIND: Record<string, string[]> = {
   ozon_fbs: ["client_id", "api_key"],
   wb_fbo:   ["token"],
   wb_fbs:   ["token"],
+  shopify:  ["access_token"],
 };
 
 const ALLOWED_WAREHOUSE_KINDS = new Set([
-  "ozon_fbo", "ozon_fbs", "wb_fbo", "wb_fbs", "google_sheet",
+  "ozon_fbo", "ozon_fbs", "wb_fbo", "wb_fbs", "google_sheet", "shopify",
 ]);
 
 // Backward compat для legacy запросов от старого UI
@@ -49,6 +51,8 @@ function deriveSourceAndMarketplace(kind: string): { source: string; marketplace
     case "wb_fbo":
     case "wb_fbs":
       return { source: "marketplace_api", marketplace: "wildberries" };
+    case "shopify":
+      return { source: "marketplace_api", marketplace: "shopify" };
     case "google_sheet":
       return { source: "google_sheet", marketplace: null };
     default:
@@ -62,6 +66,7 @@ function deriveWarehouseKind(source: string, marketplace: string | null | undefi
   if (source === "marketplace_api") {
     if (marketplace === "ozon") return "ozon_fbo";          // legacy ozon = FBO по умолчанию
     if (marketplace === "wildberries") return "wb_fbo";     // legacy wb = FBO по умолчанию
+    if (marketplace === "shopify") return "shopify";
   }
   return null;
 }

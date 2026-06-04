@@ -47,6 +47,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (conn.source === "google_sheet") endpoint = `/ingest/google-sheet/${id}`;
   else if (conn.source === "marketplace_api" && conn.marketplace === "ozon") endpoint = `/ingest/ozon/${id}`;
   else if (conn.source === "marketplace_api" && conn.marketplace === "wildberries") endpoint = `/ingest/wb/${id}`;
+  else if (conn.source === "marketplace_api" && conn.marketplace === "shopify") endpoint = `/ingest/shopify/${id}`;
   else return NextResponse.json({ error: "Для CSV используй upload-csv" }, { status: 400 });
 
   const controller = new AbortController();

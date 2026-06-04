@@ -39,5 +39,6 @@ export function warehouseKindLabel(kind: string | null | undefined): string {
     wb_fbo:       "Wildberries FBO",
     wb_fbs:       "Wildberries FBS",
     google_sheet: "Google Sheet",
+    shopify:      "Shopify",
   } as Record<string, string>)[kind] ?? kind;
 }
