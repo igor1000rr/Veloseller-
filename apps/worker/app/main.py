@@ -18,7 +18,7 @@ from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.logger import JsonFormatter, setup_logger
 from app.radar.api import router as radar_router
 from app.schemas import SnapshotInput, SourceType
-from app.sources import csv_upload, feed as feed_src, google_sheet, ozon, wildberries
+from app.sources import csv_upload, feed as feed_src, google_sheet, ozon, shopify, wildberries
 from app.telegram_link import verify_telegram_link_token
 
 _root = logging.getLogger()
@@ -598,6 +598,20 @@ def _run_feed_sync_bg(connection_id: str, seller_id: str, feed_url: str) -> None
         logger.exception("feed sync failed (bg)", extra={"connection_id": connection_id})
 
 
+def _run_shopify_sync_bg(connection_id: str, seller_id: str, shop: str, access_token: str) -> None:
+    sb = get_supabase()
+    try:
+        snapshots = shopify.fetch_snapshots(shop, access_token)
+        inserted = _persist_snapshots(seller_id, connection_id, SourceType.MARKETPLACE_API, snapshots)
+        _mark_connection_synced(sb, connection_id)
+        logger.info("shopify synced (bg)", extra={
+            "connection_id": connection_id, "inserted": inserted, "fetched_skus": len(snapshots),
+        })
+    except Exception as e:
+        _mark_connection_synced(sb, connection_id, error=str(e)[:500])
+        logger.exception("shopify sync failed (bg)", extra={"connection_id": connection_id})
+
+
 @app.post("/ingest/csv", dependencies=[Depends(require_worker_secret)])
 async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
     raise HTTPException(
@@ -682,6 +696,27 @@ def ingest_feed(connection_id: str, background_tasks: BackgroundTasks) -> dict:
     if not _try_acquire_sync_lock(sb, connection_id):
         return {"started": False, "status": "running", "message": "Sync уже идёт или склад на паузе"}
     background_tasks.add_task(_run_feed_sync_bg, connection_id, conn.data["seller_id"], feed_url)
+    return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
+
+
+@app.post("/ingest/shopify/{connection_id}", dependencies=[Depends(require_worker_secret)])
+def ingest_shopify(connection_id: str, background_tasks: BackgroundTasks) -> dict:
+    sb = get_supabase()
+    conn = sb.table("data_connections").select("*").eq("id", connection_id).single().execute()
+    if not conn.data:
+        raise HTTPException(404, "Connection not found")
+    cfg = conn.data.get("config") or {}
+    from app.crypto import decrypt_if_encrypted
+    shop = cfg.get("shop") or cfg.get("shop_domain")
+    access_token = decrypt_if_encrypted(cfg.get("access_token"))
+    if not shop or not access_token:
+        raise HTTPException(400, "config.shop и config.access_token обязательны")
+    if not _try_acquire_sync_lock(sb, connection_id):
+        return {"started": False, "status": "running", "message": "Sync уже идёт или склад на паузе"}
+    background_tasks.add_task(
+        _run_shopify_sync_bg,
+        connection_id, conn.data["seller_id"], shop, access_token,
+    )
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
