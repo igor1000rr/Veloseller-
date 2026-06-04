@@ -29,6 +29,12 @@ const TYPE_LABELS: Record<string, string> = {
   recount_like: t("sku.eventType.recount"),
 };
 
+// Александр 04.06.2026: остаток отвязан от левой шкалы (там только TVelo).
+// Остаток и OOS-полосы рисуются «по нижней секции» — на скрытых осях, домен
+// которых растянут так, что максимум занимает STOCK_BAND высоты графика.
+// Иначе при остатках в сотни штук линия TVelo (0–3) лежала на дне.
+const STOCK_BAND = 0.28;
+
 export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]; changelogByDate?: ChangelogByDate }) {
   // Rule 12.1 — детектим изменения цены и считаем %-дельту
   const priceChanges: { date: string; dateLabel: string; price: number; prev: number; pct: number }[] = [];
@@ -104,19 +110,25 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
       <ComposedChart data={formatted} margin={{ top: 24, right: 30, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#e6e3d4" vertical={false} />
         <XAxis dataKey="dateLabel" stroke="#8a8a7e" fontSize={11} tickLine={false} />
-        <YAxis yAxisId="velocity" stroke="#3f6212" fontSize={11} tickLine={false}
+        {/* Левая шкала — только TVelo (Александр 04.06.2026). */}
+        <YAxis yAxisId="velocity" stroke="#3f6212" fontSize={11} tickLine={false} domain={[0, "auto"]}
                label={{ value: t("sku.chart.axisLeft"), angle: -90, position: "insideLeft", fill: "#3f6212", fontSize: 11 }} />
         <YAxis yAxisId="price" orientation="right" stroke="#7c3aed" fontSize={11} tickLine={false}
                label={{ value: t("sku.chart.price"), angle: 90, position: "insideRight", fill: "#7c3aed", fontSize: 11 }} />
+        {/* Скрытая шкала остатков: домен растянут так, что максимальный бар
+            занимает STOCK_BAND высоты — остатки «по нижней секции». */}
+        <YAxis yAxisId="stock" hide domain={[0, (dataMax: number) => Math.max(dataMax, 1) / STOCK_BAND]} />
+        {/* Скрытая шкала OOS-полос (0..1): полоса высотой STOCK_BAND снизу. */}
+        <YAxis yAxisId="band" hide domain={[0, 1]} />
         <Tooltip content={<CustomTooltip />} />
         <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" />
 
-        {/* OOS-полосы (availability=0) */}
-        <Area yAxisId="velocity" type="step" dataKey={(d: any) => d.availability === 0 ? 100 : 0}
+        {/* OOS-полосы (availability=0) — по нижней секции, вровень с остатками */}
+        <Area yAxisId="band" type="step" dataKey={(d: any) => d.availability === 0 ? STOCK_BAND : 0}
               fill="#fecaca" stroke="none" name={t("sku.chart.oosLegend")} isAnimationActive={false} />
 
-        {/* Остаток — бары */}
-        <Bar yAxisId="velocity" dataKey="stock" fill="#a5ada3" name={t("sku.chart.stock")} opacity={0.55} />
+        {/* Остаток — бары по нижней секции (своя скрытая шкала) */}
+        <Bar yAxisId="stock" dataKey="stock" fill="#a5ada3" name={t("sku.chart.stock")} opacity={0.55} />
 
         {/* TVelo (Rule 5.3) */}
         <Line yAxisId="velocity" type="monotone" dataKey="velocity" stroke="#3f6212"
