@@ -2,7 +2,8 @@
  * Robokassa helpers — генерация URL оплаты и проверка подписей.
  *
  * Поддерживает две оси биллинга:
- *  - Veloseller: starter (2500₽) / growth (6900₽) / pro (14900₽)
+ *  - Veloseller: starter (2500₽) / growth (6900₽) / pro (14900₽, legacy)
+ *                + «Конструктор» custom_{wh}x{sku} (см. lib/custom-plan.ts)
  *  - Radar:      radar_start (900₽) / radar_seller (2500₽) / radar_pro (5000₽) / radar_expert (10000₽)
  *
  * Подписи (MD5 hex лоуэркейс):
@@ -21,6 +22,7 @@
  *  - ROBOKASSA_TEST_PASSWORD_2 (для теста)
  */
 import { createHash, timingSafeEqual } from "node:crypto";
+import { parseCustomPlanId, customPlanPrice, customPlanLabel } from "./custom-plan";
 
 export type VeloseLLerPlan = "starter" | "growth" | "pro";
 export type RadarPlan = "radar_start" | "radar_seller" | "radar_pro" | "radar_expert";
@@ -30,6 +32,8 @@ export type ProductKind = "veloseller" | "radar";
 /**
  * Цены в рублях.
  * Veloseller: тарифы Александра — multi-warehouse SaaS.
+ *   pro — legacy: из сетки 04.06.2026 убран (заменён Конструктором), но остаётся
+ *   валидным для активации старых инвойсов и продления существующих подписок.
  * Radar: тарифы из ТЗ — отслеживание новинок брендов.
  */
 export const PLAN_PRICES: Record<Plan, number> = {
@@ -56,11 +60,23 @@ export const RADAR_BRANDS_LIMITS: Record<RadarPlan, number> = {
 
 /**
  * Лимит складов на тариф Veloseller — используется при активации в webhook.
+ * Сетка Александра 04.06.2026: Рост = 5 складов (было 6).
  */
 export const VELOSELLER_WAREHOUSES_LIMITS: Record<VeloseLLerPlan, number> = {
   starter: 2,
-  growth:  6,
+  growth:  5,
   pro:     15,
+};
+
+/**
+ * Лимит SKU на один склад (сетка Александра 04.06.2026).
+ * Пишется в sellers.plan_sku_per_warehouse_limit при активации.
+ * pro (legacy) получает триальный потолок 10000.
+ */
+export const VELOSELLER_SKU_LIMITS: Record<VeloseLLerPlan, number> = {
+  starter: 1000,
+  growth:  2000,
+  pro:     10000,
 };
 
 /**
@@ -80,6 +96,25 @@ export function isValidPlan(plan: string): plan is Plan {
   return plan in PLAN_PRICES;
 }
 
+/** Любой оплачиваемый план: фиксированный тариф ИЛИ валидный конструктор. */
+export function isPayablePlan(plan: string): boolean {
+  return isValidPlan(plan) || parseCustomPlanId(plan) !== null;
+}
+
+/** Цена плана (фикс или конструктор). null — план не оплачивается. */
+export function planPriceOf(plan: string): number | null {
+  if (isValidPlan(plan)) return PLAN_PRICES[plan];
+  const custom = parseCustomPlanId(plan);
+  return custom ? customPlanPrice(custom) : null;
+}
+
+/** Название плана для description Робокассы (фикс или конструктор). */
+export function planLabelOf(plan: string): string {
+  if (isValidPlan(plan)) return PLAN_LABELS[plan];
+  const custom = parseCustomPlanId(plan);
+  return custom ? customPlanLabel(custom) : plan;
+}
+
 export function isVeloseLLerPlan(plan: Plan): plan is VeloseLLerPlan {
   return plan === "starter" || plan === "growth" || plan === "pro";
 }
@@ -90,6 +125,11 @@ export function isRadarPlan(plan: Plan): plan is RadarPlan {
 
 export function productKindOf(plan: Plan): ProductKind {
   return isRadarPlan(plan) ? "radar" : "veloseller";
+}
+
+/** ProductKind для любой строки плана: radar_* → radar, иначе veloseller (включая custom). */
+export function productKindOfPlan(plan: string): ProductKind {
+  return plan.startsWith("radar_") ? "radar" : "veloseller";
 }
 
 function isTestMode(): boolean {
