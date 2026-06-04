@@ -87,6 +87,16 @@ describe("POST /api/robokassa/create-payment", () => {
     expect(res.status).toBe(400);
   });
 
+  it("невалидный конструктор (вне диапазона) → 400", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1", email: "u@x.ru" } } });
+    const { POST } = await import("@/app/api/robokassa/create-payment/route");
+    const res = await POST(new Request("http://x", {
+      method: "POST",
+      body: JSON.stringify({ plan: "custom_0x999" }),
+    }) as any);
+    expect(res.status).toBe(400);
+  });
+
   it("успех: возвращает url + inv_id", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1", email: "u@x.ru" } } });
     getSellerMock.mockResolvedValue({ data: { email: "u@x.ru" }, error: null });
@@ -105,5 +115,24 @@ describe("POST /api/robokassa/create-payment", () => {
     expect(body.inv_id).toBe(123);
     expect(body.url).toContain("InvId=123");
     expect(body.url).toContain("OutSum=6900.00");
+  });
+
+  it("конструктор custom_5x2000: сумма считается на сервере → OutSum=6000.00", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1", email: "u@x.ru" } } });
+    getSellerMock.mockResolvedValue({ data: { email: "u@x.ru" }, error: null });
+    insertInvoiceSelectSingleMock.mockResolvedValue({
+      data: { inv_id: 321 },
+      error: null,
+    });
+    const { POST } = await import("@/app/api/robokassa/create-payment/route");
+    const res = await POST(new Request("http://x", {
+      method: "POST",
+      // 5×1000 + (2000/1000)×500 = 6000
+      body: JSON.stringify({ plan: "custom_5x2000" }),
+    }) as any);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.url).toContain("InvId=321");
+    expect(body.url).toContain("OutSum=6000.00");
   });
 });
