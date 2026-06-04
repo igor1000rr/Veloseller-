@@ -19,6 +19,14 @@ export type Locale = "ru" | "en";
 export const LOCALE: Locale =
   process.env.NEXT_PUBLIC_LOCALE === "en" ? "en" : "ru";
 
+/**
+ * Канонический origin деплоя — для metadataBase, canonical, JSON-LD, sitemap.
+ * РФ-дефолт https://veloseller.ru; .com задаёт NEXT_PUBLIC_SITE_URL="https://<домен>".
+ * Без хвостового слеша.
+ */
+export const SITE_URL: string =
+  (process.env.NEXT_PUBLIC_SITE_URL || "https://veloseller.ru").replace(/\/+$/, "");
+
 function parseList(v: string | undefined, fallback: string[]): string[] {
   if (v === undefined || v === null || v.trim() === "") return fallback;
   return v.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
