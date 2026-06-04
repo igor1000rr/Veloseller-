@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getSelectedWarehouse } from "@/lib/warehouse";
 import { getPreHolidayWindow } from "@/lib/holidays";
-import { buildHealthBreakdown, buildConfidenceBreakdown } from "../[id]/HealthTooltip";
+import { buildHealthBreakdown, buildConfidenceBreakdown } from "../[id]/health-breakdown";
 import { t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -10,12 +10,10 @@ export const dynamic = "force-dynamic";
  * ВРЕМЕННАЯ диагностика прод-инцидента «Application error, Digest: 801888437»
  * на /dashboard/skus и карточке SKU.
  *
- * Прод-Next прячет стек за digest, доступа к journalctl из этой сессии нет —
- * поэтому страница повторяет data-фазу списка и карточки шаг за шагом,
- * каждый шаг в try/catch, и показывает где именно бросается исключение
- * (плюс supabase error.message, которые основной код молча проглатывает).
- *
- * После диагностики роут удаляется.
+ * Причина найдена этим роутом 04.06.2026: вызов buildHealthBreakdown()
+ * (модуль был "use client") из серверного компонента карточки.
+ * Функции вынесены в ../[id]/health-breakdown.ts. Роут оставлен до
+ * подтверждения фикса на проде, после чего удаляется.
  */
 
 type Step = { name: string; ok: boolean; info?: string; error?: string };

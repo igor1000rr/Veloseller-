@@ -3,7 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SkuAnalysisChart, type ChartPoint } from "./SkuAnalysisChart";
 import { ReorderPanel } from "./ReorderPanel";
-import { HealthKpi, buildHealthBreakdown, buildConfidenceBreakdown } from "./HealthTooltip";
+import { HealthKpi } from "./HealthTooltip";
+import { buildHealthBreakdown, buildConfidenceBreakdown } from "./health-breakdown";
 import { Icons } from "../../../_components/Icons";
 import { InfoTooltip } from "../../../_components/InfoTooltip";
 import { t } from "@/lib/i18n";
@@ -24,7 +25,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
 
   // Александр 01.06.2026: карточка SKU иногда таймаутила (statement timeout
   // в логах postgres) — было 6 запросов подряд через await. Под нагрузкой
-  // recalc-джоба суммарное время превышало 8с лимит. Решение:
+  // recalc-джобы суммарное время превышало 8с лимит. Решение:
   // 1) Распараллеливаем 5 независимых запросов через Promise.all.
   // 2) `select *` на tvelo_metrics → конкретные поля (нужно 11 из 25+).
   const day60Ago = new Date(Date.now() - 60 * 86400_000).toISOString();
