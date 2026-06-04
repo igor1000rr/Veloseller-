@@ -1,8 +1,15 @@
 /**
  * Тарифы Veloseller и Radar — единственный источник для UI (биллинг, лендинг).
  *
- * Локале-зависимы: РФ-сборка — рубли (значения 1:1 со старым хардкодом
- * в billing/page.tsx), .com — USD ($0/$29/$79/$149).
+ * Локале-зависимы: РФ-сборка — рубли, .com — USD ($0/$29/$79/$149).
+ *
+ * Сетка Александра 04.06.2026 (РФ): Триал 15 складов × 10000 SKU,
+ * Старт 2 × 1000, Рост 5 × 2000; четвёртая карточка — «Конструктор»
+ * (1–20 складов × 1000–20000 SKU, см. lib/custom-plan.ts), он рендерится
+ * отдельным компонентом PlanBuilder, поэтому в этом массиве его нет.
+ * Тариф Про из РФ-сетки убран (legacy: активация старых оплат работает).
+ * EN-сетка не менялась (конструктор — фича РФ/Робокассы), только лимиты
+ * синхронизированы с серверными.
  *
  * Цены здесь — только отображение. Суммы списания Робокассы живут на сервере
  * (/api/robokassa/create-payment) и этим файлом не трогаются.
@@ -19,24 +26,22 @@ export type BillingPlan = {
 
 const VELOSELLER_PLANS_RU: BillingPlan[] = [
   { id: "trial",   name: "Триал",  price: 0,     period: "30 дней бесплатно",
-    features: ["15 складов", "Весь функционал бесплатно"] },
+    features: ["15 складов", "10 000 SKU на склад", "Весь функционал бесплатно"] },
   { id: "starter", name: "Старт",  price: 2500,  period: "₽/мес",
-    features: ["2 склада"] },
+    features: ["2 склада", "1 000 SKU на склад"] },
   { id: "growth",  name: "Рост",   price: 6900,  period: "₽/мес",
-    features: ["6 складов"] },
-  { id: "pro",     name: "Про",    price: 14900, period: "₽/мес",
-    features: ["15 складов"] },
+    features: ["5 складов", "2 000 SKU на склад"] },
 ];
 
 const VELOSELLER_PLANS_EN: BillingPlan[] = [
   { id: "trial",   name: "Trial",   price: 0,   period: "30 days free",
-    features: ["15 warehouses", "Full feature set, free"] },
+    features: ["15 warehouses", "10,000 SKUs per warehouse", "Full feature set, free"] },
   { id: "starter", name: "Starter", price: 29,  period: "/mo",
-    features: ["2 warehouses"] },
+    features: ["2 warehouses", "1,000 SKUs per warehouse"] },
   { id: "growth",  name: "Growth",  price: 79,  period: "/mo",
-    features: ["6 warehouses"] },
+    features: ["5 warehouses", "2,000 SKUs per warehouse"] },
   { id: "pro",     name: "Pro",     price: 149, period: "/mo",
-    features: ["15 warehouses"] },
+    features: ["15 warehouses", "10,000 SKUs per warehouse"] },
 ];
 
 export const VELOSELLER_PLANS: BillingPlan[] =
