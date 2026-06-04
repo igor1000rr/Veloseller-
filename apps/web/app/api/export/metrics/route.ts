@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
  *   format=csv  (default) — чистый CSV (UTF-8 без BOM, разделитель запятая)
  *   format=excel          — CSV с UTF-8 BOM + точка-с-запятой разделитель
  *
- * Период: 7, 30 (default), 90 дней.
+ * Период: 7, 30 (default), 90 дней. Если задан date_from/date_to — метрики
+ * пересчитываются на лету за этот период (см. ниже), period=N игнорируется.
  *
  * Multi-warehouse фильтр:
  *   Если ?warehouse_id=<id> указан явно — фильтруем по нему.
@@ -28,6 +29,13 @@ export const dynamic = "force-dynamic";
  * Правка Игоря 28.05.2026: добавлена колонка sales_units (фактические продажи
  * за период) — sum abs(delta_stock) для sales_like событий. Соответствует
  * колонке "Продажи" в /dashboard/skus.
+ *
+ * 04.06.2026 (фикс, синхронно с page.tsx): date_from/date_to больше не фильтруют
+ * tvelo_metrics.period_end (это лишь прятало строки, ничего не пересчитывая) —
+ * при явном периоде метрики пересчитываются через get_skus_period_metrics:
+ * velocity/in_stock/stockout/coverage/sales/lost_revenue за выбранное окно.
+ * confirmed_velocity и median_30d при этом пустые (считаются только ночью),
+ * confidence/segment/health — свойства SKU из сохранённой метрики.
  *
  * Логика фильтров должна быть синхронизирована с apps/web/app/dashboard/skus/page.tsx.
  * Если там появятся новые фильтры — добавлять и сюда.
@@ -70,6 +78,18 @@ function defaultThresholdFor(filter: DashboardFilter): number | null {
   if (filter === "frequently_oos") return 15;
   return null;
 }
+
+/** Метрики, пересчитанные на лету за произвольный период (get_skus_period_metrics). */
+type PeriodRow = {
+  velocity: number;
+  in_stock_days: number;
+  stockout_days: number;
+  sales_units: number;
+  current_stock: number;
+  current_price: number | null;
+  coverage_days: number | null;
+  lost_revenue: number;
+};
 
 export async function GET(req: NextRequest) {
   const supabase = await createSupabaseServerClient();
@@ -127,6 +147,18 @@ export async function GET(req: NextRequest) {
   const dateFrom = parseDateOrNull(url.searchParams.get("date_from"));
   const dateTo = parseDateOrNull(url.searchParams.get("date_to"));
 
+  // Явный период пользователя → пересчёт метрик на лету (как на /dashboard/skus).
+  const customPeriod = !!(dateFrom || dateTo);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const defStart = new Date();
+  defStart.setUTCDate(defStart.getUTCDate() - periodDays);
+  const periodStart = dateFrom ?? defStart.toISOString().slice(0, 10);
+  const periodEnd = dateTo ?? todayIso;
+  const windowLen = Math.max(1, Math.round(
+    (new Date(periodEnd).getTime() - new Date(periodStart).getTime()) / 86400_000,
+  ) + 1);
+  const exportPeriodDays = customPeriod ? windowLen : periodDays;
+
   // Концентрационные фильтры — RPC возвращает топ-N product_ids
   let concentrationIds: string[] | null = null;
   if (dashFilter === "inventory_concentration" || dashFilter === "demand_concentration") {
@@ -141,11 +173,11 @@ export async function GET(req: NextRequest) {
 
   // При применённых фильтрах на метрики нужен !inner.
   // Без фильтров — выгружаем все товары (даже без метрик) — как раньше.
+  // Даты сюда не входят: они больше не SQL-фильтр (см. шапку файла).
   const hasAnyMetricFilter = !!(
     dashFilter || segmentFilter || !includeInactive ||
     stockMin !== null || stockMax !== null ||
-    oosMin !== null || oosMax !== null ||
-    dateFrom || dateTo
+    oosMin !== null || oosMax !== null
   );
   const tveloJoin = hasAnyMetricFilter ? "tvelo_metrics!inner" : "tvelo_metrics";
 
@@ -217,8 +249,7 @@ export async function GET(req: NextRequest) {
     if (stockMax !== null) query = query.lte("tvelo_metrics.current_stock", stockMax);
     if (oosMin !== null)   query = query.gte("tvelo_metrics.stockout_days", oosMin);
     if (oosMax !== null)   query = query.lte("tvelo_metrics.stockout_days", oosMax);
-    if (dateFrom)          query = query.gte("tvelo_metrics.period_end", dateFrom);
-    if (dateTo)            query = query.lte("tvelo_metrics.period_end", dateTo);
+    // date_from/date_to намеренно не фильтруют period_end — период пересчитывается ниже.
 
     const { data, error } = await query
       .order("sku")
@@ -231,29 +262,57 @@ export async function GET(req: NextRequest) {
     fromOffset += PAGE;
   }
 
+  // === Пересчёт метрик за явный период (батчами — выборка не ограничена 50) ===
+  let periodMetrics: Map<string, PeriodRow> | null = null;
+  if (customPeriod && allRows.length > 0) {
+    periodMetrics = new Map();
+    const ids = allRows.map((p: any) => p.product_id);
+    const RPC_BATCH = 500;
+    for (let i = 0; i < ids.length; i += RPC_BATCH) {
+      const { data: rpcRows, error: rpcError } = await supabase.rpc("get_skus_period_metrics", {
+        p_seller_id: user.id,
+        p_connection_id: warehouseId ?? null,
+        p_period_start: periodStart,
+        p_period_end: periodEnd,
+        p_product_ids: ids.slice(i, i + RPC_BATCH),
+      });
+      if (rpcError) return new Response(`DB error: ${rpcError.message}`, { status: 500 });
+      for (const r of (rpcRows ?? []) as any[]) {
+        periodMetrics.set(r.product_id, {
+          velocity: Number(r.velocity ?? 0),
+          in_stock_days: Number(r.in_stock_days ?? 0),
+          stockout_days: Number(r.stockout_days ?? 0),
+          sales_units: Number(r.sales_units ?? 0),
+          current_stock: Number(r.current_stock ?? 0),
+          current_price: r.current_price != null ? Number(r.current_price) : null,
+          coverage_days: r.coverage_days != null ? Number(r.coverage_days) : null,
+          lost_revenue: Number(r.lost_revenue ?? 0),
+        });
+      }
+    }
+  }
+
   // === Фактические продажи за период (sales_units) — sum sales_like deltas ===
   // То же что в page.tsx для колонки "Продажи". Берём матчем по periodDays:
   // если period_end-period_start ≈ periodDays-1, событие учитывается.
   // Для эффективности — один запрос на все product_ids видимой выборки.
+  // При customPeriod не нужно: sales_units приходит из get_skus_period_metrics.
   const salesByProduct: Record<string, number> = {};
   const productIdsForSales = allRows.map((p: any) => p.product_id);
-  if (productIdsForSales.length > 0) {
-    // Найдём общий period_start/end из метрик (если есть). Если фильтры по дате
-    // активны — используем их; иначе берём из первой подходящей метрики.
-    let salesStart: string | null = dateFrom;
-    let salesEnd: string | null = dateTo;
-    if (!salesStart || !salesEnd) {
-      for (const p of allRows) {
-        const metrics = (p.tvelo_metrics as any[] | undefined) ?? [];
-        const matched = metrics.find((m: any) => {
-          const len = Math.round((new Date(m.period_end).getTime() - new Date(m.period_start).getTime()) / 86400_000);
-          return Math.abs(len - (periodDays - 1)) <= 1;
-        }) ?? metrics[0];
-        if (matched?.period_start && matched?.period_end) {
-          salesStart = matched.period_start;
-          salesEnd = matched.period_end;
-          break;
-        }
+  if (!customPeriod && productIdsForSales.length > 0) {
+    // Найдём общий period_start/end из метрик (если есть) — из первой подходящей.
+    let salesStart: string | null = null;
+    let salesEnd: string | null = null;
+    for (const p of allRows) {
+      const metrics = (p.tvelo_metrics as any[] | undefined) ?? [];
+      const matched = metrics.find((m: any) => {
+        const len = Math.round((new Date(m.period_end).getTime() - new Date(m.period_start).getTime()) / 86400_000);
+        return Math.abs(len - (periodDays - 1)) <= 1;
+      }) ?? metrics[0];
+      if (matched?.period_start && matched?.period_end) {
+        salesStart = matched.period_start;
+        salesEnd = matched.period_end;
+        break;
       }
     }
 
@@ -313,16 +372,17 @@ export async function GET(req: NextRequest) {
       const len = Math.round((new Date(m.period_end).getTime() - new Date(m.period_start).getTime()) / 86400_000);
       return Math.abs(len - (periodDays - 1)) <= 1;
     }) ?? metrics[0];
+    const override = periodMetrics?.get(p.product_id) ?? null;
 
     const userNotes = p.user_notes ?? "";
-    const salesUnits = salesByProduct[p.product_id] ?? 0;
+    const salesUnits = override ? override.sales_units : (salesByProduct[p.product_id] ?? 0);
 
-    if (!matched) {
+    if (!matched && !override) {
       // Товар без метрик (возможно только без фильтров) — пропускаем если есть lost-фильтр.
       if (lostFilterActive) continue;
       lines.push([
         escape(p.sku), escape(p.product_name),
-        periodDays, "", "", "", "", "", "", "", "", "", "",
+        exportPeriodDays, "", "", "", "", "", "", "", "", "", "",
         salesUnits,
         "", "", "",
         "", "", "", "", "", "", "",
@@ -332,13 +392,24 @@ export async function GET(req: NextRequest) {
       continue;
     }
 
-    const cb = matched.confidence_breakdown ?? {};
-    const adjVel = Number(matched.adjusted_velocity ?? 0);
-    const stockoutDays = Number(matched.stockout_days ?? 0);
-    const currentPrice = Number(matched.current_price ?? 0);
-    const lostRevenue = adjVel > 0 && stockoutDays > 0
-      ? Math.round(adjVel * stockoutDays * currentPrice * 100) / 100
-      : 0;
+    // При override: velocity-семейство за выбранный период; confirmed/median
+    // пустые (ночные величины), confidence/segment/health — из сохранённой метрики.
+    const cb = matched?.confidence_breakdown ?? {};
+    const adjVel = override ? override.velocity : Number(matched.adjusted_velocity ?? 0);
+    const stockoutDays = override ? override.stockout_days : Number(matched.stockout_days ?? 0);
+    const inStockDays = override ? override.in_stock_days : (matched?.in_stock_days ?? "");
+    const currentStock = override ? override.current_stock : (matched?.current_stock ?? "");
+    const currentPrice = override
+      ? Number(override.current_price ?? 0)
+      : Number(matched.current_price ?? 0);
+    const coverageDays = override
+      ? (override.coverage_days ?? "")
+      : (matched?.coverage_days ?? "");
+    const lostRevenue = override
+      ? Math.round(Number(override.lost_revenue ?? 0) * 100) / 100
+      : (adjVel > 0 && stockoutDays > 0
+          ? Math.round(adjVel * stockoutDays * currentPrice * 100) / 100
+          : 0);
 
     if (lostFilterActive) {
       if (lostMin !== null && lostRevenue <= lostMin) continue;
@@ -347,14 +418,18 @@ export async function GET(req: NextRequest) {
 
     lines.push([
       escape(p.sku), escape(p.product_name),
-      periodDays, matched.period_start, matched.period_end,
-      matched.current_stock, currentPrice,
-      matched.confirmed_velocity, matched.adjusted_velocity, matched.median_30d_velocity ?? "",
-      matched.in_stock_days, matched.stockout_days, matched.coverage_days ?? "",
+      exportPeriodDays,
+      override ? periodStart : matched.period_start,
+      override ? periodEnd : matched.period_end,
+      currentStock, currentPrice,
+      override ? "" : matched.confirmed_velocity,
+      override ? adjVel : matched.adjusted_velocity,
+      override ? "" : (matched.median_30d_velocity ?? ""),
+      inStockDays, stockoutDays, coverageDays,
       salesUnits,
-      escape(matched.inventory_segment ?? ""), matched.sku_health_score ?? "",
-      matched.underestimated_sku ? "1" : "0",
-      matched.confidence_score,
+      escape(matched?.inventory_segment ?? ""), matched?.sku_health_score ?? "",
+      matched?.underestimated_sku ? "1" : "0",
+      matched?.confidence_score ?? "",
       cb.initial ?? "", cb.replenishment_like ?? "", cb.anomaly_like ?? "",
       cb.missing_data ?? "", cb.low_history ?? "",
       lostRevenue,
@@ -369,9 +444,9 @@ export async function GET(req: NextRequest) {
     ? "-" + (warehouseName.replace(/[^a-zA-Z0-9А-яа-яЁё]/g, "_").slice(0, 40) || "warehouse")
     : "";
   // Если применены фильтры — в имени файла пометка "-filtered".
-  const isFiltered = hasAnyMetricFilter || lostFilterActive || !!search;
+  const isFiltered = hasAnyMetricFilter || lostFilterActive || !!search || customPeriod;
   const filterSuffix = isFiltered ? "-filtered" : "";
-  const baseName = `veloseller-metrics-${periodDays}d${warehouseSlug}${filterSuffix}-${today}`;
+  const baseName = `veloseller-metrics-${exportPeriodDays}d${warehouseSlug}${filterSuffix}-${today}`;
 
   const respHeaders: Record<string, string> = {
     "Content-Disposition": `attachment; filename="${baseName}.csv"`,
