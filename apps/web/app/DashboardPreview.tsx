@@ -1,6 +1,10 @@
 "use client";
 
 import { LineChart, Line, ResponsiveContainer, BarChart, Bar, Cell } from "recharts";
+import { t } from "@/lib/i18n";
+import { LOCALE } from "@/lib/features";
+
+const isEn = LOCALE === "en";
 
 const healthSeries = [
   { d: "01", v: 58 }, { d: "02", v: 61 }, { d: "03", v: 64 }, { d: "04", v: 62 },
@@ -10,7 +14,7 @@ const healthSeries = [
 ];
 
 const skuRows = [
-  { sku: "NK-PEG-41",   name: "Кроссовки Nike Pegasus 41",      tv: 3.21, cov:  9, alert: "low" },
+  { sku: "NK-PEG-41",   name: isEn ? "Nike Pegasus 41 Running Shoes" : "Кроссовки Nike Pegasus 41", tv: 3.21, cov:  9, alert: "low" },
   { sku: "AD-ULTRA-22", name: "Adidas Ultraboost 22",            tv: 1.82, cov: 24, alert: null },
   { sku: "ASC-NOV",     name: "Asics Novablast 4",               tv: 0.41, cov:189, alert: "dead" },
   { sku: "NB-1080-13",  name: "New Balance 1080v13",             tv: 2.05, cov: 31, alert: null },
@@ -41,7 +45,7 @@ export default function DashboardPreview() {
             </div>
             <span className="font-mono text-[9px] md:text-[10px] uppercase tracking-[0.2em] text-ink-hush">veloseller / dashboard</span>
           </div>
-          <span className="font-mono text-[9px] md:text-[10px] text-ink-hush hidden sm:inline">обновлено 2 мин назад</span>
+          <span className="font-mono text-[9px] md:text-[10px] text-ink-hush hidden sm:inline">{t("landing.dp.updated")}</span>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-px bg-line">
@@ -50,13 +54,13 @@ export default function DashboardPreview() {
               <Kpi label="Health"        value="88"    suffix="/100" tone="good" />
               <Kpi label="OOS SKU"       value="3"     tone="warn" />
               <Kpi label="Lost revenue"  value="$1.4k" tone="bad" />
-              <Kpi label="В заморозке"   value="$8.2k" tone="warn" />
+              <Kpi label={t("landing.dp.frozen")}   value="$8.2k" tone="warn" />
             </div>
 
             <div className="mt-4 md:mt-5 rounded-xl border border-line p-3 md:p-4 bg-paper">
               <div className="flex justify-between items-center mb-2">
-                <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Health, 14 дней</div>
-                <div className="font-mono text-[11px] text-lime-deep font-semibold">+30 пунктов</div>
+                <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("landing.dp.health14")}</div>
+                <div className="font-mono text-[11px] text-lime-deep font-semibold">{t("landing.dp.points")}</div>
               </div>
               <div className="h-[80px] md:h-[90px]">
                 <ResponsiveContainer width="100%" height="100%">
@@ -69,7 +73,7 @@ export default function DashboardPreview() {
           </div>
 
           <div className="lg:col-span-4 bg-paper p-4 md:p-5">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-3">Сегменты SKU</div>
+            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-3">{t("landing.dp.segments")}</div>
             <div className="space-y-2.5">
               {segments.map((s) => (
                 <div key={s.name} className="flex items-center gap-3">
@@ -103,8 +107,8 @@ export default function DashboardPreview() {
 
           <div className="lg:col-span-12 bg-paper p-4 md:p-5">
             <div className="flex items-center justify-between mb-3">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">SKU с алертами</div>
-              <div className="font-mono text-[10px] text-orange font-semibold">2 требуют внимания</div>
+              <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("landing.dp.alerts")}</div>
+              <div className="font-mono text-[10px] text-orange font-semibold">{t("landing.dp.needAttention")}</div>
             </div>
             <div className="divide-y divide-line border border-line rounded-xl overflow-hidden">
               {skuRows.map((r) => (
@@ -112,7 +116,7 @@ export default function DashboardPreview() {
                   <span className="col-span-4 md:col-span-3 font-mono text-[10px] md:text-[11px] text-ink-hush">{r.sku}</span>
                   <span className="col-span-4 md:col-span-5 text-[12px] md:text-[13px] text-ink-soft truncate">{r.name}</span>
                   <span className="col-span-2 font-mono text-[12px] md:text-[13px] text-lime-deep tabular font-semibold">{r.tv.toFixed(2)}</span>
-                  <span className="hidden md:inline col-span-1 font-mono text-[11px] text-ink-hush tabular text-right">{r.cov}д</span>
+                  <span className="hidden md:inline col-span-1 font-mono text-[11px] text-ink-hush tabular text-right">{r.cov}{t("landing.dp.d")}</span>
                   <span className="col-span-2 md:col-span-1 text-right">
                     {r.alert === "low"  && <Pill tone="warn">low</Pill>}
                     {r.alert === "dead" && <Pill tone="bad">dead</Pill>}

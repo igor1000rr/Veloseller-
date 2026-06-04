@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Icons } from "./_components/Icons";
+import { t } from "@/lib/i18n";
 
 export default function HeroVeloDemo() {
   const [oos, setOos] = useState(8);
@@ -55,7 +56,7 @@ export default function HeroVeloDemo() {
         <div>
           <div className="font-mono text-[10px] md:text-[11px] uppercase tracking-widest text-ink-hush">SKU / Nike Pegasus 41</div>
           <div className="mt-1 font-mono text-xs text-ink-muted">
-            продано <span className="text-ink tabular">60</span> шт за <span className="tabular">30</span> дней
+            {t("landing.demo.sold1")} <span className="text-ink tabular">60</span> {t("landing.demo.sold2")} <span className="tabular">30</span> {t("landing.demo.sold3")}
           </div>
         </div>
 
@@ -87,9 +88,9 @@ export default function HeroVeloDemo() {
         <div className="mt-5">
           <div className="flex justify-between items-center mb-2">
             <label htmlFor="oos" className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">
-              Дней без товара
+              {t("landing.demo.oosLabel")}
             </label>
-            <span className="font-mono text-sm text-orange tabular font-semibold">{oos} / 30 дней</span>
+            <span className="font-mono text-sm text-orange tabular font-semibold">{oos} / 30 {t("landing.demo.days")}</span>
           </div>
           <input
             id="oos"
@@ -104,24 +105,23 @@ export default function HeroVeloDemo() {
 
         <div className="mt-5 md:mt-6 grid grid-cols-2 gap-3">
           <div className="rounded-lg border border-line bg-bg-soft p-3 md:p-4">
-            <div className="font-mono text-[9px] md:text-[10px] uppercase tracking-widest text-ink-hush">обычная скорость продаж</div>
+            <div className="font-mono text-[9px] md:text-[10px] uppercase tracking-widest text-ink-hush">{t("landing.demo.naive")}</div>
             <div className="mt-1 font-mono text-2xl md:text-3xl text-ink-hush tabular line-through decoration-orange decoration-2">
               {naive.toFixed(2)}
             </div>
-            <div className="mt-0.5 font-mono text-[9px] md:text-[10px] text-ink-hush">шт / день</div>
+            <div className="mt-0.5 font-mono text-[9px] md:text-[10px] text-ink-hush">{t("landing.demo.perDay")}</div>
           </div>
           <div className="rounded-lg border-2 border-lime-deep/40 bg-lime-soft p-3 md:p-4 relative overflow-hidden">
             <div className="font-mono text-[9px] md:text-[10px] uppercase tracking-widest text-lime-deep font-semibold">TVelo</div>
             <div className="mt-1 font-mono text-2xl md:text-3xl text-ink tabular font-semibold">{tvelo.toFixed(2)}</div>
             <div className="mt-0.5 font-mono text-[9px] md:text-[10px] text-ink-muted">
-              шт/день · <span className="text-lime-deep font-semibold">+{lift.toFixed(0)}%</span>
+              {t("landing.demo.perDayShort")} · <span className="text-lime-deep font-semibold">+{lift.toFixed(0)}%</span>
             </div>
           </div>
         </div>
 
         <p className="mt-4 md:mt-5 text-xs md:text-[12.5px] leading-relaxed text-ink-muted">
-          Делить продажи на 30 — неверно: <span className="text-orange font-semibold">{oos} дней</span> товара
-          не было на складе. TVelo считает только <span className="text-lime-deep font-semibold">дни в наличии</span>.
+          {t("landing.demo.note1")} <span className="text-orange font-semibold">{oos} {t("landing.demo.days")}</span> {t("landing.demo.note2")} <span className="text-lime-deep font-semibold">{t("landing.demo.note3")}</span>.
         </p>
       </div>
     </div>

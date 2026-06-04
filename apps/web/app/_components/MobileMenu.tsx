@@ -2,12 +2,13 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Icons } from "./Icons";
+import { t } from "@/lib/i18n";
 
 const nav = [
-  { href: "#features", label: "Возможности" },
-  { href: "#how", label: "Как работает" },
-  { href: "#integrations", label: "Интеграции" },
-  { href: "#pricing", label: "Тарифы" },
+  { href: "#features", label: t("landing.nav.features") },
+  { href: "#how", label: t("landing.nav.how") },
+  { href: "#integrations", label: t("landing.nav.integrations") },
+  { href: "#pricing", label: t("landing.nav.pricing") },
   { href: "#faq", label: "FAQ" },
 ];
 
@@ -28,7 +29,7 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
       <button
         onClick={() => setOpen(true)}
         className="md:hidden inline-flex items-center justify-center size-10 rounded-lg border border-line bg-paper text-ink hover:bg-bg-soft transition"
-        aria-label="Открыть меню"
+        aria-label={t("landing.menu.open")}
       >
         <Icons.Menu />
       </button>
@@ -49,7 +50,7 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
             <button
               onClick={() => setOpen(false)}
               className="inline-flex items-center justify-center size-10 rounded-lg border border-line bg-paper text-ink"
-              aria-label="Закрыть"
+              aria-label={t("landing.menu.close")}
             >
               <Icons.Close />
             </button>
@@ -76,7 +77,7 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
                 onClick={() => setOpen(false)}
                 className="flex items-center justify-center gap-2 w-full rounded-lg bg-ink text-paper px-5 py-3.5 font-semibold"
               >
-                В кабинет <Icons.ArrowRight />
+                {t("landing.toDashboard")} <Icons.ArrowRight />
               </Link>
             ) : (
               <>
@@ -85,14 +86,14 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
                   onClick={() => setOpen(false)}
                   className="flex items-center justify-center w-full rounded-lg bg-ink text-paper px-5 py-3.5 font-semibold"
                 >
-                  Начать бесплатно
+                  {t("landing.pr.startFree")}
                 </Link>
                 <Link
                   href={"/login" as any}
                   onClick={() => setOpen(false)}
                   className="flex items-center justify-center w-full rounded-lg border border-line bg-paper text-ink px-5 py-3.5 font-medium"
                 >
-                  Войти
+                  {t("landing.login")}
                 </Link>
               </>
             )}
