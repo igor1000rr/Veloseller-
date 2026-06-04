@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { HealthKpi } from "@/app/dashboard/skus/[id]/HealthTooltip";
 import {
-  HealthKpi, buildHealthBreakdown, buildConfidenceBreakdown,
-} from "@/app/dashboard/skus/[id]/HealthTooltip";
+  buildHealthBreakdown, buildConfidenceBreakdown,
+} from "@/app/dashboard/skus/[id]/health-breakdown";
 
 describe("HealthKpi", () => {
   it("показывает label и value", () => {
