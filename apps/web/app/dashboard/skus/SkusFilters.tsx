@@ -92,6 +92,10 @@ export function SkusFilters({
       date_from: dateFrom, date_to: dateTo,
       reorder_days: reorderDays === "30" ? "" : reorderDays,
     });
+    // 04.06.2026 (фикс «Рассчитать не считает»): если URL не изменился,
+    // router.replace не перерисовывает server component — refresh гарантирует
+    // пересчёт страницы при каждом нажатии кнопки.
+    router.refresh();
   }
 
   function toggleInactive() {
