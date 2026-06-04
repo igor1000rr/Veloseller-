@@ -5,10 +5,12 @@ import {
   isVeloseLLerPlan,
   isRadarPlan,
   VELOSELLER_WAREHOUSES_LIMITS,
+  VELOSELLER_SKU_LIMITS,
   RADAR_BRANDS_LIMITS,
   type VeloseLLerPlan,
   type RadarPlan,
 } from "@/lib/robokassa";
+import { parseCustomPlanId } from "@/lib/custom-plan";
 import { enforceRateLimitDurable, RATE_LIMITS } from "@/lib/rate-limit";
 
 /**
@@ -19,7 +21,9 @@ import { enforceRateLimitDurable, RATE_LIMITS } from "@/lib/rate-limit";
  *  2. Проверяем совпадение test/prod-режима сервера с IsTest флагом
  *  3. Обновляем invoice → paid
  *  4. Активируем подписку — в зависимости от product_kind:
- *     - veloseller: seller.plan + plan_warehouses_limit + subscription_expires_at
+ *     - veloseller: seller.plan + plan_warehouses_limit + plan_sku_per_warehouse_limit
+ *                   + subscription_expires_at. Лимиты: фикс-тариф — из таблиц
+ *                   robokassa.ts; «Конструктор» custom_{wh}x{sku} — из кодировки плана.
  *     - radar:      seller.radar_plan + radar_brands_limit + radar_active_until
  *  5. Отвечаем ровно "OK{InvId}" plain text — без этого Robokassa будет ретраить.
  */
@@ -105,6 +109,8 @@ async function handle(req: NextRequest): Promise<Response> {
   // Активируем подписку — в зависимости от product_kind.
   // Legacy invoices без product_kind (до этой миграции) имеют DEFAULT 'veloseller'.
   const productKind = invoice.product_kind || "veloseller";
+  // «Конструктор» (Александр 04.06.2026): лимиты зашиты в кодировку плана.
+  const customParams = parseCustomPlanId(invoice.plan);
 
   if (productKind === "radar" && isRadarPlan(invoice.plan)) {
     // Radar подписка — обновляем radar_* поля sellers.
@@ -122,15 +128,28 @@ async function handle(req: NextRequest): Promise<Response> {
         radar_active_until: expiresAt.toISOString(),
       })
       .eq("id", invoice.seller_id);
+  } else if (customParams) {
+    // Конструктор: складов и SKU/склад ровно сколько оплачено.
+    await sb
+      .from("sellers")
+      .update({
+        plan: invoice.plan,
+        plan_warehouses_limit: customParams.warehouses,
+        plan_sku_per_warehouse_limit: customParams.skuPerWarehouse,
+        subscription_expires_at: expiresAt.toISOString(),
+      })
+      .eq("id", invoice.seller_id);
   } else if (isVeloseLLerPlan(invoice.plan)) {
-    // Veloseller подписка — обновляем plan + plan_warehouses_limit + expires.
+    // Veloseller фикс-тариф — plan + лимиты складов/SKU + expires.
     const warehousesLimit = VELOSELLER_WAREHOUSES_LIMITS[invoice.plan as VeloseLLerPlan];
+    const skuLimit = VELOSELLER_SKU_LIMITS[invoice.plan as VeloseLLerPlan];
 
     await sb
       .from("sellers")
       .update({
         plan: invoice.plan,
         plan_warehouses_limit: warehousesLimit,
+        plan_sku_per_warehouse_limit: skuLimit,
         subscription_expires_at: expiresAt.toISOString(),
       })
       .eq("id", invoice.seller_id);
