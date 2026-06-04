@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { saveUserNotes } from "../actions";
 import { t } from "@/lib/i18n";
 
 type Props = {
@@ -12,7 +13,11 @@ type Props = {
   /** Больше не используется в расчёте (Александр 04.06.2026), но page.tsx
    *  всё ещё передаёт проп — оставлен в типе для совместимости. */
   safetyDays: number;
+  /** Текущие заметки SKU — кнопка дописывает сводку, не затирая ручные записи. */
+  initialNotes: string | null;
 };
+
+type SaveStatus = "idle" | "saving" | "saved" | "error";
 
 /**
  * Блок «Закупка» в карточке SKU.
@@ -21,17 +26,23 @@ type Props = {
  *  - Lead time → «Срок поставки», Reorder point → «Точка перезаказа» (словарь);
  *  - Safety days / Safety stock убраны полностью — из UI, формулы и сохранения.
  *    Точка перезаказа = TVelo × срок поставки;
- *  - Новое поле «Товары в пути (шт)» — то, что уже едет от поставщика.
- *    Локальный калькулятор (не сохраняется), увеличивает эффективный остаток
- *    в расчёте «До заказа»;
- *  - Новый блок «Текущее наличие» — между точкой перезаказа и «До заказа».
+ *  - Поле «Товары в пути (шт)» — то, что уже едет от поставщика. Локальный
+ *    калькулятор, увеличивает эффективный остаток в расчёте «До заказа»;
+ *  - Блок «Текущее наличие» — между точкой перезаказа и «До заказа»;
+ *  - Кнопка «Сохранить в Заметки»: пишет сводку расчёта в user_notes SKU
+ *    (видна в колонке «Заметки» на вкладке SKU и в Excel-выгрузке) —
+ *    дописыванием к существующим заметкам. Заодно тихо сохраняет срок
+ *    поставки (PATCH /reorder), иначе его негде было бы задать.
  */
-export function ReorderPanel({ productId, adjustedVelocity, currentStock, leadTimeDays: initLead }: Props) {
+export function ReorderPanel({ productId, adjustedVelocity, currentStock, leadTimeDays: initLead, initialNotes }: Props) {
   const router = useRouter();
   const [leadTime, setLeadTime] = useState(initLead);
   const [reorderFor, setReorderFor] = useState(30);
   const [inTransit, setInTransit] = useState(0);
-  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<SaveStatus>("idle");
+  // Актуальные заметки между сохранениями (router.refresh асинхронный —
+  // повторное нажатие не должно затирать только что дописанную сводку).
+  const notesRef = useRef(initialNotes ?? "");
 
   const reorderPoint = Math.round(adjustedVelocity * leadTime);
   // «До заказа»: товары в пути считаем уже доступными — они приедут раньше,
@@ -43,13 +54,40 @@ export function ReorderPanel({ productId, adjustedVelocity, currentStock, leadTi
   const recommendedQty = Math.round(adjustedVelocity * reorderFor);
 
   async function save() {
-    setSaving(true);
-    await fetch(`/api/products/${productId}/reorder`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lead_time_days: leadTime }),
-    });
-    setSaving(false);
+    setStatus("saving");
+
+    // Сводка расчёта — одна строка в заметках, например:
+    // «04.06.2026 · закупка: 35 шт на 30 дн, поставка 14 дн, в пути 20 шт»
+    const summary =
+      t("sku.reorder.noteTemplate", {
+        date: new Date().toLocaleDateString("ru-RU"),
+        qty: recommendedQty,
+        days: reorderFor,
+        lead: leadTime,
+      }) + (inTransit > 0 ? t("sku.reorder.noteInTransit", { n: inTransit }) : "");
+
+    const base = notesRef.current.trim();
+    let next = base ? `${base}\n${summary}` : summary;
+    // Серверный лимит user_notes — 2000 символов (saveUserNotes режет хвост).
+    // Режем старое начало, чтобы свежая сводка не потерялась.
+    if (next.length > 2000) next = next.slice(next.length - 2000);
+
+    const [, notesRes] = await Promise.all([
+      fetch(`/api/products/${productId}/reorder`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lead_time_days: leadTime }),
+      }).catch(() => null),
+      saveUserNotes(productId, next),
+    ]);
+
+    if (notesRes.ok) {
+      notesRef.current = next;
+      setStatus("saved");
+      setTimeout(() => setStatus(s => (s === "saved" ? "idle" : s)), 2000);
+    } else {
+      setStatus("error");
+    }
     router.refresh();
   }
 
@@ -85,10 +123,16 @@ export function ReorderPanel({ productId, adjustedVelocity, currentStock, leadTi
       </div>
 
       <div className="mt-4 flex items-center gap-3">
-        <button onClick={save} disabled={saving}
+        <button onClick={save} disabled={status === "saving"}
                 className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white text-sm rounded-lg disabled:opacity-50">
-          {saving ? t("common.saving") : t("sku.reorder.saveBtn")}
+          {status === "saving" ? t("common.saving") : t("sku.reorder.saveBtn")}
         </button>
+        {status === "saved" && (
+          <span className="text-sm text-emerald-700 font-medium">✓ {t("sku.reorder.savedToNotes")}</span>
+        )}
+        {status === "error" && (
+          <span className="text-sm text-red-700 font-medium">{t("sku.notes.error")}</span>
+        )}
         {daysUntilReorder != null && daysUntilReorder === 0 && (
           <span className="text-sm text-red-700 font-medium">⚠ {t("sku.reorder.timeToReorder")}</span>
         )}
