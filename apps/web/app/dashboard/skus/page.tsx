@@ -637,10 +637,11 @@ export default async function SkusPage({ searchParams }: {
                     </Link>
                   </td>
                   <td className="col-skucol-name px-3 sm:px-4 py-3">
-                    {/* Александр 01.06.2026: название тоже сделать ссылкой для проваливания в SKU */}
+                    {/* Александр 01.06.2026: название тоже сделать ссылкой для проваливания в SKU.
+                        04.06.2026: сделана зелёной как артикул — визуально понятно что это ссылка. */}
                     <Link
                       href={`/dashboard/skus/${p.product_id}` as any}
-                      className="text-ink-soft hover:text-lime-deep transition"
+                      className="text-lime-deep hover:text-ink transition"
                     >
                       {p.product_name}
                     </Link>
