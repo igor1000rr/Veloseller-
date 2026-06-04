@@ -94,15 +94,40 @@ export const footerWarehouseTypes = isEn
   ? ["Shopify", "Google Sheet"]
   : ["Ozon FBS", "Ozon FBO", "Wildberries FBS", "Wildberries FBO", "Google Sheet"];
 
-export type LandingPlan = { name: string; price: number; highlight: boolean; perks: string[] };
+export type LandingPlan = {
+  name: string;
+  price: number;
+  highlight: boolean;
+  perks: string[];
+  /** Цена «от …» — для Конструктора (минимальная конфигурация). */
+  fromPrice?: boolean;
+};
 
 /** Платные тарифы для офферов JSON-LD (без триала). */
 export const paidPlans = VELOSELLER_PLANS.filter((p) => p.id !== "trial");
 
-/** Карточки цен лендинга: 3 платных тарифа, Рост/Growth подсвечен. */
-export const landingPlans: LandingPlan[] = paidPlans.map((p) => ({
-  name: p.name,
-  price: p.price,
-  highlight: p.id === "growth",
-  perks: p.features,
-}));
+/**
+ * Карточки цен лендинга. РФ (сетка Александра 04.06.2026): Старт, Рост (подсвечен)
+ * и «Конструктор» от 1500 ₽ (1 склад × 1000 SKU). EN: фикс-тарифы как есть.
+ */
+export const landingPlans: LandingPlan[] = [
+  ...paidPlans.map((p) => ({
+    name: p.name,
+    price: p.price,
+    highlight: p.id === "growth",
+    perks: p.features,
+  })),
+  ...(isEn
+    ? []
+    : [{
+        name: "Конструктор",
+        price: 1500,
+        highlight: false,
+        fromPrice: true,
+        perks: [
+          "1–20 складов",
+          "1 000–20 000 SKU на склад",
+          "Склад — 1 000 ₽, каждые 1 000 SKU — 500 ₽",
+        ],
+      }]),
+];
