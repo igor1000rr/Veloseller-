@@ -11,7 +11,7 @@ import { isWarehouseKindEnabled } from "@/lib/features";
 
 /**
  * Multi-warehouse архитектура (май 2026):
- * 5 типов складов, каждый = отдельная "data_connection" в БД с собственным warehouse_kind.
+ * 6 типов складов, каждый = отдельная "data_connection" в БД с собственным warehouse_kind.
  * Один Ozon API-ключ → 2 склада (FBO + FBS, остатки берутся по разным фильтрам).
  * Один WB token → 2 склада (FBO через Statistics API + FBS через Marketplace API).
  * Для WB FBS токену нужны категории: Статистика + Маркетплейс + Контент.
@@ -23,8 +23,10 @@ import { isWarehouseKindEnabled } from "@/lib/features";
  * Ф0 (мультиверсия): набор карточек фильтруется isWarehouseKindEnabled по
  * ENABLED_MARKETPLACES. РФ-дефолт (ozon+wildberries) показывает всё как раньше;
  * .com скроет Ozon/WB. Google Sheet — ручной источник, доступен везде.
+ * .com добавляет Shopify (один склад на магазин, остатки+цены через Admin GraphQL);
+ * на РФ-сборке карточка Shopify скрыта тем же фильтром.
  */
-type WarehouseKind = "ozon_fbo" | "ozon_fbs" | "wb_fbo" | "wb_fbs" | "google_sheet";
+type WarehouseKind = "ozon_fbo" | "ozon_fbs" | "wb_fbo" | "wb_fbs" | "google_sheet" | "shopify";
 
 type WarehouseMeta = {
   kind: WarehouseKind;
@@ -70,6 +72,12 @@ const WAREHOUSES: WarehouseMeta[] = [
     title: "Google Sheet",
     text: "Анализ вашего склада через Google Sheet с остатками и ценами.",
     dot: "#0F9D58", status: "ready",
+  },
+  {
+    kind: "shopify",
+    title: "Shopify",
+    text: "Анализ остатков и цен магазина Shopify через Admin API (товары и их варианты).",
+    dot: "#95BF47", status: "ready",
   },
 ];
 
@@ -215,11 +223,14 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
   const [clientId, setClientId] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [wbToken, setWbToken] = useState("");
+  const [shop, setShop] = useState("");
+  const [accessToken, setAccessToken] = useState("");
 
   const isOzon = kind === "ozon_fbo" || kind === "ozon_fbs";
   const isWb = kind === "wb_fbo" || kind === "wb_fbs";
   const isWbFbs = kind === "wb_fbs";
   const isSheet = kind === "google_sheet";
+  const isShopify = kind === "shopify";
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -246,6 +257,8 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
         config = { client_id: clientId, api_key: apiKey };
       } else if (isWb) {
         config = { token: wbToken };
+      } else if (isShopify) {
+        config = { shop: shop.trim(), access_token: accessToken.trim() };
       }
 
       const createRes = await fetch("/api/connections", {
@@ -294,6 +307,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
         {isOzon && <OzonInstructions />}
         {isWb && <WbInstructions isFbs={isWbFbs} />}
         {isSheet && <SheetInstructions />}
+        {isShopify && <ShopifyInstructions />}
 
         <div>
           <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">
@@ -358,6 +372,22 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
               </p>
             )}
           </div>
+        )}
+
+        {isShopify && (
+          <>
+            <div>
+              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Домен магазина</label>
+              <input required value={shop} onChange={(e) => setShop(e.target.value)} placeholder="mystore.myshopify.com"
+                className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono text-sm focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+            </div>
+            <div>
+              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Admin API access token</label>
+              <input required type="password" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} placeholder="shpat_..."
+                className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+              <p className="mt-1.5 font-mono text-[11px] text-ink-hush">Токен из custom app магазина, начинается с shpat_. Достаточно прав read_products.</p>
+            </div>
+          </>
         )}
 
         <button type="submit" disabled={loading}
@@ -510,6 +540,27 @@ function SheetInstructions() {
   );
 }
 
+function ShopifyInstructions() {
+  return (
+    <div className="rounded-xl border border-line bg-bg-soft p-4 md:p-5 text-sm">
+      <h3 className="font-display text-base font-medium text-ink mb-3">Как получить access token</h3>
+      <p className="text-ink-soft mb-2">
+        Админка Shopify → <b>Settings → Apps and sales channels → Develop apps</b> → <b>Create an app</b>.
+      </p>
+      <ol className="list-decimal list-inside space-y-1 text-ink-muted">
+        <li>Название приложения — произвольное</li>
+        <li><b>Configuration → Admin API integration</b> → выдать scope <b>read_products</b></li>
+        <li>Нажать <b>Install app</b></li>
+        <li><b>API credentials</b> → скопировать <b>Admin API access token</b> (начинается с <code className="bg-paper border border-line rounded px-1 py-0.5 font-mono text-[11px]">shpat_</code>)</li>
+        <li>Домен магазина — вида <b>mystore.myshopify.com</b></li>
+      </ol>
+      <p className="mt-3 text-[11px] text-ink-hush">
+        Токен показывается один раз. Доступ только на чтение каталога — менять товары и цены сервис не может.
+      </p>
+    </div>
+  );
+}
+
 function warehouseTitle(kind: WarehouseKind): string {
   return ({
     ozon_fbo:     "Ozon FBO",
@@ -517,5 +568,6 @@ function warehouseTitle(kind: WarehouseKind): string {
     wb_fbo:       "Wildberries FBO",
     wb_fbs:       "Wildberries FBS",
     google_sheet: "Google Sheet",
+    shopify:      "Shopify",
   } as const)[kind];
 }
