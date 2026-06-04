@@ -176,7 +176,7 @@ export default async function LandingPage() {
       </header>
 
       {/* ===== HERO ===== */}
-      <section className="relative w-full px-4 md:px-8 lg:px-12 pt-12 pb-16 md:pt-20 md:pb-24">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 pt-12 pb-8 md:pt-20 md:pb-12">
         <div className="grid lg:grid-cols-12 gap-10 lg:gap-12 items-center max-w-[1600px] mx-auto">
           <div className="lg:col-span-6 reveal">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-lime-deep/30 bg-lime-soft">
@@ -228,7 +228,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ===== STATS ===== */}
-      <section className="relative w-full px-4 md:px-8 lg:px-12 py-10 md:py-14 border-y border-line bg-bg-soft">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-8 md:py-10 border-y border-line bg-bg-soft">
         <div className="max-w-[1600px] mx-auto grid grid-cols-2 md:grid-cols-4 gap-6 md:gap-10">
           {stats.map((s, i) => (
             <div key={i} className="relative">
@@ -244,7 +244,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ===== INTEGRATIONS marquee ===== */}
-      <section id="integrations" className="relative w-full py-14 md:py-20 border-b border-line overflow-hidden">
+      <section id="integrations" className="relative w-full py-8 md:py-12 border-b border-line overflow-hidden">
         <div className="w-full px-4 md:px-8 lg:px-12 mb-8 md:mb-10 max-w-[1600px] mx-auto">
           <div className="flex items-end justify-between flex-wrap gap-4">
             <div>
@@ -291,7 +291,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ===== DASHBOARD PREVIEW ===== */}
-      <section className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-8 md:py-12">
         <div className="max-w-[1600px] mx-auto">
           <div className="flex items-end justify-between mb-8 md:mb-10 flex-wrap gap-4">
             <div>
@@ -310,7 +310,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ===== BENTO FEATURES ===== */}
-      <section id="features" className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line bg-bg-soft">
+      <section id="features" className="relative w-full px-4 md:px-8 lg:px-12 py-8 md:py-12 border-t border-line bg-bg-soft">
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-14">
             <Eyebrow center>Возможности</Eyebrow>
@@ -360,7 +360,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ===== СРАВНЕНИЕ ===== */}
-      <section className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-8 md:py-12 border-t border-line">
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-14">
             <Eyebrow center>Сравнение</Eyebrow>
@@ -406,7 +406,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ===== HOW IT WORKS ===== */}
-      <section id="how" className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line bg-bg-soft">
+      <section id="how" className="relative w-full px-4 md:px-8 lg:px-12 py-8 md:py-12 border-t border-line bg-bg-soft">
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-12 md:mb-16">
             <Eyebrow center>Как это работает</Eyebrow>
@@ -430,7 +430,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ===== TESTIMONIALS ===== */}
-      <section className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-8 md:py-12 border-t border-line">
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-14">
             <Eyebrow center>Отзывы</Eyebrow>
@@ -461,7 +461,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ===== PRICING ===== */}
-      <section id="pricing" className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line bg-bg-soft">
+      <section id="pricing" className="relative w-full px-4 md:px-8 lg:px-12 py-8 md:py-12 border-t border-line bg-bg-soft">
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-12">
             <Eyebrow center>Цены</Eyebrow>
@@ -484,7 +484,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ===== FAQ ===== */}
-      <section id="faq" className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line">
+      <section id="faq" className="relative w-full px-4 md:px-8 lg:px-12 py-8 md:py-12 border-t border-line">
         <div className="max-w-[1100px] mx-auto">
           <div className="text-center mb-10 md:mb-14">
             <Eyebrow center>FAQ</Eyebrow>
@@ -497,7 +497,7 @@ export default async function LandingPage() {
       </section>
 
       {/* ===== CTA ===== */}
-      <section className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-8 md:py-12">
         <div className="max-w-[1600px] mx-auto">
           <div className="relative overflow-hidden rounded-3xl border-2 border-lime-deep/30 bg-gradient-to-br from-lime-soft via-paper to-paper p-6 sm:p-8 md:p-16 lg:p-20">
             <div className="absolute -right-20 -top-20 size-80 rounded-full bg-lime/30 blur-3xl" />
