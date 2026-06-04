@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 import { t } from "@/lib/i18n";
@@ -25,6 +25,16 @@ export type FilterRanges = {
  *  - "velocity × stockout × price" → формула на русском
  *  - Новый фильтр "Дней до окончания остатков" (по coverage_days)
  *  - Кнопка «Рассчитать» — psycologically даёт пользователю явный триггер
+ *
+ * Александр 04.06.2026:
+ *  - Авторасчёт при вводе убран (debounce-обновление URL на каждый символ) —
+ *    все расчёты запускает только кнопка «Рассчитать». Меньше нагрузка и логичнее.
+ *    Исключение — чекбокс «Включить SKU без активности»: это явный клик-
+ *    переключатель, применяется сразу.
+ *  - Поле «Закупка на N дней» переехало сюда из шапки списка. Старая шапочная
+ *    GET-форма со стрелкой при сабмите теряла date_from/date_to и все min/max-
+ *    диапазоны (hidden-поля сохраняли не всё) — отсюда нули в закупке.
+ *    Теперь «Рассчитать» пишет в URL все параметры разом, включая reorder_days.
  */
 export function SkusFilters({
   warehouseCreatedAt,
@@ -57,8 +67,8 @@ export function SkusFilters({
   const [coverageMax, setCoverageMax] = useState(sp.get("coverage_max") ?? "");
   const [dateFrom, setDateFrom] = useState(sp.get("date_from") || defaultDateFrom);
   const [dateTo, setDateTo] = useState(sp.get("date_to") || defaultDateTo);
-
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Закупка на N дней — дефолт 30 синхронизирован с сервером (page.tsx).
+  const [reorderDays, setReorderDays] = useState(sp.get("reorder_days") ?? "30");
 
   function pushUpdate(updates: Record<string, string>) {
     const params = new URLSearchParams(sp.toString());
@@ -70,31 +80,23 @@ export function SkusFilters({
     router.replace(`${pathname}?${params.toString()}` as any);
   }
 
-  function scheduleUpdate(updates: Record<string, string>) {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => pushUpdate(updates), 350);
-  }
-
   function recalculateNow() {
-    // Принудительно применяем все текущие значения формы — для кнопки "Рассчитать".
+    // Принудительно применяем все текущие значения формы — единственный триггер расчёта.
     // Александр 01.06.2026: "психологически понятнее — нажал → получил расчёт".
-    if (debounceRef.current) clearTimeout(debounceRef.current);
+    // Значение "30" в reorder_days не пишем в URL — это серверный дефолт.
     pushUpdate({
       stock_min: stockMin, stock_max: stockMax,
       oos_min: oosMin,     oos_max: oosMax,
       lost_min: lostMin,   lost_max: lostMax,
       coverage_min: coverageMin, coverage_max: coverageMax,
       date_from: dateFrom, date_to: dateTo,
+      reorder_days: reorderDays === "30" ? "" : reorderDays,
     });
   }
 
   function toggleInactive() {
     pushUpdate({ include_inactive: includeInactive ? "" : "1" });
   }
-
-  useEffect(() => () => {
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-  }, []);
 
   useEffect(() => {
     setStockMin(sp.get("stock_min") ?? "");
@@ -107,6 +109,7 @@ export function SkusFilters({
     setCoverageMax(sp.get("coverage_max") ?? "");
     setDateFrom(sp.get("date_from") || defaultDateFrom);
     setDateTo(sp.get("date_to") || defaultDateTo);
+    setReorderDays(sp.get("reorder_days") ?? "30");
   }, [sp, defaultDateFrom, defaultDateTo]);
 
   const minDate = warehouseCreatedAt ? warehouseCreatedAt.slice(0, 10) : undefined;
@@ -132,7 +135,7 @@ export function SkusFilters({
               value={dateFrom}
               min={minDate}
               max={dateTo || today}
-              onChange={e => { setDateFrom(e.target.value); scheduleUpdate({ date_from: e.target.value }); }}
+              onChange={e => setDateFrom(e.target.value)}
               className="flex-1 sm:flex-initial min-w-[140px] px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
             />
             <span className="text-ink-hush">—</span>
@@ -141,19 +144,43 @@ export function SkusFilters({
               value={dateTo}
               min={dateFrom || minDate}
               max={today}
-              onChange={e => { setDateTo(e.target.value); scheduleUpdate({ date_to: e.target.value }); }}
+              onChange={e => setDateTo(e.target.value)}
               className="flex-1 sm:flex-initial min-w-[140px] px-2 py-1.5 border border-line rounded-lg bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
             />
-            {/* 04.06.2026: active:scale-95 — визуальный эффект нажатия (просьба Александра).
-                Класс transition уже анимирует transform — кнопка плавно «вжимается». */}
-            <button
-              type="button"
-              onClick={recalculateNow}
-              className="px-4 py-1.5 rounded-lg bg-ink text-paper font-mono text-xs uppercase tracking-wider font-semibold hover:bg-ink-soft active:scale-95 active:bg-ink-soft transition min-h-[36px]"
-            >
-              {t("sku.filters.calc")}
-            </button>
           </div>
+        </div>
+
+        {/* Закупка на N дней — переехала из шапки (04.06.2026, Александр).
+            Применяется той же кнопкой «Рассчитать» вместе со всеми параметрами. */}
+        <div className="min-w-0">
+          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
+            {t("sku.list.reorderFor")}
+          </label>
+          <div className="flex items-center gap-2">
+            <input
+              type="number"
+              value={reorderDays}
+              min={1}
+              max={365}
+              inputMode="numeric"
+              onChange={e => setReorderDays(e.target.value)}
+              className="w-16 sm:w-20 px-2 py-1.5 border border-line rounded-lg text-center bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
+            />
+            <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("unit.days.many")}</span>
+          </div>
+        </div>
+
+        <div className="min-w-0">
+          <div className="mb-1.5 h-[15px]" aria-hidden />
+          {/* 04.06.2026: active:scale-95 — визуальный эффект нажатия (просьба Александра).
+              Класс transition уже анимирует transform — кнопка плавно «вжимается». */}
+          <button
+            type="button"
+            onClick={recalculateNow}
+            className="px-4 py-1.5 rounded-lg bg-ink text-paper font-mono text-xs uppercase tracking-wider font-semibold hover:bg-ink-soft active:scale-95 active:bg-ink-soft transition min-h-[36px]"
+          >
+            {t("sku.filters.calc")}
+          </button>
         </div>
 
         {showInactiveToggle && (
@@ -190,8 +217,8 @@ export function SkusFilters({
           maxPlaceholder={String(ranges.stockMax)}
           minVal={stockMin}
           maxVal={stockMax}
-          onMinChange={v => { setStockMin(v); scheduleUpdate({ stock_min: v }); }}
-          onMaxChange={v => { setStockMax(v); scheduleUpdate({ stock_max: v }); }}
+          onMinChange={setStockMin}
+          onMaxChange={setStockMax}
         />
         <RangeField
           label={t("sku.filters.oos.label")}
@@ -200,8 +227,8 @@ export function SkusFilters({
           maxPlaceholder={String(ranges.oosMax)}
           minVal={oosMin}
           maxVal={oosMax}
-          onMinChange={v => { setOosMin(v); scheduleUpdate({ oos_min: v }); }}
-          onMaxChange={v => { setOosMax(v); scheduleUpdate({ oos_max: v }); }}
+          onMinChange={setOosMin}
+          onMaxChange={setOosMax}
         />
         <RangeField
           label={t("sku.filters.lost.label")}
@@ -210,8 +237,8 @@ export function SkusFilters({
           maxPlaceholder={Math.round(ranges.lostMax).toString()}
           minVal={lostMin}
           maxVal={lostMax}
-          onMinChange={v => { setLostMin(v); scheduleUpdate({ lost_min: v }); }}
-          onMaxChange={v => { setLostMax(v); scheduleUpdate({ lost_max: v }); }}
+          onMinChange={setLostMin}
+          onMaxChange={setLostMax}
         />
         {/* Новый фильтр (Александр 01.06.2026): "Дней до окончания остатков"
             по столбцу coverage_days. Очень важный для закупок. */}
@@ -222,8 +249,8 @@ export function SkusFilters({
           maxPlaceholder={String(ranges.coverageMax)}
           minVal={coverageMin}
           maxVal={coverageMax}
-          onMinChange={v => { setCoverageMin(v); scheduleUpdate({ coverage_min: v }); }}
-          onMaxChange={v => { setCoverageMax(v); scheduleUpdate({ coverage_max: v }); }}
+          onMinChange={setCoverageMin}
+          onMaxChange={setCoverageMax}
         />
       </div>
     </div>

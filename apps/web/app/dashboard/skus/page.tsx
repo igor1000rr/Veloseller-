@@ -445,6 +445,10 @@ export default async function SkusPage({ searchParams }: {
 
   return (
     <div className="space-y-6">
+      {/* 04.06.2026 (Александр): GET-форма «Закупка на N дней» со стрелкой убрана из
+          шапки: при сабмите она теряла date_from/date_to и все min/max-диапазоны
+          (hidden-поля сохраняли не всё) — отсюда нули в закупке. Поле переехало в
+          SkusFilters и применяется кнопкой «Рассчитать» вместе со всеми параметрами. */}
       <header className="flex items-end justify-between gap-3 sm:gap-4 flex-wrap">
         <div className="min-w-0">
           <div className="inline-flex items-center gap-2 mb-2">
@@ -462,21 +466,6 @@ export default async function SkusPage({ searchParams }: {
             </div>
           )}
         </div>
-        <form className="flex items-center gap-2 text-sm">
-          <label className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("sku.list.reorderFor")}</label>
-          <input
-            type="number" name="reorder_days" defaultValue={reorderDays} min={1} max={365}
-            inputMode="numeric"
-            className="w-16 sm:w-20 px-2 py-1.5 border border-line rounded-lg text-center bg-paper font-mono text-sm focus:outline-none focus:border-lime-deep min-h-[36px]"
-          />
-          <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("unit.days.many")}</span>
-          {segmentFilter && <input type="hidden" name="segment" value={segmentFilter} />}
-          {dashFilter && <input type="hidden" name="filter" value={dashFilter} />}
-          {customThreshold !== null && <input type="hidden" name="threshold" value={customThreshold} />}
-          {periodDays !== 30 && <input type="hidden" name="period" value={periodDays} />}
-          {search && <input type="hidden" name="q" value={search} />}
-          <button type="submit" className="px-3 py-1.5 text-xs bg-ink text-paper rounded-lg hover:bg-ink-soft transition min-h-[36px]">→</button>
-        </form>
       </header>
 
       {dashFilter && (
