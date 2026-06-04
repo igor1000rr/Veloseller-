@@ -11,6 +11,7 @@
  * - Несуществующий invoice → FAIL
  * - Повторный webhook (идемпотентность) → OK, без обновления плана
  * - Нормальный флоу → "OK{InvId}" + plan обновлён + subscription_expires_at = +30d
+ * - Конструктор custom_{wh}x{sku} → активация с лимитами из кодировки
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createHash } from "node:crypto";
@@ -20,6 +21,7 @@ const ORIG_ENV = { ...process.env };
 // Моки admin client
 const getInvoiceMock = vi.fn();
 const updateInvoiceEqMock = vi.fn();
+const updateSellerMock = vi.fn();
 const updateSellerEqMock = vi.fn();
 
 vi.mock("@/lib/supabase/admin", () => ({
@@ -39,9 +41,7 @@ vi.mock("@/lib/supabase/admin", () => ({
       }
       if (table === "sellers") {
         return {
-          update: vi.fn(() => ({
-            eq: updateSellerEqMock,
-          })),
+          update: updateSellerMock,
         };
       }
       return {};
@@ -56,9 +56,11 @@ beforeEach(() => {
   delete process.env.ROBOKASSA_TEST_MODE;
   getInvoiceMock.mockReset();
   updateInvoiceEqMock.mockReset();
+  updateSellerMock.mockReset();
   updateSellerEqMock.mockReset();
   updateInvoiceEqMock.mockResolvedValue({ error: null });
   updateSellerEqMock.mockResolvedValue({ error: null });
+  updateSellerMock.mockImplementation(() => ({ eq: updateSellerEqMock }));
   vi.resetModules();
 });
 
@@ -141,6 +143,37 @@ describe("POST /api/robokassa/result — FLOW", () => {
     expect(await res.text()).toBe("OK7");
     expect(updateInvoiceEqMock).toHaveBeenCalledTimes(1);
     expect(updateSellerEqMock).toHaveBeenCalledTimes(1);
+    // Рост (сетка 04.06.2026): 5 складов × 2000 SKU
+    expect(updateSellerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plan: "growth",
+        plan_warehouses_limit: 5,
+        plan_sku_per_warehouse_limit: 2000,
+      }),
+    );
+  });
+
+  it("конструктор: активация пишет лимиты из кодировки плана", async () => {
+    getInvoiceMock.mockResolvedValue({
+      // 3×1000 + (4000/1000)×500 = 5000
+      data: { id: "inv-uuid", seller_id: "u1", plan: "custom_3x4000", amount: 5000, status: "pending", product_kind: "veloseller" },
+      error: null,
+    });
+    const sig = validSignature("5000.00", "77");
+    const { POST } = await import("@/app/api/robokassa/result/route");
+    const res = await POST(makeFormRequest({
+      OutSum: "5000.00", InvId: "77", SignatureValue: sig,
+    }) as any);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("OK77");
+    expect(updateSellerEqMock).toHaveBeenCalledTimes(1);
+    expect(updateSellerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        plan: "custom_3x4000",
+        plan_warehouses_limit: 3,
+        plan_sku_per_warehouse_limit: 4000,
+      }),
+    );
   });
 
   it("идемпотентность: повторный webhook не обновляет план", async () => {
