@@ -29,5 +29,13 @@
   "billing.err.createPayment": "Не удалось создать платёж",
   "billing.err.network": "Ошибка сети",
   "billing.manageNote": "Подписка продлевается вручную: выберите тариф повторно, когда истекает 30 дней.",
-  "billing.manageNoteStub": "Чтобы продлить или сменить тариф — напишите нам на почту."
+  "billing.manageNoteStub": "Чтобы продлить или сменить тариф — напишите нам на почту.",
+  "billing.builder.title": "Конструктор",
+  "billing.builder.sub": "Соберите тариф под свой объём",
+  "billing.builder.wh": "Количество складов",
+  "billing.builder.sku": "SKU на склад",
+  "billing.builder.pricing": "Склад — 1 000 ₽/мес, каждые 1 000 SKU — 500 ₽/мес",
+  "billing.builder.period": "₽/мес",
+  "billing.builder.buy": "Оплатить конструктор",
+  "billing.builder.renew": "Продлить конструктор"
 }
