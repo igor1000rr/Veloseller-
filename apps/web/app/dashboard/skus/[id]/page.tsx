@@ -17,9 +17,11 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
+  // user_notes нужен ReorderPanel: кнопка «Сохранить в Заметки» дописывает
+  // сводку расчёта к существующим заметкам, не затирая их (Александр 04.06.2026).
   const { data: product } = await supabase
     .from("products")
-    .select("product_id,sku,product_name,seller_id,lead_time_days,safety_days")
+    .select("product_id,sku,product_name,seller_id,lead_time_days,safety_days,user_notes")
     .eq("product_id", id).eq("seller_id", user.id).maybeSingle();
   if (!product) notFound();
 
@@ -220,6 +222,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
           currentStock={Number(latest.current_stock)}
           leadTimeDays={leadTime}
           safetyDays={safety}
+          initialNotes={product.user_notes ?? null}
         />
       )}
 
