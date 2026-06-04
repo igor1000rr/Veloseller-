@@ -1,15 +1,13 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
-import { VelocitySparkline } from "./VelocitySparkline";
 import { Icons } from "../../_components/Icons";
-import { InfoTooltip } from "../../_components/InfoTooltip";
 import { getSelectedWarehouse, warehouseKindLabel } from "@/lib/warehouse";
 import { getPreHolidayWindow } from "@/lib/holidays";
 import { SkusFilters, type FilterRanges } from "./SkusFilters";
 import { SearchInput } from "./SearchInput";
-import { NotesCell } from "./NotesCell";
 import { DashFilterChip } from "./DashFilterChip";
 import { ColumnsPicker } from "./ColumnsPicker";
+import { SkusTable, type PeriodMetricsRow } from "./SkusTable";
 import { t } from "@/lib/i18n";
 
 const PAGE_SIZE = 50;
@@ -78,18 +76,6 @@ function daysAgo(n: number): string {
   return isoDate(d);
 }
 
-type PreHolidayRow = {
-  product_id: string;
-  velocity: number;
-  in_stock_days: number;
-  stockout_days: number;
-  sales_units: number;
-  current_stock: number;
-  current_price: number | null;
-  coverage_days: number | null;
-  lost_revenue: number;
-};
-
 export default async function SkusPage({ searchParams }: {
   searchParams: Promise<{
     page?: string;
@@ -153,6 +139,15 @@ export default async function SkusPage({ searchParams }: {
     defaultDateTo = isoDate(today);
     defaultDateFrom = daysAgo(periodDays);
   }
+
+  // 04.06.2026 (фикс «Рассчитать не считает»): раньше date_from/date_to лишь
+  // фильтровали сохранённые tvelo_metrics по period_end — TVelo/Продажи/Покрытие
+  // оставались из ночного 30-дневного окна и при выборе только дат «ничего не
+  // происходило». Теперь явный период пользователя пересчитывает метрики на лету
+  // через get_skus_period_metrics — тем же механизмом, что предпраздничное окно.
+  const customPeriod = !!(dateFrom || dateTo);
+  const periodStart = dateFrom ?? defaultDateFrom;
+  const periodEnd = dateTo ?? defaultDateTo;
 
   const from = (page - 1) * PAGE_SIZE;
   const to = from + PAGE_SIZE - 1;
@@ -263,8 +258,9 @@ export default async function SkusPage({ searchParams }: {
   if (oosMax !== null)   productsQuery = productsQuery.lte("tvelo_metrics.stockout_days", oosMax);
   if (coverageMin !== null) productsQuery = productsQuery.gte("tvelo_metrics.coverage_days", coverageMin);
   if (coverageMax !== null) productsQuery = productsQuery.lte("tvelo_metrics.coverage_days", coverageMax);
-  if (dateFrom)          productsQuery = productsQuery.gte("tvelo_metrics.period_end", dateFrom);
-  if (dateTo)            productsQuery = productsQuery.lte("tvelo_metrics.period_end", dateTo);
+  // date_from/date_to намеренно НЕ фильтруют tvelo_metrics.period_end:
+  // период пользователя пересчитывается на лету ниже (get_skus_period_metrics),
+  // а фильтр по period_end лишь прятал строки, ничего не пересчитывая.
 
   const lostFilterActiveButPostProcess =
     (lostMin !== null && lostMin > 0) || lostMax !== null;
@@ -296,18 +292,26 @@ export default async function SkusPage({ searchParams }: {
     return { ...p, tvelo_metrics: matchedMetric ? [matchedMetric] : [] };
   });
 
-  let preHolidayMetrics: Map<string, PreHolidayRow> | null = null;
-  if (preHoliday && filtered.length > 0) {
+  // Окно для пересчёта метрик на лету. Приоритет: явный период пользователя
+  // из фильтров → предпраздничное окно → нет (сохранённые ночные метрики).
+  const overrideWindow = customPeriod
+    ? { start: periodStart, end: periodEnd }
+    : preHoliday
+      ? { start: preHoliday.windowStart, end: defaultDateTo }
+      : null;
+
+  let periodMetrics: Map<string, PeriodMetricsRow> | null = null;
+  if (overrideWindow && filtered.length > 0) {
     const { data: rpcRows } = await supabase.rpc("get_skus_period_metrics", {
       p_seller_id: user.id,
       p_connection_id: selected?.id ?? null,
-      p_period_start: preHoliday.windowStart,
-      p_period_end: defaultDateTo,
+      p_period_start: overrideWindow.start,
+      p_period_end: overrideWindow.end,
       p_product_ids: filtered.map((p: any) => p.product_id),
     });
-    preHolidayMetrics = new Map();
+    periodMetrics = new Map();
     for (const r of (rpcRows ?? []) as any[]) {
-      preHolidayMetrics.set(r.product_id, {
+      periodMetrics.set(r.product_id, {
         product_id: r.product_id,
         velocity: Number(r.velocity ?? 0),
         in_stock_days: Number(r.in_stock_days ?? 0),
@@ -322,7 +326,7 @@ export default async function SkusPage({ searchParams }: {
   }
 
   const salesByProduct: Record<string, number> = {};
-  if (!preHolidayMetrics && filtered.length > 0) {
+  if (!periodMetrics && filtered.length > 0) {
     const firstM = filtered[0].tvelo_metrics?.[0];
     if (firstM?.period_start && firstM?.period_end) {
       const { data: salesEvents } = await supabase
@@ -344,7 +348,7 @@ export default async function SkusPage({ searchParams }: {
   const lostByProduct: Record<string, number> = {};
   const lostUnitsByProduct: Record<string, number> = {};
   for (const p of filtered) {
-    const override = preHolidayMetrics?.get(p.product_id);
+    const override = periodMetrics?.get(p.product_id);
     if (override) {
       lostByProduct[p.product_id] = override.lost_revenue;
       lostUnitsByProduct[p.product_id] = Math.round(override.velocity * override.stockout_days);
@@ -441,7 +445,10 @@ export default async function SkusPage({ searchParams }: {
     return params.toString();
   };
 
-  const displayPeriodDays = preHoliday ? preHoliday.daysBefore : periodDays;
+  // Заголовок «Дней без наличия (за N дн)»: при явном периоде — его длина.
+  const displayPeriodDays = customPeriod
+    ? Math.max(1, Math.round((new Date(periodEnd).getTime() - new Date(periodStart).getTime()) / 86400_000) + 1)
+    : preHoliday ? preHoliday.daysBefore : periodDays;
 
   return (
     <div className="space-y-6">
@@ -554,151 +561,17 @@ export default async function SkusPage({ searchParams }: {
         </div>
       )}
 
-      <div className="overflow-x-auto rounded-2xl border border-line bg-paper">
-        <table className="min-w-full text-sm">
-          <thead className="bg-bg-soft border-b border-line">
-            <tr>
-              <Th col="sku">{t("sku.col.sku")}</Th>
-              <Th col="name">{t("sku.col.name")}</Th>
-              <Th col="stock" align="right">{t("sku.col.stock")}</Th>
-              <Th col="price" align="right">{t("sku.col.price")}</Th>
-              <Th col="tvelo" align="right">{t("sku.col.tvelo")}</Th>
-              <Th col="trend" align="center">{t("sku.col.trend")}</Th>
-              <Th col="coverage" align="right">{t("sku.col.coverage")}</Th>
-              {/* Александр 01.06.2026: "OOS" → "Дней без наличия" */}
-              <Th col="oos" align="right">{t("sku.col.oosDays", { n: displayPeriodDays })}</Th>
-              <Th col="sales" align="right">
-                <span className="inline-flex items-center">
-                  {t("sku.col.sales")}
-                  <InfoTooltip text={t("sku.list.salesTip")} />
-                </span>
-              </Th>
-              <Th col="reorder" align="right">{t("sku.col.reorderDays", { n: reorderDays })}</Th>
-              <Th col="confidence" align="right" accent>
-                <span className="inline-flex items-center">
-                  {t("sku.col.confidence")}
-                  <InfoTooltip text={t("sku.list.confTip")} />
-                </span>
-              </Th>
-              <Th col="health" align="right">{t("sku.col.health")}</Th>
-              <Th col="lost_revenue" align="right">
-                <span className="inline-flex items-center">
-                  {t("sku.col.lostRevenue")}
-                  <InfoTooltip text={t("sku.list.lostTip")} />
-                </span>
-              </Th>
-              <Th col="notes">{t("sku.col.notes")}</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {filtered.map((p: any) => {
-              const m = (p.tvelo_metrics?.[0] ?? null) as any;
-              const override = preHolidayMetrics?.get(p.product_id) ?? null;
-
-              const adjVel = override
-                ? override.velocity
-                : (m?.adjusted_velocity != null ? Number(m.adjusted_velocity) : 0);
-              const stockoutDays = override
-                ? override.stockout_days
-                : (m?.stockout_days != null ? Number(m.stockout_days) : 0);
-              const salesUnits = override
-                ? override.sales_units
-                : (salesByProduct[p.product_id] ?? 0);
-              const currentStock = override
-                ? override.current_stock
-                : (m?.current_stock ?? null);
-              const currentPrice = override
-                ? override.current_price
-                : (m?.current_price ?? null);
-              const coverageDays = override
-                ? override.coverage_days
-                : (m?.coverage_days != null ? Number(m.coverage_days) : null);
-              const lostRev = lostByProduct[p.product_id] ?? 0;
-              const lostUnits = lostUnitsByProduct[p.product_id] ?? 0;
-              const reorderQty = Math.round(adjVel * reorderDays);
-              const isUnderestimated = m?.underestimated_sku;
-
-              return (
-                <tr key={p.product_id} className="hover:bg-bg-soft/50 transition">
-                  <td className="col-skucol-sku px-3 sm:px-4 py-3 font-mono text-xs">
-                    <Link href={`/dashboard/skus/${p.product_id}` as any} className="text-lime-deep hover:text-ink font-medium transition">
-                      {p.sku}
-                    </Link>
-                  </td>
-                  <td className="col-skucol-name px-3 sm:px-4 py-3">
-                    {/* Александр 01.06.2026: название тоже сделать ссылкой для проваливания в SKU.
-                        04.06.2026: сделана зелёной как артикул — визуально понятно что это ссылка. */}
-                    <Link
-                      href={`/dashboard/skus/${p.product_id}` as any}
-                      className="text-lime-deep hover:text-ink transition"
-                    >
-                      {p.product_name}
-                    </Link>
-                    {isUnderestimated && (
-                      <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">{t("sku.list.underestimated")}</span>
-                    )}
-                  </td>
-                  <td className="col-skucol-stock px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{currentStock ?? "—"}</td>
-                  <td className="col-skucol-price px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{currentPrice ?? "—"}</td>
-                  <td className="col-skucol-tvelo px-3 sm:px-4 py-3 text-right font-semibold tabular text-ink">
-                    {adjVel > 0 ? adjVel.toFixed(2) : "—"}
-                  </td>
-                  <td className="col-skucol-trend px-3 sm:px-4 py-3"><VelocitySparkline points={sparkData[p.product_id] ?? []} /></td>
-                  <td className="col-skucol-coverage px-3 sm:px-4 py-3 text-right tabular text-ink-soft">
-                    {coverageDays != null ? t("sku.daysShort", { n: coverageDays.toFixed(0) }) : "—"}
-                  </td>
-                  <td className="col-skucol-oos px-3 sm:px-4 py-3 text-right tabular" title={t("sku.filters.oos.hint")}>
-                    {stockoutDays > 0 ? (
-                      <span className="text-orange font-semibold">{stockoutDays}</span>
-                    ) : (
-                      <span className="text-ink-soft">0</span>
-                    )}
-                  </td>
-                  <td className="col-skucol-sales px-3 sm:px-4 py-3 text-right tabular text-ink-soft" title={t("sku.list.salesTitle")}>
-                    {salesUnits > 0 ? salesUnits : "—"}
-                  </td>
-                  <td className="col-skucol-reorder px-3 sm:px-4 py-3 text-right font-semibold tabular text-lime-deep">
-                    {adjVel > 0 ? reorderQty : "—"}
-                  </td>
-                  <td className="col-skucol-confidence px-3 sm:px-4 py-3 text-right tabular bg-lime-soft/30">
-                    {m?.confidence_score != null ? (
-                      <span className="font-semibold text-ink">{Number(m.confidence_score).toFixed(0)}%</span>
-                    ) : <span className="text-ink-hush">—</span>}
-                  </td>
-                  <td className="col-skucol-health px-3 sm:px-4 py-3 text-right">
-                    <HealthBadge score={m?.sku_health_score} />
-                  </td>
-                  {/* Александр 01.06.2026: к сумме в ₽ добавить количество в шт в скобках */}
-                  <td className="col-skucol-lost_revenue px-3 sm:px-4 py-3 text-right tabular">
-                    {lostRev > 0 ? (
-                      <span className="text-rose font-semibold whitespace-nowrap">
-                        {Math.round(lostRev).toLocaleString("ru-RU")}
-                        {lostUnits > 0 && (
-                          <span className="ml-1 text-rose/60 font-normal text-xs">{t("sku.list.unitsParen", { n: lostUnits })}</span>
-                        )}
-                      </span>
-                    ) : (
-                      <span className="text-ink-hush">—</span>
-                    )}
-                  </td>
-                  <td className="col-skucol-notes px-3 sm:px-4 py-3">
-                    <NotesCell productId={p.product_id} initial={p.user_notes ?? null} />
-                  </td>
-                </tr>
-              );
-            })}
-            {!filtered.length && (
-              <tr>
-                <td colSpan={14} className="px-3 sm:px-4 py-12 text-center text-ink-muted text-sm">
-                  {selected
-                    ? t("sku.list.emptySelected", { name: selected.name })
-                    : t("sku.list.emptyNone")}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      <SkusTable
+        rows={filtered}
+        selectedName={selected?.name ?? null}
+        sparkData={sparkData}
+        salesByProduct={salesByProduct}
+        lostByProduct={lostByProduct}
+        lostUnitsByProduct={lostUnitsByProduct}
+        periodMetrics={periodMetrics}
+        reorderDays={reorderDays}
+        displayPeriodDays={displayPeriodDays}
+      />
 
       {totalPages > 1 && (
         <div className="flex items-center justify-between text-sm flex-wrap gap-3">
@@ -722,44 +595,5 @@ export default async function SkusPage({ searchParams }: {
         </div>
       )}
     </div>
-  );
-}
-
-function Th({ children, align = "left", accent = false, col }: {
-  children: React.ReactNode;
-  align?: "left" | "right" | "center";
-  accent?: boolean;
-  col: string;
-}) {
-  const alignCls = align === "right" ? "text-right" : align === "center" ? "text-center" : "text-left";
-  const accentCls = accent ? "bg-lime-soft/30" : "";
-  return (
-    <th className={`col-skucol-${col} px-3 sm:px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold whitespace-nowrap ${alignCls} ${accentCls}`}>
-      {children}
-    </th>
-  );
-}
-
-function HealthBadge({ score }: { score: number | null }) {
-  if (score == null) return <span className="text-ink-hush">—</span>;
-  const n = Number(score);
-  if (n < 30) {
-    return (
-      <span className="inline-flex items-center justify-center font-semibold tabular text-rose bg-rose/10 border border-rose/30 rounded px-1.5 py-0.5 min-w-[2.5rem]">
-        {n.toFixed(0)}
-      </span>
-    );
-  }
-  if (n < 70) {
-    return (
-      <span className="inline-flex items-center justify-center font-semibold tabular text-orange bg-orange/10 border border-orange/30 rounded px-1.5 py-0.5 min-w-[2.5rem]">
-        {n.toFixed(0)}
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center justify-center font-semibold tabular text-lime-deep bg-lime-soft border border-lime-deep/30 rounded px-1.5 py-0.5 min-w-[2.5rem]">
-      {n.toFixed(0)}
-    </span>
   );
 }
