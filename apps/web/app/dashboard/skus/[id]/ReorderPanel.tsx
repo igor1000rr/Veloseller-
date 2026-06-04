@@ -9,20 +9,36 @@ type Props = {
   adjustedVelocity: number;
   currentStock: number;
   leadTimeDays: number;
+  /** Больше не используется в расчёте (Александр 04.06.2026), но page.tsx
+   *  всё ещё передаёт проп — оставлен в типе для совместимости. */
   safetyDays: number;
 };
 
-export function ReorderPanel({ productId, adjustedVelocity, currentStock, leadTimeDays: initLead, safetyDays: initSafety }: Props) {
+/**
+ * Блок «Закупка» в карточке SKU.
+ *
+ * Александр 04.06.2026:
+ *  - Lead time → «Срок поставки», Reorder point → «Точка перезаказа» (словарь);
+ *  - Safety days / Safety stock убраны полностью — из UI, формулы и сохранения.
+ *    Точка перезаказа = TVelo × срок поставки;
+ *  - Новое поле «Товары в пути (шт)» — то, что уже едет от поставщика.
+ *    Локальный калькулятор (не сохраняется), увеличивает эффективный остаток
+ *    в расчёте «До заказа»;
+ *  - Новый блок «Текущее наличие» — между точкой перезаказа и «До заказа».
+ */
+export function ReorderPanel({ productId, adjustedVelocity, currentStock, leadTimeDays: initLead }: Props) {
   const router = useRouter();
   const [leadTime, setLeadTime] = useState(initLead);
-  const [safety, setSafety] = useState(initSafety);
   const [reorderFor, setReorderFor] = useState(30);
+  const [inTransit, setInTransit] = useState(0);
   const [saving, setSaving] = useState(false);
 
-  const safetyStock = Math.round(adjustedVelocity * safety);
-  const reorderPoint = Math.round(adjustedVelocity * leadTime + safetyStock);
+  const reorderPoint = Math.round(adjustedVelocity * leadTime);
+  // «До заказа»: товары в пути считаем уже доступными — они приедут раньше,
+  // чем успеет уехать новый заказ.
+  const effectiveStock = currentStock + inTransit;
   const daysUntilReorder = adjustedVelocity > 0
-    ? Math.max(0, Math.floor((currentStock - reorderPoint) / adjustedVelocity))
+    ? Math.max(0, Math.floor((effectiveStock - reorderPoint) / adjustedVelocity))
     : null;
   const recommendedQty = Math.round(adjustedVelocity * reorderFor);
 
@@ -31,7 +47,7 @@ export function ReorderPanel({ productId, adjustedVelocity, currentStock, leadTi
     await fetch(`/api/products/${productId}/reorder`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lead_time_days: leadTime, safety_days: safety }),
+      body: JSON.stringify({ lead_time_days: leadTime }),
     });
     setSaving(false);
     router.refresh();
@@ -49,20 +65,20 @@ export function ReorderPanel({ productId, adjustedVelocity, currentStock, leadTi
                  className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg" min={0} max={365}/>
         </label>
         <label className="block">
-          <span className="text-xs font-medium text-slate-700">{t("sku.reorder.safetyDaysLabel")}</span>
-          <input type="number" value={safety} onChange={e => setSafety(parseInt(e.target.value) || 0)}
-                 className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg" min={0} max={365}/>
-        </label>
-        <label className="block">
           <span className="text-xs font-medium text-slate-700">{t("sku.reorder.reorderForLabel")}</span>
           <input type="number" value={reorderFor} onChange={e => setReorderFor(parseInt(e.target.value) || 0)}
                  className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg" min={1} max={365}/>
         </label>
+        <label className="block">
+          <span className="text-xs font-medium text-slate-700">{t("sku.reorder.inTransitLabel")}</span>
+          <input type="number" value={inTransit} onChange={e => setInTransit(Math.max(0, parseInt(e.target.value) || 0))}
+                 className="mt-1 w-full px-3 py-2 border border-slate-300 rounded-lg" min={0} max={1000000}/>
+        </label>
       </div>
 
       <div className="mt-5 grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Stat label={t("sku.reorder.safetyStock")} value={safetyStock} />
         <Stat label={t("sku.reorder.reorderPoint")} value={reorderPoint} accent="blue" />
+        <Stat label={t("sku.reorder.currentStock")} value={currentStock} />
         <Stat label={t("sku.reorder.untilReorder")} value={daysUntilReorder == null ? "—" : `${daysUntilReorder} ${t("unit.dayShort")}`}
               accent={daysUntilReorder != null && daysUntilReorder <= 0 ? "red" : daysUntilReorder != null && daysUntilReorder <= 7 ? "amber" : "slate"} />
         <Stat label={t("sku.reorder.orderNow")} value={recommendedQty} accent="violet" />
