@@ -2,27 +2,14 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { UpgradeButton, ManageSubscriptionButton } from "./UpgradeButton";
 import { RadarTrialButton } from "./RadarTrialButton";
 import { Icons } from "../_components/Icons";
+import { VELOSELLER_PLANS, RADAR_PLANS, formatPlanPrice } from "@/lib/plans";
+import { LOCALE, RADAR_ENABLED, PAYMENT_PROVIDER } from "@/lib/features";
+import { t, plural } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
-// Тарифы Veloseller и Radar — две оси биллинга.
-const VELOSELLER_PLANS = [
-  { id: "trial",   name: "Триал",  price: 0,     period: "30 дней бесплатно",
-    features: ["15 складов", "Весь функционал бесплатно"] },
-  { id: "starter", name: "Старт",  price: 2500,  period: "₽/мес",
-    features: ["2 склада"] },
-  { id: "growth",  name: "Рост",   price: 6900,  period: "₽/мес",
-    features: ["6 складов"] },
-  { id: "pro",     name: "Про",    price: 14900, period: "₽/мес",
-    features: ["15 складов"] },
-];
-
-const RADAR_PLANS = [
-  { id: "radar_start",  name: "Radar Старт",   price: 900,   features: ["3 бренда", "Wordstat + WB/OZON suggest", "Email дайджест"] },
-  { id: "radar_seller", name: "Radar Селлер",  price: 2500,  features: ["10 брендов", "Всё из Старт", "ИИ-парсинг прайса"] },
-  { id: "radar_pro",    name: "Radar Про",     price: 5000,  features: ["30 брендов", "Всё из Селлер", "Telegram-бот"] },
-  { id: "radar_expert", name: "Radar Эксперт", price: 10000, features: ["100 брендов", "Всё из Про", "Приоритетная поддержка"] },
-];
+// Даты в формате локали билда (РФ: 04.06.2026, .com: 6/4/2026).
+const DATE_LOCALE = LOCALE === "en" ? "en-US" : "ru-RU";
 
 export default async function BillingPage({ searchParams }: { searchParams: Promise<{ paid?: string; canceled?: string }> }) {
   const params = await searchParams;
@@ -66,9 +53,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
         <div className="rounded-xl border border-lime-deep/40 bg-lime-soft p-4 flex items-start gap-3">
           <span className="text-lime-deep mt-0.5 text-lg shrink-0">✅</span>
           <div className="flex-1 text-sm">
-            <div className="font-medium text-ink">Оплата прошла успешно</div>
+            <div className="font-medium text-ink">{t("billing.paid.title")}</div>
             <p className="mt-1 text-ink-muted">
-              Подписка активна на 30 дней. Обновление плана происходит в фоне — если видите старый план, обновите страницу через минуту.
+              {t("billing.paid.text")}
             </p>
           </div>
         </div>
@@ -76,7 +63,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
       {params.canceled === "1" && (
         <div className="rounded-xl border border-line bg-bg-soft p-4 flex items-start gap-3">
           <span className="text-ink-muted mt-0.5 text-lg shrink-0">ℹ️</span>
-          <div className="flex-1 text-sm text-ink-muted">Оплата отменена. С вас ничего не списали.</div>
+          <div className="flex-1 text-sm text-ink-muted">{t("billing.canceled")}</div>
         </div>
       )}
       {expiringSoon && (
@@ -84,10 +71,10 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           <span className="text-orange mt-0.5 text-lg shrink-0">⏰</span>
           <div className="flex-1 text-sm">
             <div className="font-medium text-ink">
-              Подписка истекает через {daysUntilExpire} {daysUntilExpire === 1 ? "день" : daysUntilExpire && daysUntilExpire < 5 ? "дня" : "дней"}
+              {t("billing.expiring.prefix")} {daysUntilExpire} {plural(daysUntilExpire ?? 0, "billing.day")}
             </div>
             <p className="mt-1 text-ink-muted">
-              {expiresAt!.toLocaleDateString("ru-RU")} — подписка закончится, и вы будете автоматически переведены на триал.
+              {t("billing.expiring.text", { date: expiresAt!.toLocaleDateString(DATE_LOCALE) })}
             </p>
           </div>
         </div>
@@ -98,20 +85,20 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
         <header>
           <div className="inline-flex items-center gap-2 mb-2">
             <span className="size-1 rounded-full bg-lime-deep" />
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Основной тариф</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">{t("billing.eyebrow")}</span>
           </div>
           <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">Veloseller</h1>
           <p className="mt-2 text-ink-muted text-sm">
-            Текущий план: <span className="font-medium text-lime-deep">{currentName}</span> · подключено <span className="font-medium text-ink tabular">{used}/{limit}</span> складов
+            {t("billing.currentPlan")} <span className="font-medium text-lime-deep">{currentName}</span> {t("billing.connBefore")} <span className="font-medium text-ink tabular">{used}/{limit}</span> {t("billing.connAfter")}
           </p>
           {currentPlan === "trial" && seller?.trial_ends_at && (
             <p className="text-xs text-ink-hush mt-1 font-mono">
-              Триал действует до {new Date(seller.trial_ends_at).toLocaleDateString("ru-RU")}
+              {t("billing.trialUntil", { date: new Date(seller.trial_ends_at).toLocaleDateString(DATE_LOCALE) })}
             </p>
           )}
           {currentPlan !== "trial" && expiresAt && (
             <p className="text-xs text-ink-hush mt-1 font-mono">
-              Подписка действует до {expiresAt.toLocaleDateString("ru-RU")}
+              {t("billing.subUntil", { date: expiresAt.toLocaleDateString(DATE_LOCALE) })}
             </p>
           )}
         </header>
@@ -125,10 +112,10 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
               }`}>
                 <div className="flex items-baseline justify-between">
                   <h3 className="font-display text-lg font-medium text-ink">{p.name}</h3>
-                  {isCurrent && <span className="font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 bg-ink text-paper rounded font-semibold">Активный</span>}
+                  {isCurrent && <span className="font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 bg-ink text-paper rounded font-semibold">{t("billing.activeBadge")}</span>}
                 </div>
                 <div className="mt-3 flex items-baseline gap-1 flex-wrap">
-                  <span className="font-display text-3xl md:text-4xl tracking-tight font-medium tabular text-ink">{p.price.toLocaleString("ru-RU")}</span>
+                  <span className="font-display text-3xl md:text-4xl tracking-tight font-medium tabular text-ink">{formatPlanPrice(p.price)}</span>
                   <span className="text-sm text-ink-muted">{p.period}</span>
                 </div>
                 <ul className="mt-5 space-y-2 text-sm text-ink-soft">
@@ -141,10 +128,10 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
                 </ul>
                 {p.id === "trial" ? (
                   <button disabled className="mt-6 w-full py-2.5 rounded-lg text-sm font-medium bg-bg-soft text-ink-hush border border-line">
-                    {isCurrent ? "Активный" : "—"}
+                    {isCurrent ? t("billing.activeBadge") : "—"}
                   </button>
                 ) : (
-                  <UpgradeButton plan={p.id} isCurrent={isCurrent} label={isCurrent ? "Продлить на 30 дней" : `Перейти на ${p.name}`} />
+                  <UpgradeButton plan={p.id} isCurrent={isCurrent} label={isCurrent ? t("billing.btn.renew") : t("billing.btn.switchTo", { name: p.name })} />
                 )}
               </div>
             );
@@ -152,16 +139,17 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
         </div>
 
         <p className="text-center font-mono text-xs text-ink-hush flex items-center justify-center flex-wrap gap-x-2 gap-y-1 px-4 mt-6">
-          <span>Все тарифы включают весь функционал:</span>
+          <span>{t("billing.includes")}</span>
           <span>TVelo</span><span>·</span>
-          <span>Покрытие</span><span>·</span>
-          <span>Потерянная выручка</span><span>·</span>
-          <span>Планирование закупки</span><span>·</span>
+          <span>{t("billing.feat.coverage")}</span><span>·</span>
+          <span>{t("billing.feat.lost")}</span><span>·</span>
+          <span>{t("billing.feat.purchase")}</span><span>·</span>
           <span>Email + Telegram</span>
         </p>
       </section>
 
-      {/* ===== Секция 2: Radar — отдельный модуль ===== */}
+      {/* ===== Секция 2: Radar — отдельный модуль (только РФ: RADAR_ENABLED) ===== */}
+      {RADAR_ENABLED && (
       <section>
         <header>
           <div className="inline-flex items-center gap-2 mb-2">
@@ -211,7 +199,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">
           {RADAR_PLANS.map(p => {
-            // Сравнение без префикса: radar_start → sellers.radar_plan = 'start'
+            {/* Сравнение без префикса: radar_start → sellers.radar_plan = 'start' */}
             const planShort = p.id.replace(/^radar_/, "");
             const isCurrent = radarActive && radarPlanShort === planShort;
             return (
@@ -223,8 +211,8 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
                   {isCurrent && <span className="font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 bg-ink text-paper rounded font-semibold">Активный</span>}
                 </div>
                 <div className="mt-3 flex items-baseline gap-1">
-                  <span className="font-display text-2xl md:text-3xl tracking-tight font-medium tabular text-ink">{p.price.toLocaleString("ru-RU")}</span>
-                  <span className="text-sm text-ink-muted">₽/мес</span>
+                  <span className="font-display text-2xl md:text-3xl tracking-tight font-medium tabular text-ink">{formatPlanPrice(p.price)}</span>
+                  <span className="text-sm text-ink-muted">{p.period}</span>
                 </div>
                 <ul className="mt-4 space-y-1.5 text-sm text-ink-soft">
                   {p.features.map((f, i) => (
@@ -240,14 +228,15 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
           })}
         </div>
       </section>
+      )}
 
       <div className="text-center font-mono text-[11px] text-ink-hush">
-        Для интеграторов и агентств: <a href="mailto:info@proaim.ru" className="text-lime-deep hover:underline">info@proaim.ru</a>
+        {t("billing.integrators")} <a href="mailto:info@proaim.ru" className="text-lime-deep hover:underline">info@proaim.ru</a>
       </div>
 
       <div className="text-center space-y-2">
         {currentPlan !== "trial" && <ManageSubscriptionButton />}
-        <p className="font-mono text-[11px] text-ink-hush">Подписка продлевается выбором тарифа заново.</p>
+        <p className="font-mono text-[11px] text-ink-hush">{t(PAYMENT_PROVIDER === "stub" ? "billing.renewNoteStub" : "billing.renewNote")}</p>
       </div>
     </div>
   );

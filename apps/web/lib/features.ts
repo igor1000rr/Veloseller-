@@ -41,6 +41,15 @@ export const RADAR_ENABLED: boolean =
   process.env.NEXT_PUBLIC_RADAR_ENABLED !== "false";
 
 /**
+ * Платёжный провайдер. РФ — robokassa (рабочий рублёвый флоу, дефолт).
+ * .com — "stub": онлайн-оплаты пока нет, кнопка апгрейда ведёт на mailto,
+ * тариф активируется вручную. Международный эквайринг (Paddle/Stripe) —
+ * отдельная фаза. .com задаёт NEXT_PUBLIC_PAYMENT_PROVIDER="stub".
+ */
+export const PAYMENT_PROVIDER: "robokassa" | "stub" =
+  process.env.NEXT_PUBLIC_PAYMENT_PROVIDER === "stub" ? "stub" : "robokassa";
+
+/**
  * К какому маркетплейсу относится тип склада.
  * null = не-маркетплейс (ручной источник: Google Sheet / CSV / фид) — доступен всегда.
  */
