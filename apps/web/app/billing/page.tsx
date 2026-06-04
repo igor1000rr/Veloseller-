@@ -1,9 +1,11 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { UpgradeButton, ManageSubscriptionButton } from "./UpgradeButton";
 import { RadarTrialButton } from "./RadarTrialButton";
+import { PlanBuilder } from "./PlanBuilder";
 import { Icons } from "../_components/Icons";
 import { VELOSELLER_PLANS, RADAR_PLANS, formatPlanPrice } from "@/lib/plans";
 import { LOCALE, RADAR_ENABLED, PAYMENT_PROVIDER } from "@/lib/features";
+import { parseCustomPlanId } from "@/lib/custom-plan";
 import { t, plural } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +31,10 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
   const currentPlan = seller?.plan ?? "trial";
   const limit = seller?.plan_warehouses_limit ?? 15;
   const used = warehouseCount ?? 0;
-  const currentName = VELOSELLER_PLANS.find(p => p.id === currentPlan)?.name ?? currentPlan;
+  // «Конструктор» хранится как custom_{wh}x{sku} — в VELOSELLER_PLANS его нет.
+  const currentName = parseCustomPlanId(currentPlan)
+    ? t("billing.builder.title")
+    : VELOSELLER_PLANS.find(p => p.id === currentPlan)?.name ?? currentPlan;
 
   // Veloseller истечение
   const expiresAt = seller?.subscription_expires_at ? new Date(seller.subscription_expires_at) : null;
@@ -136,6 +141,9 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
               </div>
             );
           })}
+          {/* «Конструктор» — четвёртая карточка РФ-сетки (Александр 04.06.2026).
+              Только на Робокассе: на stub-провайдере (.com) сетка из 4 фикс-тарифов. */}
+          {PAYMENT_PROVIDER !== "stub" && <PlanBuilder currentPlan={currentPlan} />}
         </div>
 
         <p className="text-center font-mono text-xs text-ink-hush flex items-center justify-center flex-wrap gap-x-2 gap-y-1 px-4 mt-6">
