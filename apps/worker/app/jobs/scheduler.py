@@ -24,7 +24,7 @@ from app.config import settings
 from app.db import fetch_all, get_supabase
 from app.jobs.recalc import recalc_all_sellers
 from app.schemas import SourceType
-from app.sources import google_sheet, ozon, wildberries
+from app.sources import google_sheet, ozon, shopify, wildberries
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger("veloseller.scheduler")
@@ -88,6 +88,12 @@ def _job_sync_active_connections() -> None:
                         snaps = wildberries.fetch_fbs_snapshots(token)
                     else:
                         snaps = wildberries.fetch_snapshots(token)
+                elif conn.get("marketplace") == "shopify":
+                    # .com: Shopify Admin GraphQL. Токен шифруется как ozon/wb,
+                    # shop — плейнтекст. Ветвление как в main._run_shopify_sync_bg.
+                    shop = cfg.get("shop") or cfg.get("shop_domain")
+                    access_token = decrypt_if_encrypted(cfg.get("access_token"))
+                    snaps = shopify.fetch_snapshots(shop, access_token)
                 else:
                     continue
                 _persist_via_main(conn["seller_id"], conn["id"], conn["source"], snaps)
