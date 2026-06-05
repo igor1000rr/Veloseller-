@@ -10,8 +10,11 @@
 #   4. Поднимает только нужные сервисы (без edge-runtime: не используем).
 #
 # Использование (на сервере, под root, docker уже установлен):
-#   bash setup-selfhosted.sh api.veloseller.com /opt/supabase
-#   (1-й аргумент — публичный домен API, 2-й — куда ставить, default /opt/supabase)
+#   APP_SITE_URL=https://veloseller.ru RESEND_API_KEY=re_xxx \
+#     bash setup-selfhosted.sh api.veloseller.ru /opt/supabase
+#   1-й аргумент — публичный домен Supabase API (A-запись на этот сервер),
+#   2-й — каталог установки (default /opt/supabase).
+#   APP_SITE_URL — адрес самого приложения: уходит в ссылки auth-писем.
 #
 # После запуска:
 #   - ключи и пароли лежат в $TARGET/docker/.env (бэкапни его!)
@@ -20,9 +23,11 @@
 #   - Postgres (supavisor) ТОЛЬКО 127.0.0.1:5432 — для pg_dump/psql/MCP по SSH-туннелю
 set -euo pipefail
 
-API_DOMAIN="${1:?Укажи публичный домен API, например api.veloseller.com}"
+API_DOMAIN="${1:?Укажи публичный домен API, например api.veloseller.ru}"
 TARGET="${2:-/opt/supabase}"
 SUPABASE_REPO_REF="${SUPABASE_REPO_REF:-master}"
+# URL приложения для ссылок в письмах Auth (confirm / recovery).
+APP_SITE_URL="${APP_SITE_URL:-https://veloseller.ru}"
 
 # Список сервисов, которые поднимаем. functions (edge-runtime) исключён —
 # Veloseller его не использует, минус ~300МБ RAM и лишняя поверхность.
@@ -85,11 +90,10 @@ else
   set_env VAULT_ENC_KEY "$VAULT_ENC_KEY"
   set_env PG_META_CRYPTO_KEY "$PG_META_CRYPTO_KEY"
 
-  # Публичные URL: API за nginx с TLS
+  # Публичные URL: API за nginx с TLS; SITE_URL — адрес приложения для писем
   set_env API_EXTERNAL_URL "https://${API_DOMAIN}"
   set_env SUPABASE_PUBLIC_URL "https://${API_DOMAIN}"
-  set_env SITE_URL "https://${API_DOMAIN%%.*}.veloseller${API_DOMAIN#*veloseller}" # перезапишем ниже, если задан APP_SITE_URL
-  [ -n "${APP_SITE_URL:-}" ] && set_env SITE_URL "$APP_SITE_URL"
+  set_env SITE_URL "$APP_SITE_URL"
 
   # Слушаем только localhost — наружу через nginx
   set_env KONG_HTTP_PORT 127.0.0.1:8000
