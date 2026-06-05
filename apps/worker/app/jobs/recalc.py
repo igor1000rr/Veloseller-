@@ -141,12 +141,24 @@ def _write_inventory_events(sb, product_id, event_rows, period_start, period_end
 
 def _write_changelog(sb, seller_id, product_id, aggregates, period_start, period_end):
     significant = {EventType.REPLENISHMENT_LIKE, EventType.ANOMALY_LIKE, EventType.MISSING_DATA, EventType.RECOUNT_LIKE}
+    # Инцидент 05.06.2026 (DB Size 82%): «Нет данных за день» ДО первого
+    # реального снапшота продукта — мусорный хвост 90-дневного периода до
+    # подключения склада. 503К таких строк (97% таблицы changelog) съели
+    # половину базы. missing_data пишем только с первого дня, где данные были.
+    first_data_day = min(
+        (a.day for a in aggregates if a.event_type != EventType.MISSING_DATA),
+        default=None,
+    )
     execute_minimal(
         sb.table("changelog").delete().eq("product_id", product_id).gte("event_date", period_start.isoformat()).lte("event_date", period_end.isoformat())
     )
     rows = []
     for a in aggregates:
         if a.event_type not in significant:
+            continue
+        if a.event_type == EventType.MISSING_DATA and (
+            first_data_day is None or a.day < first_data_day
+        ):
             continue
         rows.append({
             "seller_id": seller_id, "product_id": product_id,
