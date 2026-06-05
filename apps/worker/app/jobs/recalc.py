@@ -8,23 +8,28 @@ from typing import Optional
 
 import pytz
 
-from app.db import fetch_all, get_supabase
+from app.db import execute_minimal, fetch_all, get_supabase
 from app.engine.alerts import (
     critical_stock_alert, dead_inventory_alert, low_stock_alert, repeated_stockout_alert,
     should_keep_critical_active, should_keep_dead_active,
     should_keep_low_stock_active, should_keep_repeated_stockout_active,
 )
-from app.engine.events import classify_event
 from app.engine.health import is_underestimated_sku
-from app.engine.lost_revenue import average_stockout_price
-from app.engine.pipeline import DailyAggregate, compute_metrics_for_sku
+from app.engine.pipeline import compute_metrics_for_sku
 from app.engine.price import calculate_elasticity, detect_price_changes
-from app.engine.store import (
-    SkuHealthInput, SkuValue, concentration_50, demand_weight,
-    frozen_inventory_value, total_inventory_value, warehouse_health_score,
+from app.schemas import EventType
+
+# Перенесено в соседние модули 05.06.2026 (инцидент egress, recalc.py перерос
+# лимит передачи MCP). Реэкспорт сохраняет старые импорты тестов и кода.
+from app.jobs.recalc_aggregates import (  # noqa: F401
+    _extract_pre_period_sales_deltas,
+    build_daily_aggregates,
 )
-from app.holidays import is_holiday
-from app.schemas import EventType, TVeloMetric
+from app.jobs.recalc_store import (  # noqa: F401
+    _compute_aggregates,
+    _write_store_metrics,
+    _write_warehouse_metrics,
+)
 
 logger = logging.getLogger("veloseller.recalc")
 
@@ -116,151 +121,12 @@ def _fetch_snapshots_batched(sb, product_ids, history_start):
     return result
 
 
-def _extract_pre_period_sales_deltas(snapshots_rows, period_start, seller_tz):
-    """Медиана продаж до периода (для anomaly seed). Праздники исключаются."""
-    by_day = {}
-    for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
-        ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
-        local_day = ts.astimezone(seller_tz).date()
-        if local_day < period_start:
-            by_day[local_day] = row
-    if not by_day:
-        return []
-    sorted_days = sorted(by_day.keys())
-    deltas = []
-    prev_day = None
-    prev_stock = None
-    for day in sorted_days:
-        stock = int(by_day[day]["stock_quantity"])
-        if prev_stock is not None and prev_day is not None:
-            d = stock - prev_stock
-            # Праздники не попадают в медиану: в них продажи ведут себя аномально
-            if d < 0 and not is_holiday(day):
-                days_gap = max(1, (day - prev_day).days)
-                per_day_delta = abs(d) / days_gap
-                deltas.append(float(per_day_delta))
-        prev_stock = stock
-        prev_day = day
-    if len(deltas) >= 3:
-        med = _median(deltas)
-        if med > 0:
-            deltas = [d for d in deltas if d <= 5 * med]
-    return deltas
-
-
-def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
-    """Строит dayly aggregates из snapshots. Праздники (федеральные РФ) помечаются excluded=True
-    и не попадают в классификацию anomaly_like — через classify_event(event_date=...)."""
-    by_day = {}
-    for row in sorted(snapshots_rows, key=lambda r: r["snapshot_time"]):
-        ts = datetime.fromisoformat(row["snapshot_time"].replace("Z", "+00:00"))
-        local_day = ts.astimezone(seller_tz).date()
-        by_day[local_day] = row
-
-    pre_period_days = sorted([d for d in by_day if d < period_start])
-    abs_deltas_history = []
-    prev_stock = None
-    prev_snapshot_id = None
-    prev_exists = False
-    if pre_period_days:
-        last_pre = pre_period_days[-1]
-        prev_stock = int(by_day[last_pre]["stock_quantity"])
-        prev_snapshot_id = by_day[last_pre].get("snapshot_id")
-        prev_exists = True
-        prev_for_seed = None
-        prev_day_for_seed = None
-        for d in pre_period_days:
-            s = int(by_day[d]["stock_quantity"])
-            if prev_for_seed is not None and prev_day_for_seed is not None:
-                delta = s - prev_for_seed
-                # Праздники из seed-истории тоже выкидываем
-                if delta < 0 and not is_holiday(d):
-                    days_gap = max(1, (d - prev_day_for_seed).days)
-                    per_day = max(1, int(round(abs(delta) / days_gap)))
-                    abs_deltas_history.append(per_day)
-            prev_for_seed = s
-            prev_day_for_seed = d
-
-    aggregates = []
-    event_rows = []
-
-    cur = period_start
-    while cur <= period_end:
-        if cur in by_day:
-            row = by_day[cur]
-            stock = int(row["stock_quantity"])
-            price = float(row["price"])
-            avail = bool(row["availability"])
-            delta = (stock - prev_stock) if prev_exists else None
-            median_abs = _median(abs_deltas_history) if abs_deltas_history else None
-            # Передаём event_date в classify_event — праздники не классифицируются как anomaly
-            et, excluded = classify_event(delta, median_abs, prev_exists, event_date=cur)
-            # Добавляем в медиану ТОЛЬКО sales_like и НЕ праздники
-            if et == EventType.SALES_LIKE and delta is not None and not is_holiday(cur):
-                abs_deltas_history.append(abs(delta))
-            aggregates.append(DailyAggregate(
-                day=cur, availability=avail, end_of_day_stock=stock, price=price,
-                event_type=et, delta_stock=delta, excluded_from_confirmed_metrics=excluded,
-            ))
-            event_rows.append({
-                "product_id": row.get("product_id"),
-                "previous_snapshot_id": prev_snapshot_id,
-                "current_snapshot_id": row.get("snapshot_id"),
-                "event_time": row["snapshot_time"],
-                "event_date": cur.isoformat(),
-                "delta_stock": delta,
-                "event_type": et.value,
-                "excluded_from_confirmed_metrics": excluded,
-            })
-            prev_stock = stock
-            prev_snapshot_id = row.get("snapshot_id")
-            prev_exists = True
-        else:
-            aggregates.append(DailyAggregate(
-                day=cur, availability=False, end_of_day_stock=prev_stock or 0,
-                price=0.0, event_type=EventType.MISSING_DATA,
-                delta_stock=None, excluded_from_confirmed_metrics=True,
-            ))
-        cur = cur + timedelta(days=1)
-
-    try:
-        from app.engine.recount import Snapshot as RcSnap, detect_recount_pairs
-        rc_snaps = [
-            RcSnap(
-                snapshot_id=r.get("snapshot_id", ""),
-                snapshot_time=datetime.fromisoformat(r["snapshot_time"].replace("Z", "+00:00")),
-                stock_quantity=int(r["stock_quantity"]),
-            )
-            for r in sorted(snapshots_rows, key=lambda x: x["snapshot_time"])
-        ]
-        recount_pairs = detect_recount_pairs(rc_snaps)
-        if recount_pairs:
-            recount_days = set()
-            for snap_a, snap_b in recount_pairs:
-                recount_days.add(snap_a.snapshot_time.astimezone(seller_tz).date())
-            for i, a in enumerate(aggregates):
-                if a.day in recount_days and a.event_type != EventType.MISSING_DATA:
-                    aggregates[i] = DailyAggregate(
-                        day=a.day, availability=a.availability,
-                        end_of_day_stock=a.end_of_day_stock, price=a.price,
-                        event_type=EventType.RECOUNT_LIKE,
-                        delta_stock=a.delta_stock,
-                        excluded_from_confirmed_metrics=True,
-                    )
-                    for er in event_rows:
-                        if er["event_date"] == a.day.isoformat():
-                            er["event_type"] = EventType.RECOUNT_LIKE.value
-                            er["excluded_from_confirmed_metrics"] = True
-    except Exception:
-        pass
-
-    return aggregates, event_rows
-
-
 def _write_inventory_events(sb, product_id, event_rows, period_start, period_end):
     if not event_rows:
         return 0
-    sb.table("inventory_events").delete().eq("product_id", product_id).gte("event_date", period_start.isoformat()).lte("event_date", period_end.isoformat()).execute()
+    execute_minimal(
+        sb.table("inventory_events").delete().eq("product_id", product_id).gte("event_date", period_start.isoformat()).lte("event_date", period_end.isoformat())
+    )
     rows = []
     for r in event_rows:
         if not r.get("current_snapshot_id"):
@@ -269,13 +135,15 @@ def _write_inventory_events(sb, product_id, event_rows, period_start, period_end
         r2["product_id"] = product_id
         rows.append(r2)
     if rows:
-        sb.table("inventory_events").insert(rows).execute()
+        execute_minimal(sb.table("inventory_events").insert(rows))
     return len(rows)
 
 
 def _write_changelog(sb, seller_id, product_id, aggregates, period_start, period_end):
     significant = {EventType.REPLENISHMENT_LIKE, EventType.ANOMALY_LIKE, EventType.MISSING_DATA, EventType.RECOUNT_LIKE}
-    sb.table("changelog").delete().eq("product_id", product_id).gte("event_date", period_start.isoformat()).lte("event_date", period_end.isoformat()).execute()
+    execute_minimal(
+        sb.table("changelog").delete().eq("product_id", product_id).gte("event_date", period_start.isoformat()).lte("event_date", period_end.isoformat())
+    )
     rows = []
     for a in aggregates:
         if a.event_type not in significant:
@@ -288,7 +156,7 @@ def _write_changelog(sb, seller_id, product_id, aggregates, period_start, period
             "confidence_impact": _confidence_impact(a.event_type),
         })
     if rows:
-        sb.table("changelog").insert(rows).execute()
+        execute_minimal(sb.table("changelog").insert(rows))
     return len(rows)
 
 
@@ -297,13 +165,13 @@ def _upsert_or_skip_alert(sb, seller_id, product_id, kind, message, payload):
         "product_id", product_id
     ).eq("kind", kind).is_("acknowledged_at", "null").limit(1).execute()
     if existing.data:
-        sb.table("alerts").update({"message": message, "payload": payload}).eq("id", existing.data[0]["id"]).execute()
+        execute_minimal(sb.table("alerts").update({"message": message, "payload": payload}).eq("id", existing.data[0]["id"]))
         return False
     try:
-        sb.table("alerts").insert({
+        execute_minimal(sb.table("alerts").insert({
             "seller_id": seller_id, "product_id": product_id,
             "kind": kind, "message": message, "payload": payload,
-        }).execute()
+        }))
         return True
     except Exception as e:
         err_str = str(e).lower()
@@ -312,7 +180,7 @@ def _upsert_or_skip_alert(sb, seller_id, product_id, kind, message, payload):
                 "product_id", product_id
             ).eq("kind", kind).is_("acknowledged_at", "null").limit(1).execute()
             if existing2.data:
-                sb.table("alerts").update({"message": message, "payload": payload}).eq("id", existing2.data[0]["id"]).execute()
+                execute_minimal(sb.table("alerts").update({"message": message, "payload": payload}).eq("id", existing2.data[0]["id"]))
             return False
         raise
 
@@ -352,9 +220,9 @@ def _write_alerts(sb, seller_id, product_id, m, underestimated):
         keep_fn = _HYSTERESIS_KEEP_CHECKS.get(kind)
         if keep_fn is not None and keep_fn(m):
             continue
-        sb.table("alerts").update({
+        execute_minimal(sb.table("alerts").update({
             "acknowledged_at": datetime.now(timezone.utc).isoformat(),
-        }).eq("id", row["id"]).execute()
+        }).eq("id", row["id"]))
 
     new_count = 0
     for kind, msg in desired_alerts:
@@ -460,7 +328,7 @@ def recalc_seller(seller_id, period_days=30, progress=None):
                     }
                     for pc in price_changes
                 ]
-                sb.table("changelog").insert(price_rows).execute()
+                execute_minimal(sb.table("changelog").insert(price_rows))
                 changelog_written += len(price_rows)
 
                 for pc in price_changes:
@@ -479,7 +347,7 @@ def recalc_seller(seller_id, period_days=30, progress=None):
                     sig = calculate_elasticity(pc, sales_before, sales_after)
                     if sig is not None:
                         try:
-                            sb.table("price_elasticity").upsert({
+                            execute_minimal(sb.table("price_elasticity").upsert({
                                 "product_id": pid, "seller_id": seller_id,
                                 "change_date": pc.day.isoformat(),
                                 "previous_price": float(pc.previous_price),
@@ -490,7 +358,7 @@ def recalc_seller(seller_id, period_days=30, progress=None):
                                 "price_impact_percent": float(sig.price_impact_percent),
                                 "days_before": sig.days_before,
                                 "days_after": sig.days_after,
-                            }, on_conflict="product_id,change_date").execute()
+                            }, on_conflict="product_id,change_date"))
                         except Exception as e:
                             logger.warning("elasticity write failed for %s: %s", pid, e)
 
@@ -543,7 +411,7 @@ def recalc_seller(seller_id, period_days=30, progress=None):
                 and has_enough_history
                 and m.stockout_days >= 2
             )
-            sb.table("tvelo_metrics").upsert({
+            execute_minimal(sb.table("tvelo_metrics").upsert({
                 "product_id": pid,
                 "period_start": m.period_start.isoformat(),
                 "period_end": m.period_end.isoformat(),
@@ -560,7 +428,7 @@ def recalc_seller(seller_id, period_days=30, progress=None):
                 "inventory_segment": m.segment.value if m.segment else None,
                 "sku_health_score": float(m.sku_health_score) if m.sku_health_score is not None else None,
                 "underestimated_sku": underestimated,
-            }, on_conflict="product_id,period_start,period_end").execute()
+            }, on_conflict="product_id,period_start,period_end"))
             metrics_written += 1
             alerts_written += _write_alerts(sb, seller_id, pid, m, underestimated)
         except Exception as e:
@@ -587,8 +455,6 @@ def recalc_seller(seller_id, period_days=30, progress=None):
 
     # ПРАВКА 10 этап 2: warehouse_metrics — per-warehouse история для графиков
     # динамики /dashboard. Пишется ДОПОЛНИТЕЛЬНО к store_metrics.
-    # Группировка sku_data по connection_id, для каждого склада — те же
-    # формулы что в _write_store_metrics через общую _compute_aggregates.
     _bump_progress(progress, phase="writing_warehouse")
     try:
         warehouse_written = _write_warehouse_metrics(sb, seller_id, sku_data, period_start, period_end)
@@ -606,199 +472,6 @@ def recalc_seller(seller_id, period_days=30, progress=None):
         "store_metrics_written": store_written,
         "warehouse_metrics_written": warehouse_written,
     }
-
-
-def _compute_aggregates(sku_data):
-    """Вычисляет агрегаты для группы SKU. Используется и store_metrics, и
-    warehouse_metrics — гарантирует идентичные формулы.
-
-    Возвращает dict с полями для upsert (без seller_id / period_* /
-    connection_id — их добавляет вызывающий код).
-
-    Логика (правка 4.1 Александра — see _write_store_metrics):
-    - Активные SKU (availability_now OR has_movements) — для health,
-      концентраций, денег, distribution.
-    - Все SKU (включая inactive) — для счётчиков и lost_revenue.
-    - Inactive = ~availability_now AND ~has_movements.
-    - "Нет в наличии" (active_oos) = oos - inactive.
-    """
-    if not sku_data:
-        return None
-
-    active_sku_data = [
-        item for item in sku_data
-        if item["availability_now"] or item.get("has_movements", True)
-    ]
-
-    sku_health_inputs = [
-        SkuHealthInput(
-            product_id=item["pid"],
-            health_score=item["metric"].sku_health_score or 0,
-            stock_quantity=item["current_stock"],
-            price=item["current_price"],
-            adjusted_velocity=item["metric"].adjusted_velocity,
-            median_30d_velocity=item["metric"].median_30d_velocity,
-            is_out_of_stock=not item["availability_now"],
-        )
-        for item in active_sku_data
-    ]
-    inv_items = [SkuValue(s.product_id, s.stock_quantity * s.price) for s in sku_health_inputs]
-    dem_items = [
-        SkuValue(s.product_id, demand_weight(s.adjusted_velocity, s.median_30d_velocity, s.price))
-        for s in sku_health_inputs
-    ]
-    inv_conc = concentration_50(inv_items)
-    dem_conc = concentration_50(dem_items)
-    coverage_by_sku = {item["pid"]: item["metric"].coverage_days for item in active_sku_data}
-    total_value = total_inventory_value(sku_health_inputs)
-    frozen_value = frozen_inventory_value(sku_health_inputs, coverage_by_sku)
-    wh_score = warehouse_health_score(sku_health_inputs)
-    seg_distribution = {}
-    for item in active_sku_data:
-        seg = (item["metric"].segment.value if item["metric"].segment else "insufficient_data")
-        seg_distribution[seg] = seg_distribution.get(seg, 0) + 1
-
-    # Счётчики — по всем SKU (включая inactive). Иначе total_sku_count будет
-    # неконсистентен с тем, что показывается на вкладке SKU при include_inactive=1.
-    oos_count = sum(1 for item in sku_data if not item["availability_now"])
-    low_count = sum(
-        1 for item in sku_data
-        if item["metric"].coverage_days is not None and item["metric"].coverage_days <= 7
-    )
-    dead_count = sum(
-        1 for item in sku_data
-        if item["metric"].coverage_days is not None and item["metric"].coverage_days > 180
-    )
-
-    # inactive_sku_count — SKU с нулевым остатком И без движений за период.
-    # На фронте они скрываются по умолчанию (правка 1 Александра).
-    inactive_count = sum(
-        1 for item in sku_data
-        if not item["availability_now"] and not item.get("has_movements", True)
-    )
-
-    # frequently_oos_sku_count — SKU где stockout_days > 15 за период.
-    # Сигнал систематической проблемы с поставками.
-    frequently_oos_count = sum(
-        1 for item in sku_data
-        if item["metric"].stockout_days > 15
-    )
-
-    # Правка 2 Александра: "Нет в наличии" = товары с нулевым остатком,
-    # ПО КОТОРЫМ БЫЛО ДВИЖЕНИЕ за 30 дней. Из oos_count вычитаем inactive
-    # → активный OOS, то чем реально надо заниматься.
-    active_oos_count = max(0, oos_count - inactive_count)
-
-    # lost_revenue — по всем SKU. У inactive естественно = 0 (нет velocity
-    # или stockout_days = 0), поэтому фильтрация не нужна.
-    lost_total = 0.0
-    for item in sku_data:
-        m = item["metric"]
-        if m.adjusted_velocity <= 0 or m.stockout_days <= 0:
-            continue
-        prices_during_stockout = [
-            a.price for a in item.get("aggregates", [])
-            if not a.availability
-            and a.event_type != EventType.MISSING_DATA
-            and a.price > 0
-        ]
-        avg_price = average_stockout_price(prices_during_stockout, item["current_price"])
-        lost_total += m.adjusted_velocity * m.stockout_days * avg_price
-
-    return {
-        "total_sku_count": len(sku_data),
-        "oos_sku_count": active_oos_count,
-        "low_stock_sku_count": low_count,
-        "dead_inventory_sku_count": dead_count,
-        "inactive_sku_count": inactive_count,
-        "frequently_oos_sku_count": frequently_oos_count,
-        "inventory_concentration_50": inv_conc,
-        "demand_concentration_50": dem_conc,
-        "total_inventory_value": float(total_value),
-        "store_frozen_inventory_value": float(frozen_value),
-        "lost_revenue": float(lost_total),
-        "warehouse_health_score": float(wh_score) if wh_score is not None else None,
-        "demand_pattern_distribution": seg_distribution,
-    }
-
-
-def _write_store_metrics(sb, seller_id, sku_data, period_start, period_end):
-    """Записывает store_metrics — агрегат по всему магазину (всем складам).
-
-    computed_at передаём явно: DEFAULT now() в БД срабатывает только при INSERT.
-    При UPSERT-UPDATE без явной передачи computed_at останется старым, и
-    SELECT по computed_at >= X на фронте не увидит обновлённую запись.
-    """
-    aggregates = _compute_aggregates(sku_data)
-    if aggregates is None:
-        return 0
-
-    row = {
-        "seller_id": seller_id,
-        "period_start": period_start.isoformat(),
-        "period_end": period_end.isoformat(),
-        "computed_at": datetime.now(timezone.utc).isoformat(),
-        **aggregates,
-    }
-    sb.table("store_metrics").upsert(
-        row, on_conflict="seller_id,period_start,period_end"
-    ).execute()
-    return 1
-
-
-def _write_warehouse_metrics(sb, seller_id, sku_data, period_start, period_end):
-    """Записывает warehouse_metrics — по одной строке на каждый склад.
-
-    Правка 10 этап 2 (25.05.2026). Группирует sku_data по connection_id
-    и для каждого склада считает те же агрегаты что и store_metrics
-    (через общую _compute_aggregates). Используется для графиков
-    динамики /dashboard (Health/LostRevenue/DeadInventory) выбранного
-    склада.
-
-    Легаси-продукты без connection_id (если есть) пропускаются — попадают
-    только в store_metrics.
-
-    computed_at передаём явно по той же причине что и в _write_store_metrics:
-    DEFAULT now() не срабатывает при UPDATE.
-    """
-    if not sku_data:
-        return 0
-
-    by_connection = {}
-    for item in sku_data:
-        conn_id = item.get("connection_id")
-        if not conn_id:
-            continue
-        by_connection.setdefault(conn_id, []).append(item)
-
-    now_iso = datetime.now(timezone.utc).isoformat()
-
-    written = 0
-    for conn_id, items in by_connection.items():
-        try:
-            aggregates = _compute_aggregates(items)
-            if aggregates is None:
-                continue
-            row = {
-                "seller_id": seller_id,
-                "connection_id": conn_id,
-                "period_start": period_start.isoformat(),
-                "period_end": period_end.isoformat(),
-                "computed_at": now_iso,
-                **aggregates,
-            }
-            sb.table("warehouse_metrics").upsert(
-                row, on_conflict="seller_id,connection_id,period_start,period_end"
-            ).execute()
-            written += 1
-        except Exception:
-            # Не падаем на одном складе — пишем остальные. Ошибка
-            # фиксируется в логе для диагностики.
-            logger.exception("warehouse_metrics row failed", extra={
-                "seller_id": seller_id, "connection_id": conn_id,
-                "period_start": period_start.isoformat(),
-            })
-    return written
 
 
 def recalc_seller_all_periods(seller_id, progress=None):
