@@ -2,7 +2,10 @@
 # Ежедневный бэкап self-hosted Supabase (на Free-облаке бэкапов не было вовсе,
 # теперь они наша ответственность). Кладёт в /var/backups/supabase, хранит 14 шт.
 #
-# Установка: cp backup-cron.sh /usr/local/bin/supabase-backup && chmod +x ... 
+# Дамп выполняется внутри контейнера supabase-db (unix-socket, клиент = сервер
+# по версии), наружу — через stdout: на хосте postgresql-client не нужен.
+#
+# Установка: cp backup-cron.sh /usr/local/bin/supabase-backup && chmod +x /usr/local/bin/supabase-backup
 #   echo '20 3 * * * root /usr/local/bin/supabase-backup' > /etc/cron.d/supabase-backup
 set -euo pipefail
 
@@ -11,12 +14,10 @@ OUT=/var/backups/supabase
 KEEP=14
 
 mkdir -p "$OUT"
-PG_PASSWORD=$(grep '^POSTGRES_PASSWORD=' "$TARGET/docker/.env" | cut -d= -f2-)
 STAMP=$(date +%F)
 
 # Полный дамп всего кластера (public + auth + storage метаданные)
-PGPASSWORD="$PG_PASSWORD" pg_dump -h 127.0.0.1 -p 5432 -U postgres -d postgres \
-  -Fc -f "$OUT/veloseller-$STAMP.dump"
+docker exec supabase-db pg_dump -U postgres -d postgres -Fc > "$OUT/veloseller-$STAMP.dump"
 
 # Файлы storage (отчёты)
 tar -czf "$OUT/storage-$STAMP.tar.gz" -C "$TARGET/docker/volumes" storage 2>/dev/null || true
