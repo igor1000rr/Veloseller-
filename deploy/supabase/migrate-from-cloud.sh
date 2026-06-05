@@ -10,9 +10,14 @@
 #
 # Пароль облачной БД: dashboard → Settings → Database (можно Reset password).
 # Прямой Postgres-порт облака обычно жив даже при Fair-Use restriction
-# (зарезаны Data API/Auth, не сам Postgres). Если коннект не идёт — у Supabase
-# в dashboard есть Backups: скачать дамп руками и подать в этот скрипт через
-# DUMP_FILE=/path/to/dump.
+# (зарезаны Data API/Auth, не сам Postgres). Если коннект не идёт — задай
+# DUMP_FILE=/path/to/public.dump (custom-формат pg_dump схемы public).
+#
+# Все pg_dump/pg_restore/psql выполняются ВНУТРИ контейнера supabase-db:
+#   - версии клиентов совпадают с сервером по построению (PG 17.6 = облако),
+#   - на хост не нужно ставить postgresql-client,
+#   - restore идёт по unix-socket'у под postgres, минуя supavisor и его
+#     tenant-формат имён пользователей.
 #
 # Что переносится:
 #   1. Схема + данные public (таблицы, RPC, RLS-политики, триггеры, индексы)
@@ -23,54 +28,58 @@
 set -euo pipefail
 
 TARGET="${1:-/opt/supabase}"
-LOCAL_ENV="$TARGET/docker/.env"
-[ -f "$LOCAL_ENV" ] || { echo "Нет $LOCAL_ENV — сначала setup-selfhosted.sh"; exit 1; }
+DB=supabase-db
+TMP=/tmp/veloseller-migrate
 
-LOCAL_PG_PASSWORD=$(grep '^POSTGRES_PASSWORD=' "$LOCAL_ENV" | cut -d= -f2-)
-LOCAL_DB_URL="postgresql://postgres:${LOCAL_PG_PASSWORD}@127.0.0.1:5432/postgres"
-WORKDIR=$(mktemp -d /tmp/veloseller-migrate.XXXXXX)
-trap 'rm -rf "$WORKDIR"' EXIT
+[ -f "$TARGET/docker/.env" ] || { echo "Нет $TARGET/docker/.env — сначала setup-selfhosted.sh"; exit 1; }
+docker exec "$DB" true 2>/dev/null || { echo "Контейнер $DB не запущен"; exit 1; }
 
-command -v pg_dump >/dev/null || { echo "Поставь клиент: apt install -y postgresql-client-16"; exit 1; }
+dexec() { docker exec "$DB" "$@"; }
+dpsql() { docker exec -i "$DB" psql -U postgres -d postgres -v ON_ERROR_STOP=1 "$@"; }
 
-# ── 1. Дамп облака ──────────────────────────────────────────────────────────
+dexec mkdir -p "$TMP"
+cleanup() { dexec rm -rf "$TMP" || true; }
+trap cleanup EXIT
+
+# ── 1. Дамп облака (изнутри контейнера: pg_dump 17 ↔ облако 17.6) ───────────
 if [ -n "${DUMP_FILE:-}" ]; then
   echo "==> Использую готовый дамп $DUMP_FILE"
-  cp "$DUMP_FILE" "$WORKDIR/public.dump"
+  docker cp "$DUMP_FILE" "$DB:$TMP/public.dump"
 else
   : "${CLOUD_DB_URL:?Задай CLOUD_DB_URL (см. шапку скрипта)}"
   echo "==> Дамп схемы и данных public из облака"
-  pg_dump "$CLOUD_DB_URL" \
+  dexec pg_dump "$CLOUD_DB_URL" \
     --schema=public \
     --no-owner --no-privileges \
-    -Fc -f "$WORKDIR/public.dump"
+    -Fc -f "$TMP/public.dump"
 
   echo "==> Дамп пользователей auth (только данные users/identities)"
-  pg_dump "$CLOUD_DB_URL" \
+  dexec pg_dump "$CLOUD_DB_URL" \
     --data-only --column-inserts \
     -t auth.users -t auth.identities \
     --no-owner --no-privileges \
-    -f "$WORKDIR/auth_users.sql"
+    -f "$TMP/auth_users.sql"
 
   echo "==> Дамп bucket'ов storage"
-  pg_dump "$CLOUD_DB_URL" \
+  dexec pg_dump "$CLOUD_DB_URL" \
     --data-only --column-inserts \
     -t storage.buckets \
     --no-owner --no-privileges \
-    -f "$WORKDIR/storage_buckets.sql"
+    -f "$TMP/storage_buckets.sql"
 fi
 
 # ── 2. Restore public в self-hosted ────────────────────────────────────────
 echo "==> Restore public (схема + данные + RLS + RPC)"
-pg_restore "$WORKDIR/public.dump" \
-  --dbname="$LOCAL_DB_URL" \
+dexec pg_restore \
+  --username postgres --dbname postgres \
   --no-owner --no-privileges \
-  --exit-on-error
+  --exit-on-error \
+  "$TMP/public.dump"
 
 # PostgREST в self-hosted ходит ролями anon/authenticated/service_role —
 # выдаём гранты на восстановленную схему (в облаке это делалось платформой).
 echo "==> Гранты для ролей PostgREST"
-psql "$LOCAL_DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
+dpsql <<'SQL'
 grant usage on schema public to anon, authenticated, service_role;
 grant all on all tables in schema public to anon, authenticated, service_role;
 grant all on all sequences in schema public to anon, authenticated, service_role;
@@ -81,27 +90,27 @@ alter default privileges in schema public grant all on functions to anon, authen
 SQL
 
 # ── 3. Пользователи auth ────────────────────────────────────────────────────
-if [ -f "$WORKDIR/auth_users.sql" ]; then
+if dexec test -f "$TMP/auth_users.sql"; then
   echo "==> Restore auth.users / auth.identities"
   # Версии GoTrue в облаке и self-hosted могут отличаться колонками.
   # --column-inserts даёт INSERT с явными именами: при расхождении psql упадёт
   # на конкретной строке — тогда лечим точечно (юзеров единицы).
-  psql "$LOCAL_DB_URL" -v ON_ERROR_STOP=1 -f "$WORKDIR/auth_users.sql" || {
+  dpsql -f "$TMP/auth_users.sql" || {
     echo '!! restore auth упал (расхождение колонок GoTrue?).'
-    echo '!! Файл сохранён, разберём точечно:'
-    cp "$WORKDIR/auth_users.sql" /root/auth_users.sql
+    echo '!! Файл сохранён в /root/auth_users.sql — разберём точечно.'
+    docker cp "$DB:$TMP/auth_users.sql" /root/auth_users.sql
     exit 1
   }
 fi
 
 # ── 4. Storage buckets ──────────────────────────────────────────────────────
-if [ -f "$WORKDIR/storage_buckets.sql" ]; then
+if dexec test -f "$TMP/storage_buckets.sql"; then
   echo "==> Restore storage.buckets"
-  psql "$LOCAL_DB_URL" -v ON_ERROR_STOP=1 -f "$WORKDIR/storage_buckets.sql" || \
-    echo '!! buckets не вstaли (возможно уже есть) — проверь: report-files'
+  dpsql -f "$TMP/storage_buckets.sql" || \
+    echo '!! buckets не встали (возможно уже есть) — проверь наличие report-files'
 fi
 
-# ── 5. Перезапуск PostgREST (перечитать schema cache) ───────────────────────
+# ── 5. Перезапуск PostgREST/Auth/Storage (перечитать schema cache) ──────────
 cd "$TARGET/docker"
 docker compose restart rest auth storage >/dev/null
 
