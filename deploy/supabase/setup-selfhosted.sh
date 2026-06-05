@@ -6,7 +6,9 @@
 #      kong.yml, init-SQL согласованы с версиями образов, мы их НЕ патчим).
 #   2. Генерирует все секреты: POSTGRES_PASSWORD, JWT_SECRET, ANON_KEY и
 #      SERVICE_ROLE_KEY (HS256-JWT, подписанные JWT_SECRET), пароль дашборда.
-#   3. Пишет .env под Veloseller: SMTP Resend для писем Auth, домен API.
+#   3. Пишет .env под Veloseller: SMTP Resend для писем Auth, домен API,
+#      Postgres 17 (официальный override docker-compose.pg17.yml — та же
+#      мажорная версия, что у облака 17.6: дамп/restore без даунгрейда).
 #   4. Поднимает только нужные сервисы (без edge-runtime: не используем).
 #
 # Использование (на сервере, под root, docker уже установлен):
@@ -20,7 +22,8 @@
 #   - ключи и пароли лежат в $TARGET/docker/.env (бэкапни его!)
 #   - Kong слушает ТОЛЬКО 127.0.0.1:8000 — наружу выставлять через nginx+TLS
 #   - Studio доступна через тот же Kong (basic auth: DASHBOARD_USERNAME/PASSWORD)
-#   - Postgres (supavisor) ТОЛЬКО 127.0.0.1:5432 — для pg_dump/psql/MCP по SSH-туннелю
+#   - Postgres (supavisor) ТОЛЬКО 127.0.0.1:5432; админ-доступ к БД — через
+#     docker exec supabase-db psql -U postgres (так работает migrate-from-cloud.sh)
 set -euo pipefail
 
 API_DOMAIN="${1:?Укажи публичный домен API, например api.veloseller.ru}"
@@ -80,6 +83,11 @@ else
     fi
   }
 
+  # Postgres 17 — официальный override (облако Veloseller на 17.6, дамп
+  # переносим версия-в-версию). Третьим — наш loopback-override (см. ниже):
+  # при заданном COMPOSE_FILE compose сам docker-compose.override.yml не берёт.
+  set_env COMPOSE_FILE "docker-compose.yml:docker-compose.pg17.yml:docker-compose.override.yml"
+
   set_env POSTGRES_PASSWORD "$POSTGRES_PASSWORD"
   set_env JWT_SECRET "$JWT_SECRET"
   set_env ANON_KEY "$ANON_KEY"
@@ -89,6 +97,7 @@ else
   set_env SECRET_KEY_BASE "$SECRET_KEY_BASE"
   set_env VAULT_ENC_KEY "$VAULT_ENC_KEY"
   set_env PG_META_CRYPTO_KEY "$PG_META_CRYPTO_KEY"
+  set_env POOLER_TENANT_ID veloseller
 
   # Публичные URL: API за nginx с TLS; SITE_URL — адрес приложения для писем
   set_env API_EXTERNAL_URL "https://${API_DOMAIN}"
@@ -121,9 +130,10 @@ else
   echo "==> Секреты записаны в $TARGET/docker/.env"
 fi
 
-# Pooler наружу не выставляем: только localhost (pg_dump/psql/MCP — по SSH-туннелю).
-# В compose порт пробрасывается как ${POSTGRES_PORT}:5432 — перепривязываем env'ом нельзя,
-# поэтому страхуемся ufw'ом + овверайдом:
+# Pooler наружу не выставляем: только localhost. В официальном compose порт
+# пробрасывается как ${POSTGRES_PORT}:5432, а POSTGRES_PORT используется ещё и
+# внутри сервисов — env'ом не перепривяжешь, поэтому override с тегом !override
+# (замена списка ports целиком; нужен docker compose >= 2.24.4).
 cat > docker-compose.override.yml <<'YAML'
 # Veloseller: внешние порты только на loopback. Официальный compose не патчим.
 services:
@@ -132,6 +142,14 @@ services:
       - 127.0.0.1:5432:5432
       - 127.0.0.1:6543:6543
 YAML
+
+if ! docker compose config -q 2>/dev/null; then
+  echo "!! docker compose не понял override (!override требует compose >= 2.24.4)."
+  echo "!! Убираю loopback-override — ПРОВЕРЬ, что ufw закрывает 5432/6543 снаружи!"
+  rm -f docker-compose.override.yml
+  sed -i 's|^COMPOSE_FILE=.*|COMPOSE_FILE=docker-compose.yml:docker-compose.pg17.yml|' .env
+  docker compose config -q
+fi
 
 echo "==> Поднимаю сервисы: $SERVICES"
 docker compose pull $SERVICES
