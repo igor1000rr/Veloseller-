@@ -1,11 +1,14 @@
 """APScheduler: периодические задачи.
 
-- recalc-all каждый час
+- recalc-all РАЗ В СУТКИ в 02:40 UTC (после ночного sync; до 05.06.2026 бежал
+  каждый час и генерировал ~90% REST-вызовов к Supabase впустую — данные
+  меняются раз в сутки, recalc после ручных синков вызывается отдельно из main)
 - sync активных marketplace-connections РАЗ В СУТКИ в 02:00 UTC
 - expire-subscriptions в 03:00 UTC (откатываем в trial истёкшие платные подписки)
 - daily-reports в 09:00 UTC (этап 2 алерты→отчёты — диспетчер по day_of_week)
 - monthly-reports 1-го числа в 09:30 UTC (управленческий PDF за прошлый месяц)
 - snapshots retention в 04:00 UTC (БАГ 89)
+- metrics retention в 04:30 UTC (инцидент DB Size 05.06.2026)
 - reset stuck syncing каждые 10 минут (БАГ 90)
 - radar-poll в 06:00 UTC ежедневно (Wordstat poll для approved брендов + suggest)
 - radar-digest пн+чт в 09:00 UTC (Telegram дайджест по новинкам)
@@ -21,11 +24,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
-from app.db import fetch_all, get_supabase
+from app.db import execute_minimal, fetch_all, get_supabase
 from app.jobs.recalc import recalc_all_sellers
 from app.schemas import SourceType
 from app.sources import google_sheet, ozon, shopify, wildberries
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 logger = logging.getLogger("veloseller.scheduler")
 
@@ -33,6 +36,15 @@ _scheduler: BackgroundScheduler | None = None
 
 _SNAPSHOTS_RETENTION_DAYS = 180
 _STUCK_SYNCING_TIMEOUT_MINUTES = 30
+
+# Retention метрик (инцидент 05.06.2026, DB Size 82% на Free-тарифе):
+# - tvelo_metrics: ключ (product, period_start, period_end) со скользящими
+#   датами — каждый день upsert создаёт НОВЫЕ строки (~17К/день), вчерашние
+#   никем не читаются. Храним недельный хвост.
+# - changelog / inventory_events: recalc перезаписывает только последние
+#   90 дней; всё старше 100 дней — мёртвый осадок.
+_TVELO_RETENTION_DAYS = 7
+_EVENTS_RETENTION_DAYS = 100
 
 # Лимит складов для trial-плана (при откате из истёкшей подписки)
 _TRIAL_WAREHOUSES_LIMIT = 15
@@ -255,6 +267,32 @@ def _job_snapshots_retention() -> None:
         logger.exception("snapshots retention job failed: %s", e)
 
 
+def _job_metrics_retention() -> None:
+    """Инцидент 05.06.2026 (DB Size 82%): чистим осадок метрик.
+
+    tvelo_metrics: скользящие period_start/period_end дают каждый день новый
+    ключ upsert'а → ~17К новых строк ежедневно, старые никем не читаются
+    (история динамики живёт в store_metrics/warehouse_metrics). Разовая чистка
+    05.06 удалила 112К строк (110 МБ → 50 МБ); этот джоб не даёт осадку
+    накопиться снова.
+
+    changelog/inventory_events: recalc перезаписывает только последние 90 дней,
+    строки старше 100 дней — мёртвый груз (плюс страховка от повторения
+    инцидента с 503К строк missing_data — основной фикс в _write_changelog).
+    """
+    try:
+        sb = get_supabase()
+        cutoff_tvelo = (date.today() - timedelta(days=_TVELO_RETENTION_DAYS)).isoformat()
+        execute_minimal(sb.table("tvelo_metrics").delete().lt("period_end", cutoff_tvelo))
+        cutoff_events = (date.today() - timedelta(days=_EVENTS_RETENTION_DAYS)).isoformat()
+        execute_minimal(sb.table("changelog").delete().lt("event_date", cutoff_events))
+        execute_minimal(sb.table("inventory_events").delete().lt("event_date", cutoff_events))
+        logger.info("metrics retention done: tvelo<%s, events/changelog<%s",
+                    cutoff_tvelo, cutoff_events)
+    except Exception:
+        logger.exception("metrics retention job failed")
+
+
 def _job_reset_stuck_syncing() -> None:
     """БАГ 90: сбрасываем connections в status='syncing' старше N минут в 'error'."""
     try:
@@ -295,7 +333,15 @@ def start_scheduler() -> None:
     if _scheduler is not None:
         return
     _scheduler = BackgroundScheduler(timezone="UTC")
-    _scheduler.add_job(_job_recalc_all, CronTrigger(minute=5), id="recalc-all", replace_existing=True)
+    # 05.06.2026: было CronTrigger(minute=5) — каждый час. Данные меняются раз
+    # в сутки (sync 02:00), recalc после ручных синков вызывается из main —
+    # 24 одинаковых пересчёта в день впустую жгли ~90% REST-вызовов (egress).
+    _scheduler.add_job(
+        _job_recalc_all,
+        CronTrigger(hour=2, minute=40),
+        id="recalc-all",
+        replace_existing=True,
+    )
     _scheduler.add_job(
         _job_sync_active_connections,
         CronTrigger(hour=2, minute=0),
@@ -312,6 +358,12 @@ def start_scheduler() -> None:
         _job_snapshots_retention,
         CronTrigger(hour=4, minute=0),
         id="snapshots-retention",
+        replace_existing=True,
+    )
+    _scheduler.add_job(
+        _job_metrics_retention,
+        CronTrigger(hour=4, minute=30),
+        id="metrics-retention",
         replace_existing=True,
     )
     _scheduler.add_job(
