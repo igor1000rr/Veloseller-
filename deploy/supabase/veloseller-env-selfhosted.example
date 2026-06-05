@@ -1,0 +1,16 @@
+# Какие переменные поменять в env web и worker при переезде на self-hosted.
+# Значения ANON/SERVICE_ROLE — из /opt/supabase/docker/.env нового стека.
+
+# ── apps/web (.env.production) ──
+NEXT_PUBLIC_SUPABASE_URL=https://api.veloseller.ru
+NEXT_PUBLIC_SUPABASE_ANON_KEY=<ANON_KEY из стека>
+SUPABASE_SERVICE_ROLE_KEY=<SERVICE_ROLE_KEY из стека>
+
+# ── apps/worker (.env) ──
+SUPABASE_URL=https://api.veloseller.ru
+SUPABASE_SERVICE_ROLE_KEY=<SERVICE_ROLE_KEY из стека>
+
+# Если web/worker живут на ТОМ ЖЕ сервере, что и стек — быстрее и без TLS-наклада:
+# SUPABASE_URL=http://127.0.0.1:8000
+# NEXT_PUBLIC_SUPABASE_URL остаётся публичным https://api.<домен> —
+# его дергает браузер.
