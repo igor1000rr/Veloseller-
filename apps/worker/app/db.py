@@ -108,6 +108,38 @@ def get_supabase() -> Client:
     return client
 
 
+def execute_minimal(query_builder):
+    """Выполняет write-запрос (insert/update/delete/upsert) с Prefer: return=minimal.
+
+    ЭКОНОМИЯ EGRESS (инцидент 05.06.2026 — exceed_egress_quota): supabase-py
+    по умолчанию шлёт Prefer: return=representation, и PostgREST возвращает
+    в теле ответа ВСЕ затронутые строки. Recalc делает десятки тысяч
+    delete/insert/upsert за пересчёт — тела ответов гоняли гигабайты
+    обратно в worker и сожгли egress-квоту проекта.
+
+    return=minimal → PostgREST отвечает пустым телом. Остальные Prefer-токены
+    (resolution=merge-duplicates у upsert и т.п.) сохраняются.
+
+    Defensive (как fetch_all): если у builder'а нет реальных headers
+    (MagicMock / fake-моки в тестах) — молча выполняем как есть, деградация
+    к representation, поведение не меняется.
+
+    Использовать ТОЛЬКО там, где результат .execute() не читается.
+    """
+    try:
+        headers = query_builder.headers
+        prefer = headers.get("Prefer", "") or ""
+        parts = [
+            p.strip() for p in str(prefer).split(",")
+            if p.strip() and not p.strip().startswith("return=")
+        ]
+        parts.append("return=minimal")
+        headers["Prefer"] = ",".join(parts)
+    except Exception:
+        pass
+    return query_builder.execute()
+
+
 # Лимит на pagination: 1M строк. С 1000 на страницу это 1000 итераций — около минуты.
 # Реалистичный максимум для одного селлера: 1879 SKU × 365 дней = ~700K snapshot'ов
 # за год. БАГ 23 fix: было 100K, что обрезало большие исторические выгрузки.
