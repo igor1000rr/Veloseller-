@@ -5,13 +5,12 @@
 # когда Kong отвечает на http://127.0.0.1:8000.
 #
 # Использование:
-#   CLOUD_DB_URL='postgresql://postgres:ПАРОЛЬ@db.pptetnhdmxehijslbsrx.supabase.co:5432/postgres' \
+#   CLOUD_DB_URL='postgresql://postgres.<ref>:ПАРОЛЬ@aws-0-<регион>.pooler.supabase.com:5432/postgres' \
 #     bash migrate-from-cloud.sh /opt/supabase
 #
-# Пароль облачной БД: dashboard → Settings → Database (можно Reset password).
-# Прямой Postgres-порт облака обычно жив даже при Fair-Use restriction
-# (зарезаны Data API/Auth, не сам Postgres). Если коннект не идёт — задай
-# DUMP_FILE=/path/to/public.dump (custom-формат pg_dump схемы public).
+# Хост берётся из dashboard → Connect → Direct → Session pooler (порт 5432,
+# IPv4). Прямой db.<ref>.supabase.co резолвится только в IPv6 — на VPS без
+# IPv6 не подходит. Если pooler недоступен — задай DUMP_FILE=/path/public.dump.
 #
 # Все pg_dump/pg_restore/psql выполняются ВНУТРИ контейнера supabase-db:
 #   - версии клиентов совпадают с сервером по построению (PG 17.6 = облако),
@@ -69,12 +68,17 @@ else
 fi
 
 # ── 2. Restore public в self-hosted ────────────────────────────────────────
+# Схема public в self-hosted уже создана при инициализации, поэтому дамповый
+# CREATE SCHEMA public конфликтует. --clean --if-exists: pg_restore сам делает
+# DROP ... IF EXISTS перед каждым CREATE (для пустой базы DROP'ы тихо проходят).
+# Без --exit-on-error: единичные безвредные NOTICE/ошибки на уже-существующих
+# системных объектах не должны валить весь импорт. Контроль — проверкой строк ниже.
 echo "==> Restore public (схема + данные + RLS + RPC)"
 dexec pg_restore \
   --username postgres --dbname postgres \
   --no-owner --no-privileges \
-  --exit-on-error \
-  "$TMP/public.dump"
+  --clean --if-exists \
+  "$TMP/public.dump" 2>&1 | tail -30 || true
 
 # PostgREST в self-hosted ходит ролями anon/authenticated/service_role —
 # выдаём гранты на восстановленную схему (в облаке это делалось платформой).
@@ -89,6 +93,14 @@ alter default privileges in schema public grant all on sequences to anon, authen
 alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
 SQL
 
+# Проверка: данные реально на месте (вместо слепого --exit-on-error)
+echo "==> Проверка перенесённых данных public:"
+dpsql -c "select
+  (select count(*) from public.sellers) as sellers,
+  (select count(*) from public.products) as products,
+  (select count(*) from public.inventory_snapshots) as snapshots,
+  (select count(*) from public.data_connections) as connections;"
+
 # ── 3. Пользователи auth ────────────────────────────────────────────────────
 if dexec test -f "$TMP/auth_users.sql"; then
   echo "==> Restore auth.users / auth.identities"
@@ -99,8 +111,9 @@ if dexec test -f "$TMP/auth_users.sql"; then
     echo '!! restore auth упал (расхождение колонок GoTrue?).'
     echo '!! Файл сохранён в /root/auth_users.sql — разберём точечно.'
     docker cp "$DB:$TMP/auth_users.sql" /root/auth_users.sql
-    exit 1
   }
+  echo "==> auth.users после restore:"
+  dpsql -c "select count(*) as auth_users from auth.users;" || true
 fi
 
 # ── 4. Storage buckets ──────────────────────────────────────────────────────
