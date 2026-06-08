@@ -1,0 +1,34 @@
+# Запуск: из каталога deploy/mcp на сервере, с подстановкой секретов из .env стека:
+#   docker compose --env-file /opt/supabase/docker/.env up -d --build
+#
+# --env-file подставляет ANON_KEY / SERVICE_ROLE_KEY / JWT_SECRET / POSTGRES_PASSWORD
+# из .env самого Supabase-стека в interpolation ниже (один источник правды).
+#
+# Наружу слушает только 127.0.0.1:3100 — публикуется через nginx на
+# api.veloseller.ru по секретному пути (см. nginx-mcp.snippet.conf), где nginx
+# сам подставляет service-JWT в Authorization. Доступ снаружи защищён
+# непредсказуемостью пути (тот же паттерн, что у coolify-mcp / seo-mcp).
+services:
+  mcp:
+    build: .
+    container_name: veloseller-supabase-mcp
+    restart: unless-stopped
+    networks: [supabase]
+    ports:
+      - "127.0.0.1:3100:3100"
+    environment:
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SERVICE_ROLE_KEY}
+      SUPABASE_AUTH_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD}@db:5432/postgres
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3100/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  supabase:
+    external: true
+    name: supabase_default
