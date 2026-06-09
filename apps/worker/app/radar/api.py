@@ -93,10 +93,10 @@ async def extract_brands(
         sb.table("sellers")
         .select("radar_plan,radar_brands_limit,radar_active_until")
         .eq("id", seller_id)
-        .maybe_single()
+        .limit(1)
         .execute()
     )
-    seller = seller_res.data
+    seller = seller_res.data[0] if seller_res.data else None
     if not seller:
         raise HTTPException(404, "Seller not found")
     plan = (seller.get("radar_plan") or "none")
