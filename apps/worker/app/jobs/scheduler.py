@@ -479,7 +479,7 @@ def _monitoring_chat_ids(sb) -> list[str]:
 
 def _job_monitor_sync_freshness() -> None:
     """Раз в 30 мин проверяет свежесть синка. Если у активного склада последний
-    успешный синк был >12ч назад (last_sync_at) — шлёт алерт в Telegram (один раз
+    успешный синк был >30ч назад (last_sync_at) — шлёт алерт в Telegram (один раз
     на эпизод). При восстановлении — уведомление. Склады моложе порога и paused
     не учитываются. Адресат: env MONITORING_CHAT_ID или telegram админов.
     """
