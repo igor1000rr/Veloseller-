@@ -37,8 +37,13 @@ const nextConfig = {
       {
         source: "/(.*)",
         headers: [
-          // Запрещаем встраивание сайта в iframe (clickjacking защита)
-          { key: "X-Frame-Options", value: "DENY" },
+          // Разрешаем встраивание ТОЛЬКО со своего origin — нужно для выезжающей
+          // карточки SKU (iframe на свой же роут /dashboard/skus/:id). Сторонние
+          // сайты зафреймить нас по-прежнему не могут (защита от clickjacking).
+          // Раньше тут был DENY и конфликтовал с nginx (тот шлёт SAMEORIGIN):
+          // браузер видел два РАЗНЫХ XFO → конфликт → блокировал даже свой
+          // iframe (ERR_BLOCKED_BY_RESPONSE). Теперь оба слоя шлют SAMEORIGIN.
+          { key: "X-Frame-Options", value: "SAMEORIGIN" },
           // Запрещает MIME-sniffing (защита от XSS через misidentified content)
           { key: "X-Content-Type-Options", value: "nosniff" },
           // Не пересылать полный referrer на третьи сайты
