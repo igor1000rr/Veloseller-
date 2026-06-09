@@ -199,16 +199,23 @@ class YandexWordstatProvider(WordstatProvider):
 class XMLRiverProvider(WordstatProvider):
     """XMLRiver Wordstat API.
 
-    Документация: https://xmlriver.com
-    Endpoint: http://xmlriver.com/wordstat/json?user=N&key=KEY&query=ФРАЗА
+    Документация: https://xmlriver.com/apiwordstatnew/
+    Endpoint: http://xmlriver.com/wordstat/new/json?user=N&key=KEY&query=ФРАЗА
     Базовый тариф: 25₽ за 1000 запросов.
+
+    08.06.2026: старый эндпоинт /wordstat/json отключён XMLRiver
+    (code 101 "Сбор старого вордстата больше не доступен"). Перешли на
+    Wordstat New (/wordstat/new/json). Формат ответа изменился:
+    {"associations": [...], "popular": [...]}, элемент —
+    {"value": "<freq>", "text": "<фраза>"}. Режим выдачи (топы/динамика)
+    задаётся в настройках сбора кабинета XMLRiver.
     """
     name = "xmlriver"
 
     def __init__(self) -> None:
         self.user = os.getenv("XMLRIVER_USER", "").strip()
         self.key = os.getenv("XMLRIVER_KEY", "").strip()
-        self.base_url = "http://xmlriver.com/wordstat/json"
+        self.base_url = "http://xmlriver.com/wordstat/new/json"
 
     def is_available(self) -> bool:
         return bool(self.user and self.key)
@@ -219,8 +226,9 @@ class XMLRiverProvider(WordstatProvider):
             "key": self.key,
             "query": phrase,
         }
-        if with_history:
-            params["history"] = "yes"
+        # history в Wordstat New — отдельный метод (динамика), требует
+        # переключения режима сбора в кабинете. Радару нужны топы запросов
+        # (ассоциации-фразы), историю здесь не запрашиваем.
 
         last_err: Optional[Exception] = None
         for attempt in range(_HTTP_RETRY_MAX):
@@ -240,50 +248,53 @@ class XMLRiverProvider(WordstatProvider):
             if last_err:
                 raise last_err
 
-        # Формат ответа XMLRiver:
-        # {
-        #   "content": {
-        #     "includingPhrases": {
-        #       "totalCount": 12345,
-        #       "items": [{"phrase": "...", "count": 100}, ...]
-        #     },
-        #     "history": [...]  // если запрашивали
-        #   }
-        # }
-        content = data.get("content", {}) or {}
-        including = content.get("includingPhrases", {}) or {}
-        total = int(including.get("totalCount", 0) or 0)
-        items = including.get("items", []) or []
-
-        related = [
-            WordstatRelatedQuery(
-                text=str(it.get("phrase", "")).strip(),
-                frequency=int(it.get("count", 0) or 0),
+        # XMLRiver может вернуть прикладную ошибку с HTTP 200 в теле,
+        # напр. {"code": 101, "error": "..."} — raise_for_status её не ловит.
+        if isinstance(data, dict) and data.get("code") and data.get("error"):
+            raise RuntimeError(
+                f"xmlriver wordstat error {data.get('code')}: {data.get('error')}"
             )
-            for it in items
-            if it.get("phrase")
-        ]
 
-        history: list[WordstatHistoryPoint] = []
-        if with_history:
-            for point in (content.get("history", []) or []):
-                # Формат: {"date": "2026-04", "totalCount": 12345}
-                date_str = str(point.get("date", ""))
-                parts = date_str.split("-")
-                if len(parts) >= 2:
-                    history.append(WordstatHistoryPoint(
-                        year=int(parts[0]),
-                        month=int(parts[1]),
-                        frequency=int(point.get("totalCount", 0) or 0),
-                    ))
+        # Формат ответа Wordstat New (/wordstat/new/json):
+        # {
+        #   "associations": [{"isAssociations": true, "value": "586744",
+        #                     "text": "мультиметр"}, ...],
+        #   "popular":      [{"isAssociations": false, "value": "573252",
+        #                     "text": "..."}, ...]
+        # }
+        # value приходит строкой; отдельного totalCount нет. Объединяем
+        # associations + popular в related, дедуп по тексту.
+        raw_items = (data.get("associations") or []) + (data.get("popular") or [])
+        related: list[WordstatRelatedQuery] = []
+        seen: set[str] = set()
+        for it in raw_items:
+            text = str(it.get("text", "")).strip()
+            if not text:
+                continue
+            norm = text.lower()
+            if norm in seen:
+                continue
+            seen.add(norm)
+            try:
+                freq = int(it.get("value", 0) or 0)
+            except (TypeError, ValueError):
+                freq = 0
+            related.append(WordstatRelatedQuery(text=text, frequency=freq))
+
+        # base_frequency — частота самой запрошенной фразы, если присутствует
+        # в выдаче (у Wordstat New отдельного итогового счётчика нет).
+        q_norm = phrase.strip().lower()
+        base_freq = next(
+            (r.frequency for r in related if r.text.lower() == q_norm), 0
+        )
 
         return WordstatResult(
             phrase=phrase,
-            base_frequency=total,
+            base_frequency=base_freq,
             related=related,
-            history=history,
+            history=[],
             provider=self.name,
-            raw={"xmlriver": data},
+            raw={"xmlriver_new": data},
         )
 
 
