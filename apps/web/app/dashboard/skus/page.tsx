@@ -96,6 +96,8 @@ export default async function SkusPage({ searchParams }: {
     coverage_max?: string;
     date_from?: string;
     date_to?: string;
+    brand?: string;
+    category?: string;
   }>;
 }) {
   const sp = await searchParams;
