@@ -547,3 +547,200 @@ def recalc_all_sellers():
         except Exception as e:
             logger.exception("recalc failed for seller %s: %s", seller_id, e)
     return summary
+
+
+# ─── Бэкдейт-пересчёт истории метрик (для графиков Динамики) ──────────────────
+
+def _fetch_snapshots_asof(sb, product_ids, history_start, as_of_cutoff):
+    """Как _fetch_snapshots_batched, но с верхней границей: только снапшоты
+    РАНЬШЕ as_of_cutoff (начало дня, следующего за as_of). Нужно, чтобы
+    бэкдейт-пересчёт не «подглядывал» в будущее относительно as_of."""
+    if not product_ids:
+        return {}
+    result = {pid: [] for pid in product_ids}
+    for i in range(0, len(product_ids), _PRODUCT_IN_BATCH):
+        batch = product_ids[i:i + _PRODUCT_IN_BATCH]
+        rows = fetch_all(
+            sb.table("inventory_snapshots")
+            .select("snapshot_id,product_id,snapshot_time,stock_quantity,price,availability")
+            .in_("product_id", batch)
+            .gte("snapshot_time", history_start)
+            .lt("snapshot_time", as_of_cutoff)
+        )
+        for r in rows:
+            pid = r.get("product_id")
+            if pid in result:
+                result[pid].append(r)
+    for pid in result:
+        result[pid].sort(key=lambda r: r["snapshot_time"])
+    return result
+
+
+def recalc_seller_asof(seller_id, as_of, period_days=30):
+    """Бэкдейт-пересчёт: метрики SKU ПО СОСТОЯНИЮ на дату as_of.
+
+    Зачем: графики Динамики (/dashboard/dynamics) строятся по временно́му ряду
+    tvelo_metrics (точка = period_end). После миграции ряд короткий (метрики
+    пишутся только вперёд), поэтому Динамика пустая. Эта функция наполняет ряд
+    задним числом по уже имеющимся снапшотам.
+
+    Отличия от recalc_seller:
+    - period_end = as_of (не today);
+    - снапшоты берутся только до конца as_of (не подглядываем в будущее);
+    - пишем ТОЛЬКО tvelo_metrics (батч-upsert). НЕ трогаем alerts / changelog /
+      inventory_events / price_elasticity / store_metrics / warehouse_metrics:
+      это исторические точки для графика — плодить алерты и события задним числом
+      нельзя, а store/warehouse-агрегаты не date-scoped, их перетирать опасно.
+    """
+    sb = get_supabase()
+    period_end = as_of
+    period_start = period_end - timedelta(days=period_days - 1)
+    seller_tz = pytz.timezone(_seller_timezone(sb, seller_id))
+
+    products = fetch_all(
+        sb.table("products").select("product_id,sku,connection_id").eq("seller_id", seller_id)
+    )
+    if not products:
+        return {"as_of": as_of.isoformat(), "period_days": period_days,
+                "products": 0, "metrics_written": 0, "failed_skus": 0}
+
+    history_start = (period_start - timedelta(days=30)).isoformat()
+    as_of_cutoff = (as_of + timedelta(days=1)).isoformat()
+    all_pids = [p["product_id"] for p in products]
+    snapshots_by_pid = _fetch_snapshots_asof(sb, all_pids, history_start, as_of_cutoff)
+
+    sku_data = []
+    velocities_for_median = []
+    failed = 0
+    for p in products:
+        pid = p["product_id"]
+        try:
+            rows = snapshots_by_pid.get(pid, [])
+            if not rows:
+                continue
+            pre_period_history = _extract_pre_period_sales_deltas(rows, period_start, seller_tz)
+            aggregates, _event_rows = build_daily_aggregates(rows, period_start, period_end, seller_tz)
+            current_stock = int(rows[-1]["stock_quantity"])
+            current_price = float(rows[-1]["price"])
+            history_arg = pre_period_history if pre_period_history else None
+            metric = compute_metrics_for_sku(
+                product_id=pid, period_start=period_start, period_end=period_end,
+                daily_aggregates=aggregates, current_stock=current_stock,
+                history_for_median=history_arg,
+            )
+            sku_data.append({"pid": pid, "metric": metric, "current_price": current_price})
+            if metric.adjusted_velocity > 0:
+                velocities_for_median.append(metric.adjusted_velocity)
+        except Exception as e:
+            failed += 1
+            continue
+
+    median_store_velocity = _median(velocities_for_median) if velocities_for_median else 0.0
+
+    upsert_rows = []
+    for item in sku_data:
+        m = item["metric"]
+        has_enough_history = (
+            m.confidence_breakdown.low_history == 0.0 if m.confidence_breakdown else True
+        )
+        underestimated = (
+            is_underestimated_sku(
+                stockout_days=m.stockout_days,
+                adjusted_velocity=m.adjusted_velocity,
+                median_store_velocity=median_store_velocity,
+                confidence_score=m.confidence_score,
+            )
+            and has_enough_history
+            and m.stockout_days >= 2
+        )
+        upsert_rows.append({
+            "product_id": item["pid"],
+            "period_start": m.period_start.isoformat(),
+            "period_end": m.period_end.isoformat(),
+            "confirmed_velocity": float(m.confirmed_velocity),
+            "adjusted_velocity": float(m.adjusted_velocity),
+            "median_30d_velocity": float(m.median_30d_velocity),
+            "confidence_score": float(m.confidence_score),
+            "confidence_breakdown": m.confidence_breakdown.model_dump() if m.confidence_breakdown else {},
+            "stockout_days": m.stockout_days,
+            "in_stock_days": m.in_stock_days,
+            "coverage_days": float(m.coverage_days) if m.coverage_days is not None else None,
+            "current_stock": m.current_stock,
+            "current_price": item["current_price"],
+            "inventory_segment": m.segment.value if m.segment else None,
+            "sku_health_score": float(m.sku_health_score) if m.sku_health_score is not None else None,
+            "underestimated_sku": underestimated,
+        })
+
+    metrics_written = 0
+    _CHUNK = 500
+    for i in range(0, len(upsert_rows), _CHUNK):
+        chunk = upsert_rows[i:i + _CHUNK]
+        try:
+            execute_minimal(
+                sb.table("tvelo_metrics").upsert(chunk, on_conflict="product_id,period_start,period_end")
+            )
+            metrics_written += len(chunk)
+        except Exception:
+            logger.exception("asof bulk upsert failed", extra={
+                "seller_id": seller_id, "as_of": as_of.isoformat(),
+                "period_days": period_days, "chunk_start": i,
+            })
+            failed += len(chunk)
+
+    return {"as_of": as_of.isoformat(), "period_days": period_days,
+            "products": len(products), "metrics_written": metrics_written,
+            "failed_skus": failed}
+
+
+def run_history_backfill(days_back=90, periods=(7, 30, 90), only_seller=None):
+    """Прогон бэкдейт-пересчёта на days_back дней назад (включая сегодня).
+
+    Для каждой даты as_of и каждого периода пишет точку tvelo_metrics — так
+    наполняется временной ряд для графиков Динамики. Идём от старых дат к новым.
+    Старт авто-клампится к дате первого снапшота: дни раньше неё ничего не пишут
+    (продукты без снапшотов пропускаются), поэтому days_back можно ставить с
+    запасом — лишние ранние дни просто пропустятся.
+    """
+    sb = get_supabase()
+    today = date.today()
+    sellers = ([{"id": only_seller}] if only_seller
+               else fetch_all(sb.table("sellers").select("id")))
+    summary = {"days_back": days_back, "sellers": len(sellers),
+               "points_written": 0, "days_done": 0, "errors": 0}
+
+    start_day = today - timedelta(days=days_back - 1)
+    # Авто-кламп старта к первому снапшоту — чтобы не гонять пустые ранние дни.
+    try:
+        e = (sb.table("inventory_snapshots").select("snapshot_time")
+             .order("snapshot_time").limit(1).execute())
+        if e.data:
+            earliest = datetime.fromisoformat(
+                str(e.data[0]["snapshot_time"]).replace("Z", "+00:00")
+            ).date()
+            if earliest > start_day:
+                start_day = earliest
+    except Exception:
+        logger.exception("backfill: не удалось определить первый снапшот, идём по days_back")
+
+    d = start_day
+    while d <= today:
+        day_points = 0
+        for s in sellers:
+            sid = s["id"]
+            for pdays in periods:
+                try:
+                    r = recalc_seller_asof(sid, as_of=d, period_days=pdays)
+                    day_points += r.get("metrics_written", 0)
+                except Exception:
+                    summary["errors"] += 1
+                    logger.exception("backfill asof failed", extra={
+                        "seller_id": sid, "as_of": d.isoformat(), "period_days": pdays,
+                    })
+        summary["points_written"] += day_points
+        summary["days_done"] += 1
+        logger.info("backfill day done", extra={"as_of": d.isoformat(), "points": day_points})
+        d += timedelta(days=1)
+
+    logger.info("backfill complete", extra=summary)
+    return summary
