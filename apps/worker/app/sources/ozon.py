@@ -72,18 +72,22 @@ def _decimal(v) -> Decimal:
         return Decimal("0")
 
 
-def _ozon_commission_pct(item: dict) -> Optional[Decimal]:
+def _ozon_commission_pct(item: dict, kind: Optional[str] = None) -> Optional[Decimal]:
     """Комиссия Ozon в % из ответа /v5/product/info/prices (поле commissions).
 
-    /v5 отдаёт обе ставки (sales_percent_fbo и sales_percent_fbs) для каждого
-    товара — это категорийные проценты. Берём FBO как основную (для #5 это
-    стартовый дефолт, в UI юнит-экономики редактируется). Нет поля → None
-    (комиссия запишется как null, расчёт просто не подставит дефолт).
+    /v5 отдаёт обе ставки (sales_percent_fbo и sales_percent_fbs). Берём под
+    тип склада: ozon_fbs → sales_percent_fbs, иначе (fbo/None) → sales_percent_fbo.
+    Это категорийные проценты, для #5 — стартовый дефолт юнит-экономики (в UI
+    правится). Нужного поля нет → пробуем второе, затем generic. Нет → None.
     """
     comm = item.get("commissions")
     if not isinstance(comm, dict):
         return None
-    for key in ("sales_percent_fbo", "sales_percent_fbs", "sales_percent"):
+    if kind == "fbs":
+        order = ("sales_percent_fbs", "sales_percent_fbo", "sales_percent")
+    else:
+        order = ("sales_percent_fbo", "sales_percent_fbs", "sales_percent")
+    for key in order:
         val = comm.get(key)
         if val not in (None, ""):
             try:
