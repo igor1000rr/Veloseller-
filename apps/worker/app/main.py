@@ -352,7 +352,17 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
             last_price = float(last.get("price") or 0)
             cur_stock = int(s.stock_quantity)
             cur_price = float(s.price)
-            if last_stock == cur_stock and abs(last_price - cur_price) < 0.01:
+            # marketing_price тоже в ключе дедупа (#3): иначе изменение скидки МП при
+            # тех же stock+price скипалось бы и факт. цена на графике не обновлялась.
+            # Лишние строки безопасны: stock тот же → движок не видит ложных продаж.
+            last_mkt = last.get("marketing_price")
+            cur_mkt = float(s.marketing_price) if s.marketing_price is not None else None
+            mkt_same = (
+                (last_mkt is None and cur_mkt is None)
+                or (last_mkt is not None and cur_mkt is not None
+                    and abs(float(last_mkt) - cur_mkt) < 0.01)
+            )
+            if last_stock == cur_stock and abs(last_price - cur_price) < 0.01 and mkt_same:
                 skipped_duplicates += 1
                 continue
         ts = s.snapshot_time or datetime.now(timezone.utc)
