@@ -7,6 +7,9 @@ import { t } from "@/lib/i18n";
 import { isEn } from "@/lib/features";
 import { clearAllUserNotes } from "./actions";
 
+// RU/.com для инлайн-строк галочки «Стереть заметки» (без i18n-ключей ради 2 строк).
+const isEn = LOCALE === "en";
+
 export type FilterRanges = {
   stockMin: number;
   stockMax: number;
