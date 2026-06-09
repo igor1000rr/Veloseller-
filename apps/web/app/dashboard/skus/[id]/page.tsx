@@ -224,7 +224,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         )}
       </div>
 
-      {latest && Number(latest.adjusted_velocity) > 0 && (
+      {latest && (
         <ReorderPanel
           productId={product.product_id}
           adjustedVelocity={Number(latest.adjusted_velocity)}
