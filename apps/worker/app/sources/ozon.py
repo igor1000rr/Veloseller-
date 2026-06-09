@@ -476,12 +476,17 @@ def _fetch_snapshots_fbo(client_id: str, api_key: str, page_size: int = 1000) ->
                     break
                 cursor = new_cursor
 
+        # Бренд + категория (#6): best-effort, при ошибке → null, синк не падает.
+        attrs_by_pid = _fetch_ozon_attributes(cli, client_id, api_key, product_ids)
+        cat_by_id, type_by_id = _fetch_ozon_category_tree(cli, client_id, api_key)
+
         # 5. Собираем SnapshotInput. Товар, которого нет в ответе analytics —
         # легитимный ноль (на складах Ozon его нет). sku=offer_id — ключ
         # консистентен с fbs-складом и с products.sku в БД.
         out: list[SnapshotInput] = []
         for pid, info in info_by_pid.items():
             sku_num = info.get("sku")
+            brand, category = _resolve_ozon_tag(attrs_by_pid, cat_by_id, type_by_id, pid)
             out.append(SnapshotInput(
                 sku=info["offer_id"],
                 product_name=info.get("name"),
@@ -490,6 +495,8 @@ def _fetch_snapshots_fbo(client_id: str, api_key: str, page_size: int = 1000) ->
                 seller_price=seller_price_by_pid.get(pid),
                 marketing_price=marketing_by_pid.get(pid),
                 commission_pct=commission_by_pid.get(pid),
+                brand=brand,
+                category=category,
                 snapshot_time=now,
             ))
 
