@@ -382,6 +382,8 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
         price = prices_by_vendor.get(vendor_code, Decimal("0"))
         disc = discount_by_vendor.get(vendor_code, Decimal("0"))
         marketing = (price * (Decimal("1") - disc / Decimal("100"))).quantize(Decimal("0.01")) if price else Decimal("0")
+        subj_key = (subject_by_vendor.get(vendor_code) or "").lower()
+        comm = commission_map.get(subj_key, {}).get("fbs") if subj_key else None
         snapshots.append(SnapshotInput(
             sku=vendor_code,
             product_name=title or vendor_code,
@@ -389,6 +391,7 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
             price=price,
             seller_price=(price if price else None),
             marketing_price=(marketing if price else None),
+            commission_pct=comm,
             brand=(brand_by_vendor.get(vendor_code) or None),
             category=(subject_by_vendor.get(vendor_code) or None),
             snapshot_time=now,
