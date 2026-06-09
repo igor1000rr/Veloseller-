@@ -130,7 +130,7 @@ def fetch_snapshots(token: str) -> list[SnapshotInput]:
         rows = with_retry(_stocks_call, base_delay=60.0, max_delay=300.0)
         names_by_vendor = _fetch_card_names(cli, token)
 
-    grouped: dict[str, dict] = defaultdict(lambda: {"qty": 0, "price": Decimal("0"), "subject": None})
+    grouped: dict[str, dict] = defaultdict(lambda: {"qty": 0, "price": Decimal("0"), "discount": Decimal("0"), "subject": None, "brand": None})
     for r in rows:
         sku = (r.get("supplierArticle") or "").strip()
         if not sku:
@@ -139,8 +139,16 @@ def fetch_snapshots(token: str) -> list[SnapshotInput]:
         price = r.get("Price") or 0
         if price and grouped[sku]["price"] == 0:
             grouped[sku]["price"] = Decimal(str(price))
+            # Discount берём из той же строки, что и цену — чтобы пара была согласована.
+            disc = r.get("Discount") or 0
+            try:
+                grouped[sku]["discount"] = Decimal(str(disc))
+            except Exception:
+                grouped[sku]["discount"] = Decimal("0")
         if not grouped[sku]["subject"]:
             grouped[sku]["subject"] = r.get("subject")
+        if not grouped[sku]["brand"]:
+            grouped[sku]["brand"] = r.get("brand")
 
     snapshots = []
     name_found = 0
