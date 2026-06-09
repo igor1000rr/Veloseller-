@@ -1,9 +1,77 @@
 "use client";
+import { useMemo, useState } from "react";
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, ReferenceDot, ReferenceLine, Area,
 } from "recharts";
 import { t } from "@/lib/i18n";
+import { LOCALE } from "@/lib/features";
+
+const isEn = LOCALE === "en";
+
+// Правка 10 (#4): переключатель деления графика 1d/7d/1m. Дневные точки
+// ресемплятся в недельные/месячные бакеты: velocity — среднее за период,
+// price/stock — значение на конец периода, availability — мажоритарно (для OOS-полос).
+// Журнал изменений мёржится по всем дням бакета под его конечную дату.
+type ChartPeriod = "1d" | "7d" | "1m";
+
+const PERIOD_LABELS: Record<ChartPeriod, string> = isEn
+  ? { "1d": "1d", "7d": "7d", "1m": "1m" }
+  : { "1d": "1д", "7d": "7д", "1m": "1мес" };
+
+function chartLabel(dateStr: string, period: ChartPeriod): string {
+  const d = new Date(dateStr);
+  const loc = isEn ? "en-US" : "ru-RU";
+  if (period === "1m") return d.toLocaleDateString(loc, { month: "short", year: "2-digit" });
+  return d.toLocaleDateString(loc, { day: "2-digit", month: "2-digit" });
+}
+
+function resampleChart(
+  data: ChartPoint[],
+  changelog: ChangelogByDate | undefined,
+  period: ChartPeriod,
+): { points: ChartPoint[]; changelog: ChangelogByDate } {
+  if (period === "1d" || data.length === 0) {
+    return { points: data, changelog: changelog ?? {} };
+  }
+  const sorted = [...data].sort((a, b) => a.date.localeCompare(b.date));
+  const keyOf = (ds: string): string => {
+    const d = new Date(ds);
+    if (period === "1m") return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    const dayIdx = Math.floor(d.getTime() / 86400000);
+    return String(Math.floor(dayIdx / 7));
+  };
+  const groups = new Map<string, ChartPoint[]>();
+  for (const pt of sorted) {
+    const k = keyOf(pt.date);
+    const arr = groups.get(k);
+    if (arr) arr.push(pt);
+    else groups.set(k, [pt]);
+  }
+  const points: ChartPoint[] = [];
+  const merged: ChangelogByDate = {};
+  for (const arr of groups.values()) {
+    const last = arr[arr.length - 1];
+    const velAvg = arr.reduce((s, p) => s + (Number(p.velocity) || 0), 0) / arr.length;
+    const availMean = arr.reduce((s, p) => s + (p.availability ? 1 : 0), 0) / arr.length;
+    points.push({
+      date: last.date,
+      stock: last.stock,
+      price: last.price,
+      availability: availMean >= 0.5 ? 1 : 0,
+      velocity: velAvg,
+    });
+    if (changelog) {
+      const evs: ChangelogByDate[string] = [];
+      for (const p of arr) {
+        const e = changelog[p.date];
+        if (e && e.length) evs.push(...e);
+      }
+      if (evs.length) merged[last.date] = evs;
+    }
+  }
+  return { points, changelog: merged };
+}
 
 export type ChartPoint = {
   date: string;
