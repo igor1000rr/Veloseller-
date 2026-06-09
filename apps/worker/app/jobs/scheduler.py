@@ -450,6 +450,96 @@ def _job_catchup_missed_reports() -> None:
         logger.exception("catchup-missed-reports job failed")
 
 
+_SYNC_STALE_THRESHOLD_HOURS = 12
+# Антиспам: алерт о застрявшем синке шлём один раз на эпизод, при восстановлении — один раз.
+_sync_monitor_state = {"alerted": False}
+
+
+def _monitoring_chat_ids(sb) -> list[str]:
+    """Куда слать алерты мониторинга. Приоритет: env MONITORING_CHAT_ID, иначе
+    telegram_chat_id админов (ADMIN_EMAILS). Пусто → джоба тихо пропускает."""
+    explicit = (os.getenv("MONITORING_CHAT_ID") or "").strip()
+    if explicit:
+        return [explicit]
+    admin_emails = [e.strip().lower() for e in (os.getenv("ADMIN_EMAILS") or "").split(",") if e.strip()]
+    if not admin_emails:
+        return []
+    try:
+        rows = fetch_all(sb.table("sellers").select("email,telegram_chat_id"))
+    except Exception:
+        return []
+    return [
+        str(r["telegram_chat_id"]) for r in rows
+        if (r.get("email") or "").lower() in admin_emails and r.get("telegram_chat_id")
+    ]
+
+
+def _job_monitor_sync_freshness() -> None:
+    """Раз в 30 мин проверяет свежесть синка. Если у активного склада последний
+    успешный синк был >12ч назад (last_sync_at) — шлёт алерт в Telegram (один раз
+    на эпизод). При восстановлении — уведомление. Склады моложе порога и paused
+    не учитываются. Адресат: env MONITORING_CHAT_ID или telegram админов.
+    """
+    try:
+        sb = get_supabase()
+        now = datetime.now(timezone.utc)
+        stale_threshold = now - timedelta(hours=_SYNC_STALE_THRESHOLD_HOURS)
+        conns = fetch_all(
+            sb.table("data_connections")
+            .select("id,name,last_sync_at,status,created_at")
+            .neq("status", "paused")
+        )
+        stale = []
+        for c in conns:
+            created = c.get("created_at")
+            if created:
+                try:
+                    if datetime.fromisoformat(str(created).replace("Z", "+00:00")) > stale_threshold:
+                        continue  # склад моложе порога — мог ещё не синкнуться
+                except Exception:
+                    pass
+            ls = c.get("last_sync_at")
+            if ls is None:
+                stale.append((c.get("name") or c.get("id"), "ни разу"))
+                continue
+            try:
+                ls_dt = datetime.fromisoformat(str(ls).replace("Z", "+00:00"))
+            except Exception:
+                continue
+            if ls_dt < stale_threshold:
+                hrs = int((now - ls_dt).total_seconds() // 3600)
+                stale.append((c.get("name") or c.get("id"), f"{hrs}ч назад"))
+
+        chat_ids = _monitoring_chat_ids(sb)
+
+        if stale:
+            if not _sync_monitor_state["alerted"]:
+                lines = [
+                    "⚠️ <b>Veloseller: синк не отрабатывает</b>",
+                    f"Складов без свежего синка (&gt;{_SYNC_STALE_THRESHOLD_HOURS}ч): <b>{len(stale)}</b>",
+                    "",
+                ]
+                lines += [f"• {html.escape(str(n))} — {w}" for n, w in stale[:15]]
+                text = "\n".join(lines)
+                for cid in chat_ids:
+                    send_message(cid, text)
+                if not chat_ids:
+                    logger.warning(
+                        "sync stale (%d складов), но MONITORING_CHAT_ID/админ-телеграм не настроены",
+                        len(stale),
+                    )
+                _sync_monitor_state["alerted"] = True
+                logger.warning("sync freshness alert", extra={"stale_count": len(stale)})
+        else:
+            if _sync_monitor_state["alerted"]:
+                for cid in chat_ids:
+                    send_message(cid, "✅ <b>Veloseller: синк восстановился</b>\nВсе активные склады синхронизируются штатно.")
+                logger.info("sync freshness recovered")
+            _sync_monitor_state["alerted"] = False
+    except Exception:
+        logger.exception("monitor sync freshness job failed")
+
+
 def _persist_via_main(seller_id, connection_id, source_str, snapshots):
     """Импорт из main отложенный во избежание циклов."""
     from app.main import _persist_snapshots
