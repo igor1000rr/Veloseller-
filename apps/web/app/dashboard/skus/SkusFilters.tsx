@@ -230,6 +230,28 @@ export function SkusFilters({
             <InfoTooltip text={t("sku.filters.inactiveHint")} />
           </div>
         )}
+
+        {/* Правка 10 (#1): «Стереть заметки» — деструктивный тумблер (оранжевый),
+            всегда доступен; чистит все заметки селлера при «Рассчитать». */}
+        <div className="flex items-center gap-2 pt-6">
+          <button
+            type="button"
+            onClick={() => setEraseNotes((v) => !v)}
+            className="inline-flex items-center gap-2 text-sm text-ink-muted hover:text-ink transition py-2 -my-2 min-h-[36px]"
+          >
+            <span className={`size-5 rounded border ${eraseNotes ? "bg-orange border-orange" : "bg-paper border-line"} flex items-center justify-center transition shrink-0`}>
+              {eraseNotes && <span className="text-paper text-[11px]">✓</span>}
+            </span>
+            <span>{isEn ? "Erase notes" : "Стереть заметки"}</span>
+          </button>
+          <InfoTooltip
+            text={
+              isEn
+                ? "On 'Calculate', deletes all your notes across every SKU. Off by default."
+                : "При нажатии «Рассчитать» удаляет все ваши заметки по всем SKU. По умолчанию выключено."
+            }
+          />
+        </div>
       </div>
 
       {minDate && (
