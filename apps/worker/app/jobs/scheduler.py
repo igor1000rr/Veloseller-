@@ -641,6 +641,14 @@ def start_scheduler() -> None:
         id="catchup-missed-reports",
         replace_existing=True,
     )
+    # Мониторинг свежести синка — каждые 30 минут. Алерт в Telegram, если
+    # активный склад не синкался >12ч (адресат: MONITORING_CHAT_ID / ADMIN_EMAILS).
+    _scheduler.add_job(
+        _job_monitor_sync_freshness,
+        CronTrigger(minute="*/30"),
+        id="monitor-sync-freshness",
+        replace_existing=True,
+    )
     _scheduler.start()
 
 
