@@ -97,6 +97,8 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
       price: Number(s.price),
       availability: s.availability ? 1 : 0,
       velocity: 0,
+      sellerPrice: (s as any).seller_price != null ? Number((s as any).seller_price) : null,
+      marketingPrice: (s as any).marketing_price != null ? Number((s as any).marketing_price) : null,
     });
   }
   for (const m of metrics ?? []) {
