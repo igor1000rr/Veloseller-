@@ -228,6 +228,16 @@ def _job_monthly_reports() -> None:
         logger.exception("monthly-reports scheduler job failed")
 
 
+def _job_refresh_landing_stats() -> None:
+    """1-го числа в 03:30 UTC — платформенный агрегат витрины лендинга → system_settings."""
+    try:
+        from app.jobs.landing_stats import refresh_landing_stats
+        result = refresh_landing_stats()
+        logger.info("Cron landing-stats done: %s", result)
+    except Exception:
+        logger.exception("landing-stats scheduler job failed")
+
+
 def _job_radar_poll() -> None:
     """Каждый день 06:00 UTC — опрос Wordstat для Radar."""
     try:
