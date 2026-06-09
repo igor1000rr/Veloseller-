@@ -69,8 +69,13 @@ def compute_metrics_for_sku(
     )
     if first_real_idx is not None and first_real_idx > 0:
         daily_aggregates = daily_aggregates[first_real_idx:]
-        period_start = daily_aggregates[0].day
-        period_days = (period_end - period_start).days + 1
+    # ВАЖНО: period_start/period_end НЕ меняем (это ключ tvelo_metrics, по нему UI
+    # выбирает окно 7/30/90 — смена ключа плодит дубли). Штрафы confidence и health
+    # считаем по фактически покрытому окну effective_period_days.
+    effective_period_days = (
+        (period_end - daily_aggregates[0].day).days + 1
+        if daily_aggregates else period_days
+    )
 
     # MISSING_DATA дни исключаются из in_stock/stockout — это «не знаем», не подтверждённый OOS.
     in_stock_days = sum(
