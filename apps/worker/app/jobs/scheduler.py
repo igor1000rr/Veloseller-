@@ -33,6 +33,7 @@ from app.db import execute_minimal, fetch_all, get_supabase
 from app.jobs.recalc import recalc_all_sellers
 from app.schemas import SourceType
 from app.sources import google_sheet, ozon, shopify, wildberries
+from app.telegram import send_message
 from datetime import date, datetime, timedelta, timezone
 
 logger = logging.getLogger("veloseller.scheduler")
