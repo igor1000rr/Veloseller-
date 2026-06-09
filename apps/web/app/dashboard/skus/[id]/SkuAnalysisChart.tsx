@@ -180,7 +180,24 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
   };
 
   return (
-    <ResponsiveContainer width="100%" height={420}>
+    <div>
+      <div className="flex justify-end mb-2">
+        <div className="flex gap-1 rounded-lg border border-line bg-bg-soft p-0.5 font-mono text-[10px] uppercase tracking-wider">
+          {(["1d", "7d", "1m"] as ChartPeriod[]).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => setPeriod(p)}
+              className={`px-2.5 py-1 rounded transition ${
+                period === p ? "bg-paper text-ink font-semibold shadow-sm" : "text-ink-hush hover:text-ink"
+              }`}
+            >
+              {PERIOD_LABELS[p]}
+            </button>
+          ))}
+        </div>
+      </div>
+      <ResponsiveContainer width="100%" height={420}>
       <ComposedChart data={formatted} margin={{ top: 24, right: 30, left: 0, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#e6e3d4" vertical={false} />
         <XAxis dataKey="dateLabel" stroke="#8a8a7e" fontSize={11} tickLine={false} />
