@@ -450,7 +450,10 @@ def _job_catchup_missed_reports() -> None:
         logger.exception("catchup-missed-reports job failed")
 
 
-_SYNC_STALE_THRESHOLD_HOURS = 12
+_SYNC_STALE_THRESHOLD_HOURS = 30
+# Синк идёт РАЗ В СУТКИ (02:00 UTC), значит к вечеру last_sync_at штатно >12ч.
+# Порог должен быть > 24ч, иначе ложный алерт каждый день. 30ч = пропущен
+# суточный синк (как 5-7 июня) + буфер ~6ч.
 # Антиспам: алерт о застрявшем синке шлём один раз на эпизод, при восстановлении — один раз.
 _sync_monitor_state = {"alerted": False}
 
