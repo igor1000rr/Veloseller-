@@ -203,7 +203,7 @@ export default async function SkusPage({ searchParams }: {
   let productsQuery = supabase
     .from("products")
     .select(`
-      product_id, sku, product_name, user_notes, brand, category,
+      product_id, sku, product_name, user_notes, brand, category, tags,
       tvelo_metrics!inner (
         confirmed_velocity, adjusted_velocity, median_30d_velocity, confidence_score,
         stockout_days, in_stock_days, coverage_days, current_stock,
