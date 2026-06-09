@@ -52,6 +52,26 @@ def compute_metrics_for_sku(
 ) -> TVeloMetric:
     period_days = (period_end - period_start).days + 1
 
+    # КЛАМП ОКНА ПО ПЕРВОМУ СНАПШОТУ.
+    # При миграции на новый инстанс Supabase история снапшотов начинается не с
+    # начала 90-дневного окна (cutover ~22.05.2026). Дни до первого реального
+    # снапшота — это «трекинг ещё не вёлся», а НЕ «потеряли данные». Без клампа
+    # они идут как MISSING_DATA и роняют ДСТ в пол (40%) почти всем SKU.
+    # Отбрасываем ВЕДУЩИЕ MISSING_DATA дни и сдвигаем period_start на первый
+    # реальный день. Дыры ВНУТРИ периода (реальные пропуски синка) и хвостовые
+    # пропуски остаются — это честный сигнал. Скорость не меняется: у отброшенных
+    # дней не было ни sales_like, ни in_stock — пересчитываются только
+    # confidence и health по фактически покрытому окну.
+    first_real_idx = next(
+        (i for i, a in enumerate(daily_aggregates)
+         if a.event_type != EventType.MISSING_DATA),
+        None,
+    )
+    if first_real_idx is not None and first_real_idx > 0:
+        daily_aggregates = daily_aggregates[first_real_idx:]
+        period_start = daily_aggregates[0].day
+        period_days = (period_end - period_start).days + 1
+
     # MISSING_DATA дни исключаются из in_stock/stockout — это «не знаем», не подтверждённый OOS.
     in_stock_days = sum(
         1 for a in daily_aggregates
