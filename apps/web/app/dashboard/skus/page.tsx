@@ -130,6 +130,9 @@ export default async function SkusPage({ searchParams }: {
   const coverageMax = parseIntOrNull(sp.coverage_max);
   const dateFrom = parseDateOrNull(sp.date_from);
   const dateTo = parseDateOrNull(sp.date_to);
+  // Теги (#6): точный фильтр по бренду/категории (значения из API).
+  const brandFilter = (sp.brand ?? "").trim();
+  const categoryFilter = (sp.category ?? "").trim();
 
   const today = new Date();
   const preHoliday = userExplicitPeriod ? null : getPreHolidayWindow(today);
