@@ -210,6 +210,8 @@ def fetch_snapshots(token: str) -> list[SnapshotInput]:
         disc = v.get("discount") or Decimal("0")
         # Факт. цена WB = Price*(1 - Discount/100), округление до копеек.
         marketing = (nominal * (Decimal("1") - disc / Decimal("100"))).quantize(Decimal("0.01")) if nominal else Decimal("0")
+        subj_key = (v.get("subject") or "").lower()
+        comm = commission_map.get(subj_key, {}).get("fbo") if subj_key else None
         snapshots.append(SnapshotInput(
             sku=sku,
             product_name=product_name,
@@ -217,6 +219,7 @@ def fetch_snapshots(token: str) -> list[SnapshotInput]:
             price=nominal,
             seller_price=nominal,
             marketing_price=marketing,
+            commission_pct=comm,
             brand=(v.get("brand") or None),
             category=(v.get("subject") or None),
             snapshot_time=now,
