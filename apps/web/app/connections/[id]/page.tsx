@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import SyncButton from "../SyncButton";
 import DeleteButton from "../DeleteButton";
+import RenameConnection from "../RenameConnection";
 import { ConnectionErrorHint } from "../ConnectionErrorHint";
 import { parseApiError } from "@/lib/error-parser";
 import { Icons } from "../../_components/Icons";
