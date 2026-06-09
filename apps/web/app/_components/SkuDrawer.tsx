@@ -49,7 +49,7 @@ export default function SkuDrawer() {
         <div className="flex items-center justify-between border-b border-line bg-paper px-4 py-2.5">
           <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{L.title}</span>
           <div className="flex items-center gap-3">
-            <a href={cardUrl} className="font-mono text-[10px] uppercase tracking-widest text-lime-deep transition hover:text-ink">
+            <a href={cardUrl} target="_blank" rel="noopener" className="font-mono text-[10px] uppercase tracking-widest text-lime-deep transition hover:text-ink">
               {L.openFull}
             </a>
             <button
