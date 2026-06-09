@@ -47,6 +47,55 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   skipped: { label: t("report.status.skipped"), cls: "text-ink-hush border-line bg-bg-soft" },
 };
 
+/**
+ * Технический текст ошибки отчёта → человеческое объяснение + тон.
+ * Сырой текст (для отладки) остаётся под «Технические детали» в карточке.
+ */
+function humanizeReportError(
+  channel: "email" | "telegram",
+  status: string,
+  raw: string | null,
+): { text: string; tone: "warn" | "error" | "muted" } | null {
+  if (!raw) return null;
+  const m = raw.toLowerCase();
+
+  // Пропущен — нет данных за день (это не ошибка).
+  if (status === "skipped") {
+    return { text: m.includes("no data") ? t("report.skippedNoData") : raw, tone: "muted" };
+  }
+
+  // Telegram не подключён (нет chat_id).
+  if (m.includes("telegram_chat_id") || m.includes("chat_id") || m.includes("chat id")) {
+    return { text: t("report.err.telegramNoChat"), tone: "warn" };
+  }
+  // Telegram: бот заблокирован / чат недоступен.
+  if (channel === "telegram" && (m.includes("blocked") || m.includes("forbidden") || m.includes("chat not found") || m.includes("kicked"))) {
+    return { text: t("report.err.telegramBlocked"), tone: "warn" };
+  }
+  // Email не указан.
+  if (channel === "email" && (m.includes("no email") || m.includes("email not set") || m.includes("email is empty") || m.includes("missing email"))) {
+    return { text: t("report.err.emailNotSet"), tone: "warn" };
+  }
+  // Email: временный сбой почтового сервиса (Resend / сеть).
+  if (channel === "email" && (m.includes("resend") || m.includes("connection aborted") || m.includes("remotedisconnected") || m.includes("connection reset") || m.includes("timeout") || m.includes("timed out") || m.includes("502") || m.includes("503") || m.includes("504") || m.includes("temporarily"))) {
+    return { text: t("report.err.emailTransient"), tone: "warn" };
+  }
+  // Email: некорректный адрес.
+  if (channel === "email" && (m.includes("not a valid") || (m.includes("invalid") && m.includes("email")))) {
+    return { text: t("report.err.emailInvalid"), tone: "warn" };
+  }
+  // Общий fallback по каналу (вкл. «send returned False»).
+  return channel === "email"
+    ? { text: t("report.err.genericEmail"), tone: "error" }
+    : { text: t("report.err.genericTelegram"), tone: "error" };
+}
+
+const TONE_CLS: Record<string, string> = {
+  warn: "text-orange",
+  error: "text-rose",
+  muted: "text-ink-hush",
+};
+
 type ReportHistoryRow = {
   id: string;
   sent_at: string;
@@ -201,6 +250,9 @@ function ReportCard({ row }: { row: ReportHistoryRow }) {
   const status = STATUS_META[row.status] ?? STATUS_META.sent;
   const isFailure = row.status === "failed";
   const isSkipped = row.status === "skipped";
+  const humanErr = (isFailure || isSkipped)
+    ? humanizeReportError(row.channel, row.status, row.error_message)
+    : null;
 
   return (
     <div className={`rounded-2xl border bg-paper p-4 transition ${
@@ -251,23 +303,20 @@ function ReportCard({ row }: { row: ReportHistoryRow }) {
         </div>
       )}
 
-      {/* Ошибка — раскрытая по умолчанию */}
-      {isFailure && row.error_message && (
-        <div className="mt-3 pt-3 border-t border-rose/20">
-          <p className="font-mono text-[11px] text-rose break-words">
-            {row.error_message}
-          </p>
-        </div>
-      )}
-
-      {/* Skipped — короткое объяснение если есть */}
-      {isSkipped && row.error_message && (
-        <div className="mt-3 pt-3 border-t border-line">
-          <p className="font-mono text-[11px] text-ink-hush">
-            {row.error_message === "no data"
-              ? t("report.skippedNoData")
-              : row.error_message}
-          </p>
+      {/* Ошибка / пропуск — человеческое объяснение, сырой текст под деталями */}
+      {humanErr && (
+        <div className={`mt-3 pt-3 border-t ${isFailure ? "border-rose/20" : "border-line"}`}>
+          <p className={`text-[13px] leading-snug break-words ${TONE_CLS[humanErr.tone]}`}>{humanErr.text}</p>
+          {isFailure && (
+            <details className="mt-1.5 group">
+              <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-widest text-ink-hush hover:text-ink-muted transition select-none">
+                {t("report.err.techDetails")}
+              </summary>
+              <pre className="mt-1.5 p-2 bg-bg-soft border border-line rounded text-[11px] text-ink-muted font-mono overflow-x-auto whitespace-pre-wrap break-all">
+                {row.error_message}
+              </pre>
+            </details>
+          )}
         </div>
       )}
     </div>

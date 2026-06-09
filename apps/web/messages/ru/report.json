@@ -19,5 +19,13 @@
   "report.kind.weeklyReport": "Сводка по складу",
   "report.status.sent": "Отправлен",
   "report.status.failed": "Ошибка",
-  "report.status.skipped": "Пропущен"
+  "report.status.skipped": "Пропущен",
+  "report.err.telegramNoChat": "Отчёт не отправлен: Telegram не подключён. Привяжите аккаунт в разделе «Аккаунт» → Telegram.",
+  "report.err.telegramBlocked": "Отчёт не доставлен: бот заблокирован или чат недоступен. Разблокируйте бота в Telegram и снова привяжите аккаунт.",
+  "report.err.emailNotSet": "Отчёт не отправлен: не указан email. Добавьте адрес в разделе «Аккаунт».",
+  "report.err.emailTransient": "Отчёт по email не отправлен — почтовый сервис временно не ответил. Следующий отчёт придёт по расписанию.",
+  "report.err.emailInvalid": "Отчёт не отправлен: похоже, email указан неверно. Проверьте адрес в разделе «Аккаунт».",
+  "report.err.genericEmail": "Отчёт по email не отправлен. Мы уже разбираемся с причиной.",
+  "report.err.genericTelegram": "Отчёт не доставлен в Telegram. Мы уже разбираемся с причиной.",
+  "report.err.techDetails": "Технические детали"
 }

@@ -19,5 +19,13 @@
   "report.kind.weeklyReport": "Warehouse summary",
   "report.status.sent": "Sent",
   "report.status.failed": "Error",
-  "report.status.skipped": "Skipped"
+  "report.status.skipped": "Skipped",
+  "report.err.telegramNoChat": "Report not sent: Telegram isn't connected. Link your account under «Account» → Telegram.",
+  "report.err.telegramBlocked": "Report not delivered: the bot is blocked or the chat is unavailable. Unblock the bot in Telegram and reconnect your account.",
+  "report.err.emailNotSet": "Report not sent: no email address. Add one under «Account».",
+  "report.err.emailTransient": "Report not sent by email — the mail service didn't respond. The next report will arrive on schedule.",
+  "report.err.emailInvalid": "Report not sent: the email looks invalid. Check the address under «Account».",
+  "report.err.genericEmail": "Report not sent by email. We're already looking into it.",
+  "report.err.genericTelegram": "Report not delivered to Telegram. We're already looking into it.",
+  "report.err.techDetails": "Technical details"
 }
