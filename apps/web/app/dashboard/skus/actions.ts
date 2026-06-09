@@ -46,3 +46,35 @@ export async function saveUserNotes(productId: string, notes: string): Promise<{
     return { ok: false, error: e?.message ?? "unknown error" };
   }
 }
+
+/**
+ * Стереть ВСЕ заметки селлера (правка 10, #1 — галочка «Стереть заметки»).
+ * Вызывается из SkusFilters при «Рассчитать» с включённой галочкой.
+ * Чистит только свои строки (seller_id) и только непустые — минимум работы БД.
+ * RLS на products — defense in depth поверх явного eq(seller_id).
+ */
+export async function clearAllUserNotes(): Promise<{ ok: boolean; cleared?: number; error?: string }> {
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { ok: false, error: "unauthorized" };
+    }
+
+    const { data, error } = await supabase
+      .from("products")
+      .update({ user_notes: null })
+      .eq("seller_id", user.id)
+      .not("user_notes", "is", null)
+      .select("product_id");
+
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+
+    revalidatePath("/dashboard/skus");
+    return { ok: true, cleared: data?.length ?? 0 };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "unknown error" };
+  }
+}
