@@ -28,6 +28,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="min-h-screen bg-bg">
+      <EmbedChrome />
       <FreshDataGuard />
       <AppHeader
         email={user.email || ""}
