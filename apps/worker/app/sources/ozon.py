@@ -93,6 +93,134 @@ def _ozon_commission_pct(item: dict) -> Optional[Decimal]:
     return None
 
 
+# attribute_id бренда в системе Ozon — стабильная константа «Бренд» across категорий.
+# Если для части товаров id окажется иным — бренд просто останется null (graceful).
+OZON_BRAND_ATTRIBUTE_ID = 85
+
+
+def _fetch_ozon_category_tree(cli: httpx.Client, client_id: str, api_key: str) -> tuple[dict[int, str], dict[int, str]]:
+    """Карты description_category_id→имя и type_id→имя из /v1/description-category/tree.
+
+    Нужны, чтобы превратить числовые id категории/типа товара (из attributes) в
+    человекочитаемую категорию для тега (#6). Best-effort: при ошибке — пустые карты,
+    категория останется null, синк не падает. Один запрос на синк.
+    """
+    cat_by_id: dict[int, str] = {}
+    type_by_id: dict[int, str] = {}
+    try:
+        def _call():
+            resp = cli.post(
+                f"{BASE}/v1/description-category/tree",
+                headers=_headers(client_id, api_key),
+                json={},
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+        data = with_retry(_call)
+
+        def _walk(nodes):
+            for n in (nodes or []):
+                cid = n.get("description_category_id")
+                cname = n.get("category_name")
+                if cid is not None and isinstance(cname, str) and cname.strip():
+                    try:
+                        cat_by_id[int(cid)] = cname.strip()
+                    except (TypeError, ValueError):
+                        pass
+                tid = n.get("type_id")
+                tname = n.get("type_name")
+                if tid is not None and isinstance(tname, str) and tname.strip():
+                    try:
+                        type_by_id[int(tid)] = tname.strip()
+                    except (TypeError, ValueError):
+                        pass
+                _walk(n.get("children"))
+
+        _walk(data.get("result"))
+        logger.info("ozon category tree: %d categories, %d types", len(cat_by_id), len(type_by_id))
+    except Exception as e:
+        logger.warning("ozon category tree fetch failed: %s", e)
+    return cat_by_id, type_by_id
+
+
+def _fetch_ozon_attributes(cli: httpx.Client, client_id: str, api_key: str, product_ids: list[str]) -> dict[str, dict]:
+    """Бренд + id категории/типа по product_id через /v4/product/info/attributes.
+
+    Returns: {product_id: {"brand": str|None, "dcid": int|None, "type_id": int|None}}.
+    Best-effort: ошибка батча логируется и пропускается (бренд/категория → null).
+    Батчим по 1000 + cursor-пагинация (last_id), как в остальных Ozon-вызовах.
+    """
+    out: dict[str, dict] = {}
+    for i in range(0, len(product_ids), 1000):
+        batch = product_ids[i:i + 1000]
+        last_id = ""
+        pages = 0
+        while pages < MAX_PAGES_PER_BATCH:
+            pages += 1
+
+            def _call(b=batch, lid=last_id):
+                resp = cli.post(
+                    f"{BASE}/v4/product/info/attributes",
+                    headers=_headers(client_id, api_key),
+                    json={"filter": {"product_id": b, "visibility": "ALL"}, "limit": 1000, "last_id": lid},
+                )
+                resp.raise_for_status()
+                return resp.json()
+
+            try:
+                data = with_retry(_call)
+            except Exception as e:
+                logger.warning("ozon attributes fetch failed for batch %d: %s", i, e)
+                break
+
+            items = data.get("result") or []
+            for it in items:
+                pid = str(it.get("id") or it.get("product_id") or "")
+                if not pid:
+                    continue
+                brand = None
+                for attr in (it.get("attributes") or []):
+                    if attr.get("id") == OZON_BRAND_ATTRIBUTE_ID:
+                        vals = attr.get("values") or []
+                        if vals:
+                            raw = vals[0].get("value")
+                            brand = raw.strip() if isinstance(raw, str) and raw.strip() else None
+                        break
+                out[pid] = {
+                    "brand": brand,
+                    "dcid": it.get("description_category_id"),
+                    "type_id": it.get("type_id"),
+                }
+            new_last = data.get("last_id") or ""
+            if not new_last or new_last == last_id or not items:
+                break
+            last_id = new_last
+    logger.info("ozon attributes fetched: %d / %d product_ids", len(out), len(product_ids))
+    return out
+
+
+def _resolve_ozon_tag(attrs_by_pid: dict[str, dict], cat_by_id: dict[int, str], type_by_id: dict[int, str], pid: str) -> tuple[Optional[str], Optional[str]]:
+    """(brand, category) для product_id: категория = type_name (точнее) или category_name."""
+    a = attrs_by_pid.get(pid) or {}
+    brand = a.get("brand")
+    category = None
+    tid = a.get("type_id")
+    if tid is not None:
+        try:
+            category = type_by_id.get(int(tid))
+        except (TypeError, ValueError):
+            category = None
+    if not category:
+        dcid = a.get("dcid")
+        if dcid is not None:
+            try:
+                category = cat_by_id.get(int(dcid))
+            except (TypeError, ValueError):
+                category = None
+    return brand, category
+
+
 def _fetch_product_names(cli: httpx.Client, client_id: str, api_key: str, offer_ids: list[str]) -> dict[str, str]:
     """Получить реальные названия товаров по offer_id через /v3/product/info/list.
 
