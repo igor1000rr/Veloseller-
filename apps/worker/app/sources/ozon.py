@@ -334,6 +334,15 @@ def _fetch_snapshots_fbo(client_id: str, api_key: str, page_size: int = 1000) ->
                     price_info = item.get("price") or {}
                     raw = price_info.get("marketing_price") or price_info.get("price") or price_info.get("min_price") or "0"
                     prices_by_pid[pid] = _decimal(raw)
+                    sp = price_info.get("price")
+                    if sp not in (None, "", 0, "0"):
+                        seller_price_by_pid[pid] = _decimal(sp)
+                    mp = price_info.get("marketing_price")
+                    if mp not in (None, "", 0, "0"):
+                        marketing_by_pid[pid] = _decimal(mp)
+                    comm = _ozon_commission_pct(item)
+                    if comm is not None:
+                        commission_by_pid[pid] = comm
                 new_cursor = data.get("cursor") or ""
                 if not new_cursor or new_cursor == cursor or not items:
                     break
@@ -504,6 +513,15 @@ def fetch_snapshots(
                     price_info = item.get("price") or {}
                     raw = price_info.get("marketing_price") or price_info.get("price") or price_info.get("min_price") or "0"
                     prices_by_pid[pid] = _decimal(raw)
+                    sp = price_info.get("price")
+                    if sp not in (None, "", 0, "0"):
+                        seller_price_by_pid[pid] = _decimal(sp)
+                    mp = price_info.get("marketing_price")
+                    if mp not in (None, "", 0, "0"):
+                        marketing_by_pid[pid] = _decimal(mp)
+                    comm = _ozon_commission_pct(item)
+                    if comm is not None:
+                        commission_by_pid[pid] = comm
                 new_cursor = data.get("cursor") or ""
                 if not new_cursor or new_cursor == cursor or not items:
                     break
