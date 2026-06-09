@@ -7,6 +7,7 @@
  */
 import { VelocitySparkline } from "./VelocitySparkline";
 import SkuLink from "./SkuLink";
+import Link from "next/link";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 import { NotesCell } from "./NotesCell";
 import { t } from "@/lib/i18n";
