@@ -154,7 +154,14 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
         <div className="font-display font-medium text-ink mb-2">{p.dateLabel}</div>
         <div className="space-y-1 font-mono text-xs">
           <Row label="TVelo" value={Number(p.velocity).toFixed(2)} color="#3f6212" />
-          <Row label={t("sku.chart.price")} value={Number(p.price).toFixed(2)} color="#7c3aed" />
+          {p.sellerPrice != null && p.marketingPrice != null && Math.abs(Number(p.sellerPrice) - Number(p.marketingPrice)) >= 0.01 ? (
+            <>
+              <Row label={L.sellerPrice} value={Number(p.sellerPrice).toFixed(2)} color="#d97706" />
+              <Row label={L.marketingPrice} value={Number(p.marketingPrice).toFixed(2)} color="#7c3aed" />
+            </>
+          ) : (
+            <Row label={t("sku.chart.price")} value={Number(p.price).toFixed(2)} color="#7c3aed" />
+          )}
           <Row label={t("sku.chart.stock")} value={String(p.stock)} />
           <Row label={t("sku.chart.availability")} value={p.availability ? t("sku.chart.inStock") : "OOS"} color={p.availability ? "#3f6212" : "#e11d48"} />
         </div>
