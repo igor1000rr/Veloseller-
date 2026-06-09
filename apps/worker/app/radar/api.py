@@ -93,7 +93,7 @@ async def extract_brands(
         sb.table("sellers")
         .select("radar_plan,radar_brands_limit,radar_active_until")
         .eq("id", seller_id)
-        .maybeSingle()
+        .maybe_single()
         .execute()
     )
     seller = seller_res.data
@@ -107,7 +107,7 @@ async def extract_brands(
     # 1. Идемпотентность
     upload_res = (
         sb.table("radar_price_uploads").select("*").eq("id", upload_id)
-        .eq("seller_id", seller_id).maybeSingle().execute()
+        .eq("seller_id", seller_id).maybe_single().execute()
     )
     upload = upload_res.data
     if not upload:
