@@ -624,3 +624,24 @@ export default async function SkusPage({ searchParams }: {
     </div>
   );
 }
+
+function TagFilterChip({ kind, value, removeHref }: {
+  kind: "brand" | "category";
+  value: string;
+  removeHref: string;
+}) {
+  const label = kind === "brand" ? (isEn ? "Brand" : "Бренд") : (isEn ? "Category" : "Категория");
+  return (
+    <span className="inline-flex items-center gap-2 rounded-lg border border-azure/40 bg-azure/5 pl-3 pr-1.5 py-1.5 text-sm">
+      <span className="font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">{label}</span>
+      <span className="font-medium text-ink break-all">{value}</span>
+      <Link
+        href={removeHref as any}
+        className="inline-flex items-center justify-center size-5 rounded text-ink-hush hover:text-ink hover:bg-bg-soft transition shrink-0"
+        aria-label={isEn ? "Clear" : "Сбросить"}
+      >
+        <span aria-hidden className="text-base leading-none">×</span>
+      </Link>
+    </span>
+  );
+}
