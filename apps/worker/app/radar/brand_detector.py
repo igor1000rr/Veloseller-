@@ -49,6 +49,21 @@ STOP_WORDS: frozenset[str] = frozenset({
     "software", "update", "upgrade", "firmware", "app",
     # Маркетплейс мусор (русские через фильтр кириллицы выпадут сами)
     "official", "оригинал", "товар", "артикул", "номер",
+    # --- расширение 09.06: латинский мусор электроники ---
+    # прилагательные / маркетинг
+    "professional", "classic", "compact", "smart", "wireless", "digital",
+    "portable", "universal", "multi", "auto", "mobile", "waterproof",
+    "rechargeable", "foldable", "adjustable", "combo", "eco", "value",
+    "gift", "best", "top",
+    # доп. цвета
+    "pink", "purple", "orange", "brown", "beige", "yellow", "navy", "rose",
+    "violet", "transparent",
+    # тех-аббревиатуры / интерфейсы
+    "usb", "hdmi", "lcd", "oled", "led", "wifi", "bluetooth", "rgb", "gps",
+    "nfc", "otg", "smd", "tft", "ips", "ssd", "hdd", "dc", "ac", "uv",
+    # материалы
+    "steel", "metal", "plastic", "silicone", "carbon", "glass", "wood",
+    "leather", "rubber", "alloy", "nylon",
 })
 
 # Регулярки
