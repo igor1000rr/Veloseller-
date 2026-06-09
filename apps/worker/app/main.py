@@ -328,7 +328,7 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
             batch_pids = pids[i:i + IN_BATCH]
             recent = fetch_all(
                 sb.table("inventory_snapshots")
-                .select("product_id,stock_quantity,price,snapshot_time")
+                .select("product_id,stock_quantity,price,marketing_price,snapshot_time")
                 .in_("product_id", batch_pids)
                 .gte("snapshot_time", cutoff)
                 .order("snapshot_time", desc=True)
