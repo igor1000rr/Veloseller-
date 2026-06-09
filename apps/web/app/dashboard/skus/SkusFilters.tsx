@@ -207,8 +207,9 @@ export function SkusFilters({
               Класс transition уже анимирует transform — кнопка плавно «вжимается». */}
           <button
             type="button"
-            onClick={recalculateNow}
-            className="px-4 py-1.5 rounded-lg bg-ink text-paper font-mono text-xs uppercase tracking-wider font-semibold hover:bg-ink-soft active:scale-95 active:bg-ink-soft transition min-h-[36px]"
+            onClick={onCalcClick}
+            disabled={clearing}
+            className="px-4 py-1.5 rounded-lg bg-ink text-paper font-mono text-xs uppercase tracking-wider font-semibold hover:bg-ink-soft active:scale-95 active:bg-ink-soft transition min-h-[36px] disabled:opacity-60"
           >
             {t("sku.filters.calc")}
           </button>
