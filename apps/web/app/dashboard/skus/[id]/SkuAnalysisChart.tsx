@@ -104,15 +104,21 @@ const TYPE_LABELS: Record<string, string> = {
 const STOCK_BAND = 0.28;
 
 export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]; changelogByDate?: ChangelogByDate }) {
-  // Rule 12.1 — детектим изменения цены и считаем %-дельту
+  const [period, setPeriod] = useState<ChartPeriod>("1d");
+  const { points, changelog: cl } = useMemo(
+    () => resampleChart(data, changelogByDate, period),
+    [data, changelogByDate, period],
+  );
+
+  // Rule 12.1 — детектим изменения цены и считаем %-дельту (по точкам выбранного периода)
   const priceChanges: { date: string; dateLabel: string; price: number; prev: number; pct: number }[] = [];
-  for (let i = 1; i < data.length; i++) {
-    if (data[i].price !== data[i - 1].price && data[i].price > 0 && data[i - 1].price > 0) {
-      const prev = data[i - 1].price;
-      const next = data[i].price;
+  for (let i = 1; i < points.length; i++) {
+    if (points[i].price !== points[i - 1].price && points[i].price > 0 && points[i - 1].price > 0) {
+      const prev = points[i - 1].price;
+      const next = points[i].price;
       priceChanges.push({
-        date: data[i].date,
-        dateLabel: new Date(data[i].date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }),
+        date: points[i].date,
+        dateLabel: chartLabel(points[i].date, period),
         price: next,
         prev,
         pct: ((next - prev) / prev) * 100,
@@ -120,9 +126,9 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
     }
   }
 
-  const formatted = data.map(d => ({
+  const formatted = points.map(d => ({
     ...d,
-    dateLabel: new Date(d.date).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }),
+    dateLabel: chartLabel(d.date, period),
   }));
 
   // Custom tooltip — под warm-paper палитру + changelog раскрытие
