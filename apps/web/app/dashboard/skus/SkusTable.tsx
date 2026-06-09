@@ -128,6 +128,24 @@ export function SkusTable({
                   {isUnderestimated && (
                     <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">{t("sku.list.underestimated")}</span>
                   )}
+                  {(p.brand || p.category) && (
+                    <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                      {p.brand && (
+                        <Link href={`/dashboard/skus?brand=${encodeURIComponent(p.brand)}` as any}
+                              className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider border border-line bg-bg-soft text-ink-soft hover:border-azure/50 hover:text-azure transition"
+                              title={p.brand}>
+                          {p.brand}
+                        </Link>
+                      )}
+                      {p.category && (
+                        <Link href={`/dashboard/skus?category=${encodeURIComponent(p.category)}` as any}
+                              className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wider border border-line bg-bg-soft text-ink-soft hover:border-lime-deep/50 hover:text-lime-deep transition"
+                              title={p.category}>
+                          {p.category}
+                        </Link>
+                      )}
+                    </div>
+                  )}
                 </td>
                 <td className="col-skucol-stock px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{currentStock ?? "—"}</td>
                 <td className="col-skucol-price px-3 sm:px-4 py-3 text-right tabular text-ink-soft">{currentPrice ?? "—"}</td>
