@@ -184,7 +184,7 @@ def poll_brand(
                 .eq("seller_id", seller_id)
                 .eq("brand_id", brand_id)
                 .eq("query_normalized", mq.phrase.lower().strip())
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             existing_row = existing.data
@@ -235,7 +235,7 @@ def poll_brand(
                 .eq("seller_id", seller_id)
                 .eq("brand_id", brand_id)
                 .eq("query_normalized", brand_name.lower().strip())
-                .maybe_single()
+                .limit(1)
                 .execute()
             )
             parent_id = parent.data["id"] if parent.data else None
