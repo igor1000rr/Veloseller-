@@ -119,12 +119,11 @@ export function SkusTable({
                 <td className="col-skucol-name px-3 sm:px-4 py-3">
                   {/* Александр 01.06.2026: название — ссылка для проваливания в SKU.
                       04.06.2026: артикул больше не ссылка, название — единственный вход в карточку. */}
-                  <Link
-                    href={`/dashboard/skus/${p.product_id}` as any}
+                  <SkuLink
+                    id={p.product_id}
+                    name={p.product_name}
                     className="text-lime-deep hover:text-ink transition"
-                  >
-                    {p.product_name}
-                  </Link>
+                  />
                   {isUnderestimated && (
                     <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">{t("sku.list.underestimated")}</span>
                   )}
