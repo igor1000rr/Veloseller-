@@ -257,9 +257,14 @@ export default async function SkusPage({ searchParams }: {
   }
 
   if (search) {
+    const escaped = search.replace(/[%_]/g, "\\  if (search) {
     const escaped = search.replace(/[%_]/g, "\\$&");
     productsQuery = productsQuery.or(`sku.ilike.%${escaped}%,product_name.ilike.%${escaped}%`);
+  }");
+    productsQuery = productsQuery.or(`sku.ilike.%${escaped}%,product_name.ilike.%${escaped}%`);
   }
+  if (brandFilter) productsQuery = productsQuery.eq("brand", brandFilter);
+  if (categoryFilter) productsQuery = productsQuery.eq("category", categoryFilter);
   if (stockMin !== null) productsQuery = productsQuery.gte("tvelo_metrics.current_stock", stockMin);
   if (stockMax !== null) productsQuery = productsQuery.lte("tvelo_metrics.current_stock", stockMax);
   if (oosMin !== null)   productsQuery = productsQuery.gte("tvelo_metrics.stockout_days", oosMin);
