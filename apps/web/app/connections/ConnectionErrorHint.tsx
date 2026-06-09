@@ -19,13 +19,17 @@ const ICON: Record<string, string> = {
 /**
  * Человеческая подсказка вместо сырого текста ошибки синка.
  * Сырой текст прячем под «Технические детали» — для отладки, но не в лицо клиенту.
+ * autoRetry: показать строку «повтор произойдёт сам» — только когда бэкенд реально
+ * пере-синкнет (временная ошибка и склад не на паузе).
  */
 export function ConnectionErrorHint({
   parsed,
   className = "mt-3",
+  autoRetry = false,
 }: {
   parsed: ParsedError | null;
   className?: string;
+  autoRetry?: boolean;
 }) {
   if (!parsed) return null;
   const transient = TRANSIENT.has(parsed.kind);
@@ -40,6 +44,12 @@ export function ConnectionErrorHint({
         <div className="flex-1 min-w-0">
           <div className={`text-sm font-semibold ${titleCls}`}>{parsed.title}</div>
           <p className="mt-1 text-sm text-ink-soft">{parsed.message}</p>
+          {autoRetry && (
+            <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-ink-muted">
+              <span aria-hidden>↻</span>
+              <span>Запрос на обновление уже в очереди — повтор произойдёт автоматически в течение нескольких минут, можно ничего не нажимать.</span>
+            </p>
+          )}
           {parsed.action && (
             <Link
               href={parsed.action.href as any}

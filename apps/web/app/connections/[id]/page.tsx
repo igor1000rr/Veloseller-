@@ -13,6 +13,8 @@ export const revalidate = 0;
 // БАГ 73: фильтруем sensitive поля из config перед отдачей в HTML
 const SENSITIVE_CONFIG_KEYS = new Set(["api_key", "token", "client_id", "password", "secret"]);
 
+const TRANSIENT_KINDS = ["rate_limit", "marketplace_down", "network"];
+
 function safeConfig(config: Record<string, any> | null): Record<string, string> {
   if (!config) return {};
   const out: Record<string, string> = {};
@@ -53,6 +55,7 @@ export default async function ConnectionDetailPage({
 
   // Сырой last_error превращаем в человеческую подсказку (как на списке складов)
   const parsed = conn.last_error ? parseApiError(conn.last_error) : null;
+  const autoRetry = !!parsed && TRANSIENT_KINDS.includes(parsed.kind) && conn.status !== "paused";
 
   // Количество snapshots от этой connection (история синков)
   const { count: snapshotsCount } = await supabase
@@ -118,7 +121,7 @@ export default async function ConnectionDetailPage({
       </div>
 
       {/* Подсказка по последней ошибке синка */}
-      {parsed && <ConnectionErrorHint parsed={parsed} className="mb-6" />}
+      {parsed && <ConnectionErrorHint parsed={parsed} className="mb-6" autoRetry={autoRetry} />}
 
       {/* Config (с замаскированными sensitive значениями) */}
       <div className="mb-6 rounded-2xl border border-line bg-paper p-5 md:p-6">

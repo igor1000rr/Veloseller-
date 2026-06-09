@@ -4,6 +4,8 @@
   каждый час и генерировал ~90% REST-вызовов к Supabase впустую — данные
   меняются раз в сутки, recalc после ручных синков вызывается отдельно из main)
 - sync активных marketplace-connections РАЗ В СУТКИ в 02:00 UTC
+- retry-transient-errors каждые 5 минут (авто-повтор синка при временных
+  ошибках: лимит WB, 5xx, сеть — жёсткие ошибки токен/прав НЕ ретрайм)
 - expire-subscriptions в 03:00 UTC (откатываем в trial истёкшие платные подписки)
 - daily-reports в 09:00 UTC (этап 2 алерты→отчёты — диспетчер по day_of_week)
 - monthly-reports 1-го числа в 09:30 UTC (управленческий PDF за прошлый месяц)
@@ -49,6 +51,14 @@ _EVENTS_RETENTION_DAYS = 100
 # Лимит складов для trial-плана (при откате из истёкшей подписки)
 _TRIAL_WAREHOUSES_LIMIT = 15
 
+# Авто-повтор временных ошибок синка. Окно по возрасту last_sync_at:
+# - не раньше 2 мин после последней попытки (даём лимиту WB остыть и не
+#   гонимся за только что упавшим ручным синком);
+# - не позже 6 часов (если «временная» ошибка висит полдня — это уже не
+#   временная, ждём ночной крон / ручное вмешательство).
+_TRANSIENT_RETRY_MIN_AGE_MINUTES = 2
+_TRANSIENT_RETRY_MAX_AGE_HOURS = 6
+
 
 def _job_recalc_all() -> None:
     try:
@@ -58,8 +68,73 @@ def _job_recalc_all() -> None:
         logger.exception("Cron recalc-all failed: %s", e)
 
 
-def _job_sync_active_connections() -> None:
+def _run_connection_sync(sb, conn) -> None:
+    """Один проход синка для connection: fetch → persist → пометить active.
+
+    Бросает исключение при ошибке (вызывающий помечает status=error). Общий
+    для ночного sync-active и для retry-transient-errors — чтобы логика
+    ветвления по источнику/складу жила в одном месте.
+    """
     from app.crypto import decrypt_if_encrypted
+    cfg = conn.get("config") or {}
+    if conn["source"] == "google_sheet":
+        snaps = google_sheet.fetch_snapshots(
+            cfg.get("sheet_url") or cfg.get("sheet_id"),
+            cfg.get("worksheet_index", 0),
+        )
+    elif conn.get("marketplace") == "ozon":
+        client_id = decrypt_if_encrypted(cfg.get("client_id"))
+        api_key = decrypt_if_encrypted(cfg.get("api_key"))
+        # 04.06.2026: крон звал fetch_snapshots БЕЗ kind — оба ozon-склада
+        # каждую ночь перезаписывались СУММОЙ всех типов остатков
+        # (вторая причина «FBO и FBS одинаковые»). Маппинг дублирует
+        # main._ozon_kind_from_warehouse — импорт из main дал бы цикл.
+        warehouse_kind = conn.get("warehouse_kind")
+        if warehouse_kind == "ozon_fbo":
+            kind = "fbo"
+        elif warehouse_kind == "ozon_fbs":
+            kind = "fbs"
+        else:
+            kind = None
+        snaps = ozon.fetch_snapshots(client_id, api_key, kind=kind)
+    elif conn.get("marketplace") == "wildberries":
+        token = decrypt_if_encrypted(cfg.get("token") or cfg.get("api_key"))
+        # 04.06.2026: тот же класс бага — крон игнорировал wb_fbs и писал
+        # в fbs-склад FBO-остатки. Ветвление как в main._run_wb_sync_bg.
+        if conn.get("warehouse_kind") == "wb_fbs":
+            snaps = wildberries.fetch_fbs_snapshots(token)
+        else:
+            snaps = wildberries.fetch_snapshots(token)
+    elif conn.get("marketplace") == "shopify":
+        # .com: Shopify Admin GraphQL. Токен шифруется как ozon/wb,
+        # shop — плейнтекст. Ветвление как в main._run_shopify_sync_bg.
+        shop = cfg.get("shop") or cfg.get("shop_domain")
+        access_token = decrypt_if_encrypted(cfg.get("access_token"))
+        snaps = shopify.fetch_snapshots(shop, access_token)
+    else:
+        # Неизвестный источник — ничего не делаем (как старый continue).
+        return
+    _persist_via_main(conn["seller_id"], conn["id"], conn["source"], snaps)
+    sb.table("data_connections").update({
+        "last_sync_at": datetime.now(timezone.utc).isoformat(),
+        "status": "active",
+        "last_error": None,
+        "failure_count": 0,
+    }).eq("id", conn["id"]).execute()
+
+
+def _mark_connection_error(sb, conn, err) -> None:
+    try:
+        sb.table("data_connections").update({
+            "last_sync_at": datetime.now(timezone.utc).isoformat(),
+            "status": "error",
+            "last_error": str(err)[:500],
+        }).eq("id", conn["id"]).execute()
+    except Exception:
+        logger.exception("Failed to mark connection error", extra={"connection_id": conn["id"]})
+
+
+def _job_sync_active_connections() -> None:
     try:
         sb = get_supabase()
         conns = fetch_all(
@@ -70,62 +145,71 @@ def _job_sync_active_connections() -> None:
         )
         logger.info("scheduler sync: %d active connections", len(conns))
         for conn in conns:
-            cfg = conn.get("config") or {}
             try:
-                if conn["source"] == "google_sheet":
-                    snaps = google_sheet.fetch_snapshots(
-                        cfg.get("sheet_url") or cfg.get("sheet_id"),
-                        cfg.get("worksheet_index", 0),
-                    )
-                elif conn.get("marketplace") == "ozon":
-                    client_id = decrypt_if_encrypted(cfg.get("client_id"))
-                    api_key = decrypt_if_encrypted(cfg.get("api_key"))
-                    # 04.06.2026: крон звал fetch_snapshots БЕЗ kind — оба ozon-склада
-                    # каждую ночь перезаписывались СУММОЙ всех типов остатков
-                    # (вторая причина «FBO и FBS одинаковые»). Маппинг дублирует
-                    # main._ozon_kind_from_warehouse — импорт из main дал бы цикл.
-                    warehouse_kind = conn.get("warehouse_kind")
-                    if warehouse_kind == "ozon_fbo":
-                        kind = "fbo"
-                    elif warehouse_kind == "ozon_fbs":
-                        kind = "fbs"
-                    else:
-                        kind = None
-                    snaps = ozon.fetch_snapshots(client_id, api_key, kind=kind)
-                elif conn.get("marketplace") == "wildberries":
-                    token = decrypt_if_encrypted(cfg.get("token") or cfg.get("api_key"))
-                    # 04.06.2026: тот же класс бага — крон игнорировал wb_fbs и писал
-                    # в fbs-склад FBO-остатки. Ветвление как в main._run_wb_sync_bg.
-                    if conn.get("warehouse_kind") == "wb_fbs":
-                        snaps = wildberries.fetch_fbs_snapshots(token)
-                    else:
-                        snaps = wildberries.fetch_snapshots(token)
-                elif conn.get("marketplace") == "shopify":
-                    # .com: Shopify Admin GraphQL. Токен шифруется как ozon/wb,
-                    # shop — плейнтекст. Ветвление как в main._run_shopify_sync_bg.
-                    shop = cfg.get("shop") or cfg.get("shop_domain")
-                    access_token = decrypt_if_encrypted(cfg.get("access_token"))
-                    snaps = shopify.fetch_snapshots(shop, access_token)
-                else:
-                    continue
-                _persist_via_main(conn["seller_id"], conn["id"], conn["source"], snaps)
-                sb.table("data_connections").update({
-                    "last_sync_at": datetime.now(timezone.utc).isoformat(),
-                    "status": "active",
-                    "last_error": None,
-                }).eq("id", conn["id"]).execute()
+                _run_connection_sync(sb, conn)
             except Exception as e:
                 logger.exception("Sync failed for connection %s: %s", conn["id"], e)
-                try:
-                    sb.table("data_connections").update({
-                        "last_sync_at": datetime.now(timezone.utc).isoformat(),
-                        "status": "error",
-                        "last_error": str(e)[:500],
-                    }).eq("id", conn["id"]).execute()
-                except Exception:
-                    logger.exception("Failed to mark connection error", extra={"connection_id": conn["id"]})
+                _mark_connection_error(sb, conn, e)
     except Exception as e:
         logger.exception("Cron sync_active_connections failed: %s", e)
+
+
+def _is_transient_sync_error(msg) -> bool:
+    """Временная ли ошибка синка (имеет смысл авто-повтор).
+
+    rate-limit (429, WB Statistics API 1 req/60s), 5xx маркетплейса, сеть/timeout.
+    Жёсткие (401/403 токен/права, валидация) сюда НЕ попадают — повтор с теми
+    же кривыми ключами бесполезен.
+    """
+    if not msg:
+        return False
+    m = str(msg).lower()
+    markers = (
+        "429", "too many requests", "rate limit",
+        "502", "503", "504", "bad gateway", "service unavailable",
+        "timeout", "timed out", "econnrefused", "temporarily",
+    )
+    return any(marker in m for marker in markers)
+
+
+def _job_retry_transient_errors() -> None:
+    """Каждые 5 минут — авто-повтор складов в status='error' с ВРЕМЕННОЙ ошибкой.
+
+    Цель: юзеру не нужно жать «Синхронизировать» вручную после лимита WB —
+    обновление подхватится само. Ночной sync-active берёт только active и
+    склады в ошибке пропускает, поэтому без этой джобы временная ошибка
+    висела бы до ручного успешного синка.
+
+    paused-склады (3 неудачи подряд) СЮДА НЕ попадают — только status='error'.
+    Окно по возрасту (2 мин..6 ч) ограничивает частоту и не даёт долбиться
+    в персистентную проблему бесконечно.
+    """
+    try:
+        sb = get_supabase()
+        now = datetime.now(timezone.utc)
+        min_age = (now - timedelta(minutes=_TRANSIENT_RETRY_MIN_AGE_MINUTES)).isoformat()
+        max_age = (now - timedelta(hours=_TRANSIENT_RETRY_MAX_AGE_HOURS)).isoformat()
+        conns = fetch_all(
+            sb.table("data_connections")
+            .select("*")
+            .eq("status", "error")
+            .in_("source", ["google_sheet", "marketplace_api"])
+            .lt("last_sync_at", min_age)
+            .gt("last_sync_at", max_age)
+        )
+        retryable = [c for c in conns if _is_transient_sync_error(c.get("last_error"))]
+        if not retryable:
+            return
+        logger.info("transient-retry: %d connections", len(retryable))
+        for conn in retryable:
+            try:
+                _run_connection_sync(sb, conn)
+                logger.info("transient-retry ok", extra={"connection_id": conn["id"]})
+            except Exception as e:
+                logger.warning("transient-retry still failing %s: %s", conn["id"], e)
+                _mark_connection_error(sb, conn, e)
+    except Exception:
+        logger.exception("retry transient errors job failed")
 
 
 def _job_expire_subscriptions() -> None:
@@ -356,6 +440,13 @@ def start_scheduler() -> None:
         _job_sync_active_connections,
         CronTrigger(hour=2, minute=0),
         id="sync-active-connections",
+        replace_existing=True,
+    )
+    # Авто-повтор временных ошибок (лимит WB / 5xx / сеть) каждые 5 минут.
+    _scheduler.add_job(
+        _job_retry_transient_errors,
+        CronTrigger(minute="*/5"),
+        id="retry-transient-errors",
         replace_existing=True,
     )
     _scheduler.add_job(

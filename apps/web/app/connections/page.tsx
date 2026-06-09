@@ -12,6 +12,8 @@ export const revalidate = 0;
 
 const LIST_COLUMNS = "id,name,warehouse_kind,source,marketplace,status,last_sync_at,last_error,failure_count,created_at";
 
+const TRANSIENT_KINDS = ["rate_limit", "marketplace_down", "network"];
+
 export default async function ConnectionsPage() {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -78,6 +80,7 @@ export default async function ConnectionsPage() {
           connections.map((c: any) => {
             const isPaused = c.status === "paused";
             const parsed = c.last_error ? parseApiError(c.last_error) : null;
+            const autoRetry = !!parsed && TRANSIENT_KINDS.includes(parsed.kind) && c.status !== "paused";
             return (
               <div key={c.id} className={`rounded-2xl border p-5 md:p-6 hover:shadow-sm transition ${
                 isPaused ? "border-orange/40 bg-orange/[0.02]" : "border-line bg-paper"
@@ -127,7 +130,7 @@ export default async function ConnectionsPage() {
                     <DeleteButton connectionId={c.id} connectionName={c.name} variant="compact" />
                   </div>
                 </div>
-                {parsed && <ConnectionErrorHint parsed={parsed} />}
+                {parsed && <ConnectionErrorHint parsed={parsed} autoRetry={autoRetry} />}
               </div>
             );
           })
