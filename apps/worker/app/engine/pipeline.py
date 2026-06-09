@@ -118,7 +118,7 @@ def compute_metrics_for_sku(
         sales_like_days=sales_like_days,
     )
     cov_days = cov_mod.coverage_days(current_stock, adj_vel)
-    health = health_mod.sku_health_score(stockout_days, period_days, cov_days, confidence.final)
+    health = health_mod.sku_health_score(stockout_days, effective_period_days, cov_days, confidence.final)
     segment = health_mod.inventory_segment(cov_days)
 
     return TVeloMetric(
