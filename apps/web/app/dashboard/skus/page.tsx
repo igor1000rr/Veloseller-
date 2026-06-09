@@ -265,6 +265,7 @@ export default async function SkusPage({ searchParams }: {
   }
   if (brandFilter) productsQuery = productsQuery.eq("brand", brandFilter);
   if (categoryFilter) productsQuery = productsQuery.eq("category", categoryFilter);
+  if (tagFilter) productsQuery = productsQuery.contains("tags", [tagFilter]);
   if (stockMin !== null) productsQuery = productsQuery.gte("tvelo_metrics.current_stock", stockMin);
   if (stockMax !== null) productsQuery = productsQuery.lte("tvelo_metrics.current_stock", stockMax);
   if (oosMin !== null)   productsQuery = productsQuery.gte("tvelo_metrics.stockout_days", oosMin);
