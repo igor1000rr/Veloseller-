@@ -21,7 +21,7 @@ export default async function LandingStats() {
     <section className="relative w-full px-4 md:px-8 lg:px-12 py-6 md:py-8 border-t border-line bg-paper">
       <div className="max-w-[1600px] mx-auto">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6">
-          {liveStats.map((s) => (
+          {items.map((s) => (
             <div key={s.label} className="text-center md:text-left">
               <div className="font-display text-3xl sm:text-4xl md:text-5xl tracking-tight font-medium text-ink tabular">
                 {s.value}
