@@ -386,8 +386,8 @@ class WordstatService:
     def _cache_get(self, cache_key: str) -> Optional[WordstatResult]:
         try:
             sb = get_supabase()
-            res = sb.table("radar_cache").select("*").eq("cache_key", cache_key).maybe_single().execute()
-            row = res.data
+            res = sb.table("radar_cache").select("*").eq("cache_key", cache_key).limit(1).execute()
+            row = res.data[0] if res.data else None
             if not row:
                 return None
             expires_at = row.get("expires_at")
