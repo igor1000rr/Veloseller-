@@ -417,6 +417,33 @@ def _job_reset_stuck_syncing() -> None:
         logger.exception("reset stuck syncing job failed")
 
 
+_DAILY_REPORTS_HOUR_UTC = 9
+
+
+def _job_catchup_missed_reports() -> None:
+    """Догон пропущенных дневных отчётов после рестарта воркера.
+
+    Крон daily-reports (09:00 UTC) НЕ навёрстывается APScheduler'ом, если воркер
+    был в дауне в этот момент (deploy/restart) — пропущенный запуск не
+    coalesce-ится в прошлое. Поэтому одноразово при старте: если уже позже
+    09:00 UTC, повторно зовём dispatch_daily_reports(). Он идемпотентен
+    (_already_sent_today по seller+channel+sent_date): если 09:00 уже отработал —
+    no-op; если был пропущен — отчёты уйдут сейчас.
+
+    До 09:00 UTC ничего не делаем — штатный крон отправит в 09:00.
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        if now.hour < _DAILY_REPORTS_HOUR_UTC:
+            logger.info("catchup-reports: до %d:00 UTC, пропуск", _DAILY_REPORTS_HOUR_UTC)
+            return
+        from app.jobs.reports import dispatch_daily_reports
+        logger.info("catchup-reports: запуск dispatch (идемпотентный)")
+        dispatch_daily_reports()
+    except Exception:
+        logger.exception("catchup-missed-reports job failed")
+
+
 def _persist_via_main(seller_id, connection_id, source_str, snapshots):
     """Импорт из main отложенный во избежание циклов."""
     from app.main import _persist_snapshots
