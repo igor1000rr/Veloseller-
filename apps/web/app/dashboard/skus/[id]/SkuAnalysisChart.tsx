@@ -264,6 +264,7 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
         ))}
       </ComposedChart>
     </ResponsiveContainer>
+    </div>
   );
 }
 
