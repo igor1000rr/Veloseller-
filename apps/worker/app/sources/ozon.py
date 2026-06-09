@@ -669,11 +669,16 @@ def fetch_snapshots(
         unique_offer_ids = sorted({s["offer_id"] for s in stocks_by_pid.values() if s.get("offer_id")})
         names_by_offer = _fetch_product_names(cli, client_id, api_key, unique_offer_ids)
 
+        # Бренд + категория (#6): best-effort, при ошибке → null, синк не падает.
+        attrs_by_pid = _fetch_ozon_attributes(cli, client_id, api_key, product_ids)
+        cat_by_id, type_by_id = _fetch_ozon_category_tree(cli, client_id, api_key)
+
         # 5. Собираем SnapshotInput
         out: list[SnapshotInput] = []
         for pid, s in stocks_by_pid.items():
             offer_id = s["offer_id"]
             real_name = names_by_offer.get(offer_id)
+            brand, category = _resolve_ozon_tag(attrs_by_pid, cat_by_id, type_by_id, pid)
             out.append(SnapshotInput(
                 sku=offer_id,
                 product_name=real_name or None,
@@ -682,6 +687,8 @@ def fetch_snapshots(
                 seller_price=seller_price_by_pid.get(pid),
                 marketing_price=marketing_by_pid.get(pid),
                 commission_pct=commission_by_pid.get(pid),
+                brand=brand,
+                category=category,
                 snapshot_time=now,
             ))
 
