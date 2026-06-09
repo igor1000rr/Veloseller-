@@ -473,7 +473,7 @@ def _fetch_snapshots_fbo(client_id: str, api_key: str, page_size: int = 1000) ->
                     mp = price_info.get("marketing_price")
                     if mp not in (None, "", 0, "0"):
                         marketing_by_pid[pid] = _decimal(mp)
-                    comm = _ozon_commission_pct(item)
+                    comm = _ozon_commission_pct(item, kind)
                     if comm is not None:
                         commission_by_pid[pid] = comm
                 new_cursor = data.get("cursor") or ""
@@ -662,7 +662,7 @@ def fetch_snapshots(
                     mp = price_info.get("marketing_price")
                     if mp not in (None, "", 0, "0"):
                         marketing_by_pid[pid] = _decimal(mp)
-                    comm = _ozon_commission_pct(item)
+                    comm = _ozon_commission_pct(item, kind)
                     if comm is not None:
                         commission_by_pid[pid] = comm
                 new_cursor = data.get("cursor") or ""
