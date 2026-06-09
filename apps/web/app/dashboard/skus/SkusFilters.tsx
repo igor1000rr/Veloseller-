@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 import { t } from "@/lib/i18n";
+import { isEn } from "@/lib/features";
+import { clearAllUserNotes } from "./actions";
 
 export type FilterRanges = {
   stockMin: number;
