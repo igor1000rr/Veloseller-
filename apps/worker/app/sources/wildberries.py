@@ -279,6 +279,9 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
 
         # 2. Цены через Statistics API (FBO+FBS имеют единую цену на маркетплейсе)
         prices_by_vendor: dict[str, Decimal] = {}
+        discount_by_vendor: dict[str, Decimal] = {}
+        brand_by_vendor: dict[str, str] = {}
+        subject_by_vendor: dict[str, str] = {}
         try:
             def _stocks_call():
                 resp = cli.get(STOCKS_URL, params={"dateFrom": date_from},
@@ -288,9 +291,20 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
             rows = with_retry(_stocks_call, base_delay=60.0, max_delay=300.0)
             for r in rows:
                 vendor = (r.get("supplierArticle") or "").strip()
+                if not vendor:
+                    continue
                 price = r.get("Price") or 0
-                if vendor and price and vendor not in prices_by_vendor:
+                if price and vendor not in prices_by_vendor:
                     prices_by_vendor[vendor] = Decimal(str(price))
+                    disc = r.get("Discount") or 0
+                    try:
+                        discount_by_vendor[vendor] = Decimal(str(disc))
+                    except Exception:
+                        discount_by_vendor[vendor] = Decimal("0")
+                if vendor not in brand_by_vendor and r.get("brand"):
+                    brand_by_vendor[vendor] = r.get("brand")
+                if vendor not in subject_by_vendor and r.get("subject"):
+                    subject_by_vendor[vendor] = r.get("subject")
         except Exception as e:
             # Не критично — без цен snapshots сохранятся, только без потерянной выручки в расчёте
             logger.warning("WB FBS: Statistics API for prices failed: %s", e)
