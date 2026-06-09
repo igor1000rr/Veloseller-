@@ -5,6 +5,7 @@ import { landingMetadata, landingJsonLd } from "./_landing/seo";
 import LandingHeader from "./_landing/Header";
 import LandingHero from "./_landing/Hero";
 import LandingShowcase from "./_landing/Showcase";
+import LandingStats from "./_landing/Stats";
 import LandingFeatures from "./_landing/Features";
 import LandingSegments from "./_landing/Segments";
 import LandingStory from "./_landing/Story";
@@ -15,9 +16,9 @@ import LandingFooter from "./_landing/Footer";
 // запрос гарантирует, что зашедший в свой аккаунт юзер увидит "В кабинет"
 // вместо "Войти", и наоборот.
 //
-// Разметка и контент разнесены по app/_landing/* (Header/Hero/Showcase/Features/
-// Segments/Story/Bottom/Footer + data/seo/ui): монолит 42КБ не пролезал в MCP-пуш,
-// плюс секции теперь правятся независимо. Строки — словарь landing (ru 1:1 / en).
+// Разметка и контент разнесены по app/_landing/* (Header/Hero/Showcase/Stats/
+// Features/Segments/Story/Bottom/Footer + data/seo/ui): монолит 42КБ не пролезал
+// в MCP-пуш, плюс секции теперь правятся независимо. Строки — словарь landing.
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -50,6 +51,7 @@ export default async function LandingPage() {
       <LandingHeader isAuthed={isAuthed} />
       <LandingHero isAuthed={isAuthed} />
       <LandingShowcase />
+      <LandingStats />
       <LandingFeatures />
       <LandingSegments />
       <LandingStory />
