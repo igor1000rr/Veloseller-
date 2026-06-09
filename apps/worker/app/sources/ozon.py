@@ -359,6 +359,9 @@ def _fetch_snapshots_fbo(client_id: str, api_key: str, page_size: int = 1000) ->
                 product_name=info.get("name"),
                 stock_quantity=qty_by_sku.get(sku_num, 0) if sku_num else 0,
                 price=prices_by_pid.get(pid, Decimal("0")),
+                seller_price=seller_price_by_pid.get(pid),
+                marketing_price=marketing_by_pid.get(pid),
+                commission_pct=commission_by_pid.get(pid),
                 snapshot_time=now,
             ))
 
