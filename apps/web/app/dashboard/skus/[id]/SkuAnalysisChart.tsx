@@ -66,6 +66,8 @@ function resampleChart(
       price: last.price,
       availability: availMean >= 0.5 ? 1 : 0,
       velocity: velAvg,
+      sellerPrice: last.sellerPrice ?? null,
+      marketingPrice: last.marketingPrice ?? null,
     });
     if (changelog) {
       const evs: ChangelogByDate[string] = [];
