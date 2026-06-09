@@ -502,13 +502,16 @@ export default async function SkusPage({ searchParams }: {
         />
       )}
 
-      {(brandFilter || categoryFilter) && (
+      {(brandFilter || categoryFilter || tagFilter) && (
         <div className="flex items-center gap-2 flex-wrap">
           {brandFilter && (
             <TagFilterChip kind="brand" value={brandFilter} removeHref={`/dashboard/skus?${buildQs({ brand: null, page: null })}`} />
           )}
           {categoryFilter && (
             <TagFilterChip kind="category" value={categoryFilter} removeHref={`/dashboard/skus?${buildQs({ category: null, page: null })}`} />
+          )}
+          {tagFilter && (
+            <TagFilterChip kind="tag" value={tagFilter} removeHref={`/dashboard/skus?${buildQs({ tag: null, page: null })}`} />
           )}
         </div>
       )}
