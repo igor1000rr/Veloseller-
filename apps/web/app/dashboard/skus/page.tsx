@@ -631,15 +631,19 @@ export default async function SkusPage({ searchParams }: {
 }
 
 function TagFilterChip({ kind, value, removeHref }: {
-  kind: "brand" | "category";
+  kind: "brand" | "category" | "tag";
   value: string;
   removeHref: string;
 }) {
-  const label = kind === "brand" ? (isEn ? "Brand" : "Бренд") : (isEn ? "Category" : "Категория");
+  const label =
+    kind === "brand" ? (isEn ? "Brand" : "Бренд") :
+    kind === "category" ? (isEn ? "Category" : "Категория") :
+    (isEn ? "Tag" : "Тег");
+  const isTag = kind === "tag";
   return (
-    <span className="inline-flex items-center gap-2 rounded-lg border border-azure/40 bg-azure/5 pl-3 pr-1.5 py-1.5 text-sm">
-      <span className="font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">{label}</span>
-      <span className="font-medium text-ink break-all">{value}</span>
+    <span className={`inline-flex items-center gap-2 rounded-lg border pl-3 pr-1.5 py-1.5 text-sm ${isTag ? "border-violet-300 bg-violet-50" : "border-azure/40 bg-azure/5"}`}>
+      <span className={`font-mono text-[10px] uppercase tracking-widest font-semibold ${isTag ? "text-violet-700" : "text-azure"}`}>{label}</span>
+      <span className="font-medium text-ink break-all">{isTag ? `#${value}` : value}</span>
       <Link
         href={removeHref as any}
         className="inline-flex items-center justify-center size-5 rounded text-ink-hush hover:text-ink hover:bg-bg-soft transition shrink-0"
