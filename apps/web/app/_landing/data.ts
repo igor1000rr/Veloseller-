@@ -131,3 +131,96 @@ export const landingPlans: LandingPlan[] = [
         ],
       }]),
 ];
+
+/**
+ * Блок «этапы роста» (правка 10, #9): для кого Veloseller на разных стадиях.
+ * РФ-текст от Александра/Игоря; en — адаптация под .com (Shopify/Sheets).
+ * idx используется и как порядковый бейдж, и как ключ иконки в Segments.tsx.
+ */
+export const segmentsHead = isEn
+  ? {
+      eyebrow: "Growth stages",
+      h2: "Veloseller fits every stage of your growth",
+      sub: "Different jobs for different maturity — from your first reorder to multi-store control.",
+    }
+  : {
+      eyebrow: "Этапы роста",
+      h2: "Veloseller решает разные задачи на разных этапах роста",
+      sub: "От первой закупки до контроля нескольких складов — пользу видно на каждой стадии.",
+    };
+
+export const segments = isEn
+  ? [
+      {
+        idx: "01",
+        title: "New sellers",
+        accent: "lime" as const,
+        items: [
+          "Shows which products are running out",
+          "Calculates the recommended reorder",
+          "Shows how many days your stock will last",
+          "Helps you avoid frozen dead stock",
+        ],
+      },
+      {
+        idx: "02",
+        title: "Experienced sellers",
+        accent: "azure" as const,
+        items: [
+          "True sales velocity, excluding out-of-stock days",
+          "Shows lost revenue",
+          "Surfaces frozen dead stock",
+          "Controls coverage across the whole warehouse",
+          "Helps make more precise purchasing decisions",
+        ],
+      },
+      {
+        idx: "03",
+        title: "Agencies",
+        accent: "emerald" as const,
+        items: [
+          "Multiple warehouses and stores in one dashboard",
+          "Weekly client reports",
+          "Fast detection of problem SKUs",
+          "Finds revenue growth opportunities",
+          "Data-driven purchasing recommendations",
+        ],
+      },
+    ]
+  : [
+      {
+        idx: "01",
+        title: "Новым селлерам",
+        accent: "lime" as const,
+        items: [
+          "Показывает, какие товары заканчиваются",
+          "Рассчитывает рекомендуемую закупку",
+          "Показывает, на сколько дней хватит остатков",
+          "Помогает избежать замороженных остатков",
+        ],
+      },
+      {
+        idx: "02",
+        title: "Опытным селлерам",
+        accent: "azure" as const,
+        items: [
+          "Реальная скорость продаж с учётом дней без наличия",
+          "Показывает потерянную выручку",
+          "Выявляет замороженные остатки",
+          "Контролирует покрытие по всему складу",
+          "Помогает принимать более точные решения по закупкам",
+        ],
+      },
+      {
+        idx: "03",
+        title: "Агентствам",
+        accent: "emerald" as const,
+        items: [
+          "Контроль нескольких складов и магазинов в одном интерфейсе",
+          "Еженедельные отчёты для клиентов",
+          "Быстрое выявление проблемных SKU",
+          "Поиск точек роста выручки",
+          "Подготовка рекомендаций по закупкам на основе данных",
+        ],
+      },
+    ];
