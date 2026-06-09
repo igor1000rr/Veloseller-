@@ -159,6 +159,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         <div className="mt-1 font-mono text-xs text-ink-hush uppercase tracking-wider">
           SKU: <span className="text-ink-soft normal-case">{product.sku}</span>
         </div>
+        <TagsEditor productId={product.product_id} initial={product.tags ?? null} />
       </header>
 
       {/* Верхний блок KPI — переработан 01.06.2026 по ТЗ Александра.
