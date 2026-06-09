@@ -93,7 +93,7 @@ export default async function ConnectionDetailPage({
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Source detail</span>
           </div>
           <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium flex items-center gap-3 flex-wrap">
-            {conn.name}
+            <RenameConnection connectionId={conn.id} currentName={conn.name} />
             <StatusBadgeFull status={conn.status} errorKind={parsed?.kind ?? null} />
           </h1>
           <p className="mt-1.5 font-mono text-xs text-ink-hush uppercase tracking-wider">
