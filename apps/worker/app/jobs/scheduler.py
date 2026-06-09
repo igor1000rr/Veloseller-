@@ -536,6 +536,15 @@ def start_scheduler() -> None:
         id="reset-stuck-syncing",
         replace_existing=True,
     )
+    # Догон пропущенных отчётов: одноразовый запуск через 45с после старта.
+    # Покрывает случай, когда воркер был в дауне в 09:00 UTC (deploy) и крон
+    # daily-reports пропустил запуск. dispatch идемпотентен — двойной отправки нет.
+    _scheduler.add_job(
+        _job_catchup_missed_reports,
+        DateTrigger(run_date=datetime.now(timezone.utc) + timedelta(seconds=45)),
+        id="catchup-missed-reports",
+        replace_existing=True,
+    )
     _scheduler.start()
 
 
