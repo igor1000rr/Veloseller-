@@ -442,6 +442,8 @@ export default async function SkusPage({ searchParams }: {
     if (coverageMax !== null) current.coverage_max = String(coverageMax);
     if (dateFrom) current.date_from = dateFrom;
     if (dateTo) current.date_to = dateTo;
+    if (brandFilter) current.brand = brandFilter;
+    if (categoryFilter) current.category = categoryFilter;
 
     for (const [k, v] of Object.entries(overrides)) {
       if (v === null) {
