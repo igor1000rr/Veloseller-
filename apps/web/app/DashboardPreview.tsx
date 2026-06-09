@@ -1,10 +1,50 @@
 "use client";
 
-import { LineChart, Line, ResponsiveContainer, BarChart, Bar, Cell } from "recharts";
-import { t } from "@/lib/i18n";
+import {
+  LineChart, Line, ResponsiveContainer,
+  PieChart, Pie, Cell,
+} from "recharts";
 import { LOCALE } from "@/lib/features";
 
+// Правка 10 (#7): превью дашборда на лендинге приведено в соответствие с реальным
+// кабинетом (Александр: «на лендинге выглядело иначе, чем в ЛК»). Раскладка и блоки
+// повторяют dashboard/page.tsx: карточки-экшены, гейдж здоровья, стоимость+заморозка,
+// 4 KPI, скорости, мини-графики. Цифры — демо, валюта ₽ (RU) / $ (.com).
+// Реальные компоненты НЕ импортируем (у них серверные пропсы из БД) — повторяем
+// разметку и классы. Минус: при сильном редизайне ЛК превью надо будет подровнять.
 const isEn = LOCALE === "en";
+
+const L = isEn
+  ? {
+      updated: "updated 2 min ago",
+      title: "Dashboard", warehouse: "Shopify",
+      lowStock: "Running low", lowStockSub: "reorder in 7–14 days",
+      lostRev: "Lost revenue", lostRevSub: "from out-of-stock days",
+      dead: "Dead stock", deadSub: "SKU with no sales",
+      health: "Warehouse health", healthTier: "Good",
+      healthHint: "Doing well — a few growth points left.",
+      invValue: "Inventory value", frozen: "Frozen",
+      totalSku: "Total SKU", oos: "OOS", inactive: "Inactive", active: "Active",
+      velHeader: "Sales velocity, units/day", fast: "Fast", mid: "Average", slow: "Slow",
+      health14: "Health, 14 days", points: "+30 pts", segments: "SKU segments",
+      lostRevVal: "$1.4k", frozenVal: "$8.2k", invVal: "$34.5k",
+    }
+  : {
+      updated: "обновлено 2 мин назад",
+      title: "Дашборд", warehouse: "Ozon FBO",
+      lowStock: "Заканчивается", lowStockSub: "пополнить за 7–14 дней",
+      lostRev: "Потерянная выручка", lostRevSub: "из-за дней без наличия",
+      dead: "Неликвид", deadSub: "SKU без продаж",
+      health: "Состояние склада", healthTier: "Хорошо",
+      healthHint: "Склад работает хорошо — есть небольшие точки роста.",
+      invValue: "Стоимость остатков", frozen: "В заморозке",
+      totalSku: "Всего SKU", oos: "OOS", inactive: "Неактивные", active: "Активные",
+      velHeader: "Скорость продаж, шт/день", fast: "Быстрые", mid: "Средние", slow: "Медленные",
+      health14: "Здоровье, 14 дней", points: "+30 пунктов", segments: "Сегменты SKU",
+      lostRevVal: "142 000 ₽", frozenVal: "820 000 ₽", invVal: "3 450 000 ₽",
+    };
+
+const HEALTH = 88; // демо-индекс здоровья (tier «Хорошо»)
 
 const healthSeries = [
   { d: "01", v: 58 }, { d: "02", v: 61 }, { d: "03", v: 64 }, { d: "04", v: 62 },
@@ -13,18 +53,11 @@ const healthSeries = [
   { d: "13", v: 86 }, { d: "14", v: 88 },
 ];
 
-const skuRows = [
-  { sku: "NK-PEG-41",   name: isEn ? "Nike Pegasus 41 Running Shoes" : "Кроссовки Nike Pegasus 41", tv: 3.21, cov:  9, alert: "low" },
-  { sku: "AD-ULTRA-22", name: "Adidas Ultraboost 22",            tv: 1.82, cov: 24, alert: null },
-  { sku: "ASC-NOV",     name: "Asics Novablast 4",               tv: 0.41, cov:189, alert: "dead" },
-  { sku: "NB-1080-13",  name: "New Balance 1080v13",             tv: 2.05, cov: 31, alert: null },
-];
-
 const segments = [
-  { name: "fast",   value: 28, color: "#84cc16" },
-  { name: "steady", value: 42, color: "#0284c7" },
-  { name: "slow",   value: 18, color: "#f59e0b" },
-  { name: "dead",   value: 12, color: "#e11d48" },
+  { name: isEn ? "Fast" : "Быстрые",     value: 28, color: "#84cc16" },
+  { name: isEn ? "Steady" : "Стабильные", value: 42, color: "#0284c7" },
+  { name: isEn ? "Slow" : "Медленные",    value: 18, color: "#f59e0b" },
+  { name: isEn ? "Dead" : "Неликвид",     value: 12, color: "#e11d48" },
 ];
 
 export default function DashboardPreview() {
@@ -36,6 +69,7 @@ export default function DashboardPreview() {
         style={{ background: "radial-gradient(closest-side, rgba(132,204,22,0.18), transparent 70%)" }}
       />
       <div className="rounded-2xl border border-line bg-paper overflow-hidden shadow-[0_30px_80px_-25px_rgba(10,10,8,0.20)]">
+        {/* chrome bar */}
         <div className="flex items-center justify-between border-b border-line px-4 md:px-5 py-3 bg-bg-soft/50">
           <div className="flex items-center gap-3">
             <div className="flex gap-1.5">
@@ -45,22 +79,68 @@ export default function DashboardPreview() {
             </div>
             <span className="font-mono text-[9px] md:text-[10px] uppercase tracking-[0.2em] text-ink-hush">veloseller / dashboard</span>
           </div>
-          <span className="font-mono text-[9px] md:text-[10px] text-ink-hush hidden sm:inline">{t("landing.dp.updated")}</span>
+          <span className="font-mono text-[9px] md:text-[10px] text-ink-hush hidden sm:inline">{L.updated}</span>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-px bg-line">
-          <div className="lg:col-span-8 bg-paper p-4 md:p-5">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-line rounded-xl overflow-hidden">
-              <Kpi label="Health"        value="88"    suffix="/100" tone="good" />
-              <Kpi label="OOS SKU"       value="3"     tone="warn" />
-              <Kpi label="Lost revenue"  value="$1.4k" tone="bad" />
-              <Kpi label={t("landing.dp.frozen")}   value="$8.2k" tone="warn" />
+        <div className="p-4 md:p-5 space-y-4 md:space-y-5">
+          {/* header row */}
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="size-1.5 rounded-full bg-lime-deep" />
+              <span className="font-display text-lg md:text-xl font-medium text-ink">{L.title}</span>
+              <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{L.warehouse}</span>
             </div>
+            <div className="flex gap-1 rounded-lg border border-line bg-bg-soft p-0.5 font-mono text-[10px] uppercase tracking-wider">
+              <span className="px-2 py-1 rounded text-ink-hush">7</span>
+              <span className="px-2 py-1 rounded bg-paper text-ink font-semibold shadow-sm">30</span>
+              <span className="px-2 py-1 rounded text-ink-hush">90</span>
+            </div>
+          </div>
 
-            <div className="mt-4 md:mt-5 rounded-xl border border-line p-3 md:p-4 bg-paper">
+          {/* row 1: action cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4">
+            <ActionCard tone="warn"   label={L.lowStock} value="7"            sub={L.lowStockSub} />
+            <ActionCard tone="danger" label={L.lostRev}  value={L.lostRevVal} sub={L.lostRevSub} />
+            <ActionCard tone="warn"   label={L.dead}     value="12"           sub={L.deadSub} />
+          </div>
+
+          {/* row 2: health + inventory */}
+          <div className="grid gap-3 md:gap-4 md:grid-cols-2">
+            <HealthBlock />
+            <div className="rounded-2xl border border-line bg-paper p-4 sm:p-5">
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">{L.invValue}</div>
+              <div className="mt-3 font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink tabular break-words">{L.invVal}</div>
+              <div className="mt-4 rounded-lg border border-orange/20 bg-orange/5 p-3 flex items-center justify-between gap-3 flex-wrap">
+                <span className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold">{L.frozen}</span>
+                <span className="font-display tabular text-lg sm:text-xl text-orange font-medium break-words">{L.frozenVal}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* row 3: 4 kpi */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Kpi label={L.totalSku} value="1 883" />
+            <Kpi label={L.oos}      value="3"     tone="warn" />
+            <Kpi label={L.inactive} value="24"    tone="muted" />
+            <Kpi label={L.active}   value="1 859" tone="accent" />
+          </div>
+
+          {/* row 4: velocity */}
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-2.5">{L.velHeader}</div>
+            <div className="grid grid-cols-3 gap-2 sm:gap-3">
+              <Velocity tone="fast" label={L.fast} value="3.21" />
+              <Velocity tone="mid"  label={L.mid}  value="1.40" />
+              <Velocity tone="slow" label={L.slow} value="0.41" />
+            </div>
+          </div>
+
+          {/* row 5: charts */}
+          <div className="grid gap-3 md:gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-line bg-paper p-3 md:p-4">
               <div className="flex justify-between items-center mb-2">
-                <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("landing.dp.health14")}</div>
-                <div className="font-mono text-[11px] text-lime-deep font-semibold">{t("landing.dp.points")}</div>
+                <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{L.health14}</div>
+                <div className="font-mono text-[11px] text-lime-deep font-semibold">{L.points}</div>
               </div>
               <div className="h-[80px] md:h-[90px]">
                 <ResponsiveContainer width="100%" height="100%">
@@ -70,59 +150,29 @@ export default function DashboardPreview() {
                 </ResponsiveContainer>
               </div>
             </div>
-          </div>
 
-          <div className="lg:col-span-4 bg-paper p-4 md:p-5">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-3">{t("landing.dp.segments")}</div>
-            <div className="space-y-2.5">
-              {segments.map((s) => (
-                <div key={s.name} className="flex items-center gap-3">
-                  <span className="size-2 rounded-full" style={{ background: s.color }} />
-                  <span className="font-mono text-[11px] md:text-xs text-ink-soft uppercase tracking-wider w-14 md:w-16">{s.name}</span>
-                  <div className="flex-1 h-1.5 bg-line rounded-full overflow-hidden">
-                    <div className="h-full rounded-full" style={{ width: `${s.value}%`, background: s.color }} />
-                  </div>
-                  <span className="font-mono text-xs text-ink-muted tabular w-6 md:w-7 text-right">{s.value}</span>
+            <div className="rounded-2xl border border-line bg-paper p-3 md:p-4">
+              <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-2">{L.segments}</div>
+              <div className="flex items-center gap-4">
+                <div className="h-[80px] w-[80px] shrink-0">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie data={segments} dataKey="value" nameKey="name" innerRadius={22} outerRadius={38} paddingAngle={2} stroke="none">
+                        {segments.map((s, i) => <Cell key={i} fill={s.color} />)}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
-              ))}
-            </div>
-
-            <div className="mt-4 md:mt-5 rounded-xl border border-line p-3 md:p-4">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-2">Velocity Top-5</div>
-              <div className="h-[68px] md:h-[78px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={[
-                    { n: "A", v: 3.2 }, { n: "B", v: 2.7 }, { n: "C", v: 2.05 }, { n: "D", v: 1.82 }, { n: "E", v: 1.5 },
-                  ]}>
-                    <Bar dataKey="v" radius={[3,3,0,0]}>
-                      {[0,1,2,3,4].map((i) => (
-                        <Cell key={i} fill={i < 2 ? "#84cc16" : i < 4 ? "#0284c7" : "#a5ada3"} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
+                <div className="flex-1 space-y-1.5">
+                  {segments.map((s) => (
+                    <div key={s.name} className="flex items-center gap-2">
+                      <span className="size-2 rounded-full shrink-0" style={{ background: s.color }} />
+                      <span className="font-mono text-[11px] text-ink-soft uppercase tracking-wider flex-1">{s.name}</span>
+                      <span className="font-mono text-[11px] text-ink-muted tabular">{s.value}%</span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          </div>
-
-          <div className="lg:col-span-12 bg-paper p-4 md:p-5">
-            <div className="flex items-center justify-between mb-3">
-              <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("landing.dp.alerts")}</div>
-              <div className="font-mono text-[10px] text-orange font-semibold">{t("landing.dp.needAttention")}</div>
-            </div>
-            <div className="divide-y divide-line border border-line rounded-xl overflow-hidden">
-              {skuRows.map((r) => (
-                <div key={r.sku} className="grid grid-cols-12 items-center gap-2 md:gap-3 px-3 md:px-4 py-2.5 hover:bg-bg-soft transition">
-                  <span className="col-span-4 md:col-span-3 font-mono text-[10px] md:text-[11px] text-ink-hush">{r.sku}</span>
-                  <span className="col-span-4 md:col-span-5 text-[12px] md:text-[13px] text-ink-soft truncate">{r.name}</span>
-                  <span className="col-span-2 font-mono text-[12px] md:text-[13px] text-lime-deep tabular font-semibold">{r.tv.toFixed(2)}</span>
-                  <span className="hidden md:inline col-span-1 font-mono text-[11px] text-ink-hush tabular text-right">{r.cov}{t("landing.dp.d")}</span>
-                  <span className="col-span-2 md:col-span-1 text-right">
-                    {r.alert === "low"  && <Pill tone="warn">low</Pill>}
-                    {r.alert === "dead" && <Pill tone="bad">dead</Pill>}
-                  </span>
-                </div>
-              ))}
             </div>
           </div>
         </div>
@@ -131,29 +181,67 @@ export default function DashboardPreview() {
   );
 }
 
-function Kpi({ label, value, suffix, tone }: { label: string; value: string; suffix?: string; tone?: "good" | "warn" | "bad"; }) {
-  const color =
-    tone === "good" ? "#3f6212" :
-    tone === "warn" ? "#b45309" :
-    tone === "bad"  ? "#be123c" : "#1f2017";
+function ActionCard({ tone, label, value, sub }: { tone: "warn" | "danger"; label: string; value: string; sub: string }) {
+  const toneClasses = tone === "danger" ? "border-rose/30 bg-rose/5" : "border-orange/30 bg-orange/5";
+  const c = tone === "danger" ? "text-rose" : "text-orange";
+  const cSub = tone === "danger" ? "text-rose/80" : "text-orange/80";
   return (
-    <div className="bg-paper p-3 md:p-4">
-      <div className="font-mono text-[9px] md:text-[9.5px] uppercase tracking-[0.18em] text-ink-hush">{label}</div>
-      <div className="mt-1.5 font-display tabular font-medium" style={{ color, fontSize: "1.5rem", lineHeight: 1, letterSpacing: "-0.03em" }}>
-        {value}
-        {suffix && <span className="text-sm text-ink-hush ml-1">{suffix}</span>}
-      </div>
+    <div className={`rounded-2xl border-2 p-4 ${toneClasses}`}>
+      <div className={`font-mono text-[10px] uppercase tracking-widest font-semibold ${c}`}>{label}</div>
+      <div className={`mt-2 font-display text-2xl sm:text-3xl tabular font-medium tracking-tight break-words ${c}`}>{value}</div>
+      <div className={`mt-1.5 text-xs leading-relaxed ${cSub}`}>{sub}</div>
     </div>
   );
 }
 
-function Pill({ children, tone }: { children: React.ReactNode; tone: "warn" | "bad" }) {
-  const cls = tone === "warn"
-    ? "text-orange border-orange/30 bg-orange/10"
-    : "text-rose border-rose/30 bg-rose/10";
+function HealthBlock() {
   return (
-    <span className={`inline-block font-mono text-[9px] md:text-[9.5px] uppercase tracking-widest px-1.5 py-0.5 rounded border font-semibold ${cls}`}>
-      {children}
-    </span>
+    <div className="rounded-2xl border border-line bg-paper p-4 sm:p-5">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">{L.health}</div>
+        <span className="inline-flex items-center font-mono text-[10px] px-2 py-0.5 uppercase tracking-widest rounded border font-semibold whitespace-nowrap text-lime-deep border-lime-deep/30 bg-lime-soft">
+          {L.healthTier}
+        </span>
+      </div>
+      <div className="mt-3 flex items-baseline gap-2">
+        <span className="font-display tabular tracking-tight font-medium text-[2.5rem] sm:text-[3.25rem]" style={{ lineHeight: 1, color: "#3f6212" }}>{HEALTH}</span>
+        <span className="text-ink-hush font-mono text-base sm:text-lg">/100</span>
+      </div>
+      <div className="mt-5 relative">
+        <div className="h-2 rounded-full bg-bg-soft border border-line overflow-hidden">
+          <div className="h-full bg-gradient-to-r from-rose via-orange to-lime-deep" style={{ width: "100%" }} />
+        </div>
+        <div className="absolute top-1/2 -translate-y-1/2 size-3 rounded-full bg-ink border-2 border-paper shadow-md" style={{ left: `calc(${HEALTH}% - 6px)` }} />
+        <div className="mt-2 flex justify-between font-mono text-[9px] text-ink-hush uppercase tracking-wider">
+          <span>0</span><span>40</span><span>60</span><span>75</span><span>90</span><span>100</span>
+        </div>
+      </div>
+      <p className="mt-4 text-xs text-ink-muted leading-relaxed">{L.healthHint}</p>
+    </div>
+  );
+}
+
+function Kpi({ label, value, tone }: { label: string; value: string; tone?: "warn" | "muted" | "accent" }) {
+  const valueColor =
+    tone === "warn"   ? "text-orange" :
+    tone === "muted"  ? "text-ink-hush" :
+    tone === "accent" ? "text-lime-deep" :
+                        "text-ink";
+  return (
+    <div className="rounded-2xl border border-line bg-paper p-3 sm:p-4">
+      <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{label}</div>
+      <div className={`mt-1.5 font-display text-xl sm:text-2xl md:text-3xl tabular font-medium tracking-tight ${valueColor}`}>{value}</div>
+    </div>
+  );
+}
+
+function Velocity({ tone, label, value }: { tone: "fast" | "mid" | "slow"; label: string; value: string }) {
+  const border = tone === "fast" ? "border-l-lime-deep" : tone === "mid" ? "border-l-azure" : "border-l-orange";
+  const text   = tone === "fast" ? "text-lime-deep"     : tone === "mid" ? "text-azure"     : "text-orange";
+  return (
+    <div className={`bg-paper border border-line border-l-4 rounded-xl p-3 sm:p-4 ${border}`}>
+      <div className="font-mono text-[9px] sm:text-[10px] uppercase tracking-widest text-ink-hush">{label}</div>
+      <div className={`mt-1 font-display text-lg sm:text-xl md:text-2xl tabular font-medium ${text}`}>{value}</div>
+    </div>
   );
 }
