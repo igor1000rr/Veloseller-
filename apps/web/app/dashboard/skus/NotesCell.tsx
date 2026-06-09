@@ -41,6 +41,17 @@ export function NotesCell({ productId, initial }: { productId: string; initial: 
     };
   }, []);
 
+  // Синк с сервером: когда родитель приходит с новым `initial` (после «Стереть
+  // заметки» + router.refresh(), либо при смене страницы/фильтра) — обновляем
+  // отображаемое значение. Иначе локальный useState переживает ре-рендер и
+  // стёртая заметка «висит» до полной перезагрузки. Активный ввод не трогаем.
+  useEffect(() => {
+    if (editing) return;
+    setValue(initial ?? "");
+    lastSavedRef.current = initial ?? "";
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initial]);
+
   function persist(text: string) {
     if (text === lastSavedRef.current) {
       setStatus("idle");
