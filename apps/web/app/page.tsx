@@ -6,6 +6,7 @@ import LandingHeader from "./_landing/Header";
 import LandingHero from "./_landing/Hero";
 import LandingShowcase from "./_landing/Showcase";
 import LandingFeatures from "./_landing/Features";
+import LandingSegments from "./_landing/Segments";
 import LandingStory from "./_landing/Story";
 import LandingBottom from "./_landing/Bottom";
 import LandingFooter from "./_landing/Footer";
@@ -15,7 +16,7 @@ import LandingFooter from "./_landing/Footer";
 // вместо "Войти", и наоборот.
 //
 // Разметка и контент разнесены по app/_landing/* (Header/Hero/Showcase/Features/
-// Story/Bottom/Footer + data/seo/ui): монолит 42КБ не пролезал в MCP-пуш,
+// Segments/Story/Bottom/Footer + data/seo/ui): монолит 42КБ не пролезал в MCP-пуш,
 // плюс секции теперь правятся независимо. Строки — словарь landing (ru 1:1 / en).
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -50,6 +51,7 @@ export default async function LandingPage() {
       <LandingHero isAuthed={isAuthed} />
       <LandingShowcase />
       <LandingFeatures />
+      <LandingSegments />
       <LandingStory />
       <LandingBottom isAuthed={isAuthed} />
       <LandingFooter isAuthed={isAuthed} />
