@@ -1,11 +1,22 @@
 /**
  * Полоса с реальными цифрами (правка 10, #8). РФ-прод; на .com не рендерится.
- * Число + приглушённая единица (млн ₽) + подпись-капс снизу. Цифры — из data.
+ * Живые значения из system_settings['landing_live_stats'] (воркер раз в месяц,
+ * jobs/landing_stats.py); при отсутствии ключа или ошибке — fallback liveStats.
  */
-import { isEn, liveStats, liveStatsCaption } from "./data";
+import { isEn, liveStats, liveStatsCaption, type LiveStat } from "./data";
+import { getSetting } from "@/lib/admin/system-settings";
 
-export default function LandingStats() {
+export default async function LandingStats() {
   if (isEn) return null;
+
+  let items: LiveStat[] = liveStats;
+  try {
+    const live = await getSetting<LiveStat[]>("landing_live_stats", liveStats);
+    if (Array.isArray(live) && live.length === 4) items = live;
+  } catch {
+    // публичный лендинг не должен падать из-за чтения настроек — остаёмся на fallback
+  }
+
   return (
     <section className="relative w-full px-4 md:px-8 lg:px-12 py-6 md:py-8 border-t border-line bg-paper">
       <div className="max-w-[1600px] mx-auto">
