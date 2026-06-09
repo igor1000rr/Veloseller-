@@ -140,6 +140,12 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
   const lostUnits = Math.round(tvelo * stockoutDays);
   const recommendedReorder30 = Math.round(tvelo * 30);
 
+  // Юнит-экономика (#5): фактическая цена со скидками из последнего снапшота
+  // (что реально платит покупатель) + комиссия МП из API как стартовый дефолт.
+  const lastSnap = snapshots && snapshots.length ? snapshots[snapshots.length - 1] : null;
+  const unitPrice = lastSnap ? Number((lastSnap as any).marketing_price ?? lastSnap.price ?? 0) : price;
+  const unitCommission = lastSnap && (lastSnap as any).commission_pct != null ? Number((lastSnap as any).commission_pct) : null;
+
   return (
     <div className="space-y-6">
       <header>
