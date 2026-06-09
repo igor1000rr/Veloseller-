@@ -419,6 +419,7 @@ export default async function SkusPage({ searchParams }: {
     ((lostMin !== null || lostMax !== null) ? 1 : 0) +
     ((coverageMin !== null || coverageMax !== null) ? 1 : 0) +
     ((dateFrom || dateTo) ? 1 : 0) +
+    ((brandFilter || categoryFilter) ? 1 : 0) +
     (includeInactive && !dashFilter ? 1 : 0);
 
   const buildQs = (overrides: Record<string, string | number | null> = {}) => {
