@@ -277,6 +277,8 @@ def _ensure_products(sb, seller_id: str, connection_id: str, snapshots: list[Sna
         "connection_id": connection_id,
         "sku": s.sku,
         "product_name": s.product_name or s.sku,
+        "brand": s.brand,
+        "category": s.category,
     } for s in snapshots]
     for i in range(0, len(rows), _PRODUCTS_IN_BATCH):
         sb.table("products").upsert(
