@@ -134,6 +134,8 @@ export default async function SkusPage({ searchParams }: {
   // Теги (#6): точный фильтр по бренду/категории (значения из API).
   const brandFilter = (sp.brand ?? "").trim();
   const categoryFilter = (sp.category ?? "").trim();
+  // Произвольный пользовательский тег (#6): products.tags @> [tag].
+  const tagFilter = (sp.tag ?? "").trim();
 
   const today = new Date();
   const preHoliday = userExplicitPeriod ? null : getPreHolidayWindow(today);
