@@ -8,7 +8,7 @@ const cspReportOnly = [
   "default-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
-  "frame-ancestors 'none'",
+  "frame-ancestors 'self'",
   "script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.sentry.io",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
