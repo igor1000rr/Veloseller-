@@ -383,6 +383,7 @@ def _fetch_snapshots_fbo(client_id: str, api_key: str, page_size: int = 1000) ->
     старый fbs/None-путь не тронут ни одной строкой — меньше риск регресса на проде.
     """
     now = datetime.now(timezone.utc)
+    kind = "fbo"  # этот пайплайн — только FBO; нужен для выбора ставки sales_percent_fbo
 
     with httpx.Client(timeout=60.0) as cli:
         # 1. Все product_id через пагинацию /v3/product/list
