@@ -104,6 +104,27 @@ export function SkusFilters({
     router.refresh();
   }
 
+  // Правка 10 (#1): клик «Рассчитать». С включённой галочкой — подтверждение,
+  // чистка всех заметок, затем обычный пересчёт (при ошибке тоже пересчитываем).
+  async function onCalcClick() {
+    if (!eraseNotes) {
+      recalculateNow();
+      return;
+    }
+    const msg = isEn
+      ? "Delete ALL your notes across every SKU? This cannot be undone."
+      : "Удалить ВСЕ заметки по всем SKU? Действие необратимо.";
+    if (!window.confirm(msg)) return;
+    setClearing(true);
+    const res = await clearAllUserNotes();
+    setClearing(false);
+    setEraseNotes(false);
+    if (!res.ok) {
+      window.alert(isEn ? "Failed to clear notes" : "Не удалось стереть заметки");
+    }
+    recalculateNow();
+  }
+
   function toggleInactive() {
     pushUpdate({ include_inactive: includeInactive ? "" : "1" });
   }
