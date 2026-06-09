@@ -397,6 +397,14 @@ def start_scheduler() -> None:
         id="monthly-reports",
         replace_existing=True,
     )
+    # Витрина лендинга — 1-го числа в 03:30 UTC. После recalc-all (02:40), чтобы
+    # store_metrics были свежими; раз в месяц, как обещает подпись на лендинге.
+    _scheduler.add_job(
+        _job_refresh_landing_stats,
+        CronTrigger(day=1, hour=3, minute=30),
+        id="landing-stats",
+        replace_existing=True,
+    )
     _scheduler.add_job(
         _job_radar_digest,
         CronTrigger(day_of_week="mon,thu", hour=9, minute=0),
