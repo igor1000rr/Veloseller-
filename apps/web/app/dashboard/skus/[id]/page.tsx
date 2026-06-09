@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { SkuAnalysisChart, type ChartPoint } from "./SkuAnalysisChart";
 import { ReorderPanel } from "./ReorderPanel";
 import { UnitEconomics } from "./UnitEconomics";
+import { TagsEditor } from "./TagsEditor";
 import { HealthKpi } from "./HealthTooltip";
 import { buildHealthBreakdown, buildConfidenceBreakdown } from "./health-breakdown";
 import { Icons } from "../../../_components/Icons";
