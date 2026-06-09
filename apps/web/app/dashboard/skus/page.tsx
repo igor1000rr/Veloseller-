@@ -9,6 +9,9 @@ import { DashFilterChip } from "./DashFilterChip";
 import { ColumnsPicker } from "./ColumnsPicker";
 import { SkusTable, type PeriodMetricsRow } from "./SkusTable";
 import { t } from "@/lib/i18n";
+import { LOCALE } from "@/lib/features";
+
+const isEn = LOCALE === "en";
 
 const PAGE_SIZE = 50;
 
