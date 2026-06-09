@@ -446,6 +446,7 @@ export default async function SkusPage({ searchParams }: {
     if (dateTo) current.date_to = dateTo;
     if (brandFilter) current.brand = brandFilter;
     if (categoryFilter) current.category = categoryFilter;
+    if (tagFilter) current.tag = tagFilter;
 
     for (const [k, v] of Object.entries(overrides)) {
       if (v === null) {
