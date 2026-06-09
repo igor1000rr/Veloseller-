@@ -85,6 +85,8 @@ export type ChartPoint = {
   price: number;
   availability: number;     // 0 или 1
   velocity: number;
+  sellerPrice?: number | null;     // цена продавца (#3)
+  marketingPrice?: number | null;  // факт. цена со скидками МП (#3)
 };
 
 export type ChangelogByDate = Record<string, Array<{
