@@ -257,10 +257,7 @@ export default async function SkusPage({ searchParams }: {
   }
 
   if (search) {
-    const escaped = search.replace(/[%_]/g, "\\  if (search) {
-    const escaped = search.replace(/[%_]/g, "\\$&");
-    productsQuery = productsQuery.or(`sku.ilike.%${escaped}%,product_name.ilike.%${escaped}%`);
-  }");
+    const escaped = search.replace(/[%_]/g, (c) => "\\" + c);
     productsQuery = productsQuery.or(`sku.ilike.%${escaped}%,product_name.ilike.%${escaped}%`);
   }
   if (brandFilter) productsQuery = productsQuery.eq("brand", brandFilter);
