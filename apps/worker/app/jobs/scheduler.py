@@ -645,7 +645,7 @@ def start_scheduler() -> None:
         replace_existing=True,
     )
     # Мониторинг свежести синка — каждые 30 минут. Алерт в Telegram, если
-    # активный склад не синкался >12ч (адресат: MONITORING_CHAT_ID / ADMIN_EMAILS).
+    # активный склад не синкался >30ч (адресат: MONITORING_CHAT_ID / ADMIN_EMAILS).
     _scheduler.add_job(
         _job_monitor_sync_freshness,
         CronTrigger(minute="*/30"),
