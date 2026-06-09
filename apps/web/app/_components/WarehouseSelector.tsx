@@ -51,6 +51,9 @@ export default function WarehouseSelector({
           body: JSON.stringify({ warehouse_id: warehouseId }),
         });
         if (res.ok) {
+          // Igor 09.06: при смене склада уводим на «Обзор». Иначе юзер остаётся
+          // на узкой вкладке (SKU другого склада, Динамика и т.п.) с чужим контекстом.
+          router.push("/dashboard");
           router.refresh();
         }
       } catch {

@@ -4,12 +4,13 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 /**
  * GET  /api/connections/[id]  — детали подключения (без секретов)
+ * PATCH /api/connections/[id] — переименовать подключение { name }
  * DELETE /api/connections/[id] — удалить подключение
  *
  * Inventory snapshots ссылаются на connection_id с ON DELETE SET NULL —
  * данные продуктов остаются, а вот связь со снапшотами обрывается.
  *
- * БАГ 35 fix: добавлен rate limit на оба метода.
+ * БАГ 35 fix: добавлен rate limit на все методы.
  * БАГ 78 fix: не светим error.message в response.
  */
 
@@ -49,6 +50,38 @@ export async function GET(
   }
 
   return NextResponse.json({ ...data, config: safeConfig });
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id } = await params;
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const limited = enforceRateLimit(req, RATE_LIMITS.WRITE, user.id);
+  if (limited) return limited;
+
+  const body = await req.json().catch(() => ({} as any));
+  const rawName = typeof body?.name === "string" ? body.name.trim() : "";
+  if (!rawName) return NextResponse.json({ error: "Название не может быть пустым" }, { status: 400 });
+  if (rawName.length > 100) return NextResponse.json({ error: "Слишком длинное название (макс. 100 символов)" }, { status: 400 });
+
+  // Обновляем ТОЛЬКО name; seller_id в фильтре — чужой склад не переименуется.
+  const { error, count } = await supabase
+    .from("data_connections")
+    .update({ name: rawName }, { count: "exact" })
+    .eq("id", id)
+    .eq("seller_id", user.id);
+
+  if (error) {
+    console.error("[connection-patch] DB error:", error.message);
+    return NextResponse.json({ error: "Не удалось сохранить" }, { status: 500 });
+  }
+  if (count === 0) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json({ ok: true, name: rawName });
 }
 
 export async function DELETE(
