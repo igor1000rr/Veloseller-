@@ -187,7 +187,7 @@ def poll_brand(
                 .limit(1)
                 .execute()
             )
-            existing_row = existing.data
+            existing_row = existing.data[0] if existing.data else None
 
             old_status = existing_row["status"] if existing_row else None
             is_favorite = bool(existing_row.get("is_favorite", False)) if existing_row else False
