@@ -71,6 +71,10 @@ export function SkusFilters({
   const [dateTo, setDateTo] = useState(sp.get("date_to") || defaultDateTo);
   // Закупка на N дней — дефолт 30 синхронизирован с сервером (page.tsx).
   const [reorderDays, setReorderDays] = useState(sp.get("reorder_days") ?? "30");
+  // Правка 10 (#1): галочка «Стереть заметки» (по умолчанию выкл). При «Рассчитать»
+  // с включённой галочкой — подтверждение и удаление ВСЕХ заметок селлера.
+  const [eraseNotes, setEraseNotes] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   function pushUpdate(updates: Record<string, string>) {
     const params = new URLSearchParams(sp.toString());
