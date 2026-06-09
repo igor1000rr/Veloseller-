@@ -163,11 +163,19 @@ def fetch_snapshots(token: str) -> list[SnapshotInput]:
             name_from_subject += 1
         else:
             product_name = None
+        nominal = v["price"]
+        disc = v.get("discount") or Decimal("0")
+        # Факт. цена WB = Price*(1 - Discount/100), округление до копеек.
+        marketing = (nominal * (Decimal("1") - disc / Decimal("100"))).quantize(Decimal("0.01")) if nominal else Decimal("0")
         snapshots.append(SnapshotInput(
             sku=sku,
             product_name=product_name,
             stock_quantity=max(0, v["qty"]),
-            price=v["price"],
+            price=nominal,
+            seller_price=nominal,
+            marketing_price=marketing,
+            brand=(v.get("brand") or None),
+            category=(v.get("subject") or None),
             snapshot_time=now,
         ))
 
