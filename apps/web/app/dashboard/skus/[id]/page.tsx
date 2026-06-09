@@ -235,6 +235,10 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         />
       )}
 
+      {unitPrice > 0 && (
+        <UnitEconomics priceRub={unitPrice} commissionPct={unitCommission} />
+      )}
+
       {(elasticity ?? []).length > 0 && (
         <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
           <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">{t("sku.detail.elasticity.title")}</h2>
