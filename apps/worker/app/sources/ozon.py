@@ -72,6 +72,27 @@ def _decimal(v) -> Decimal:
         return Decimal("0")
 
 
+def _ozon_commission_pct(item: dict) -> Optional[Decimal]:
+    """Комиссия Ozon в % из ответа /v5/product/info/prices (поле commissions).
+
+    /v5 отдаёт обе ставки (sales_percent_fbo и sales_percent_fbs) для каждого
+    товара — это категорийные проценты. Берём FBO как основную (для #5 это
+    стартовый дефолт, в UI юнит-экономики редактируется). Нет поля → None
+    (комиссия запишется как null, расчёт просто не подставит дефолт).
+    """
+    comm = item.get("commissions")
+    if not isinstance(comm, dict):
+        return None
+    for key in ("sales_percent_fbo", "sales_percent_fbs", "sales_percent"):
+        val = comm.get(key)
+        if val not in (None, ""):
+            try:
+                return Decimal(str(val))
+            except (InvalidOperation, ValueError, TypeError):
+                return None
+    return None
+
+
 def _fetch_product_names(cli: httpx.Client, client_id: str, api_key: str, offer_ids: list[str]) -> dict[str, str]:
     """Получить реальные названия товаров по offer_id через /v3/product/info/list.
 
