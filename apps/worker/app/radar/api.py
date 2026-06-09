@@ -107,9 +107,9 @@ async def extract_brands(
     # 1. Идемпотентность
     upload_res = (
         sb.table("radar_price_uploads").select("*").eq("id", upload_id)
-        .eq("seller_id", seller_id).maybe_single().execute()
+        .eq("seller_id", seller_id).limit(1).execute()
     )
-    upload = upload_res.data
+    upload = upload_res.data[0] if upload_res.data else None
     if not upload:
         raise HTTPException(404, "Upload not found")
     if upload.get("status") == "completed":
