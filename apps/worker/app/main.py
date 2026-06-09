@@ -361,6 +361,9 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
             "stock_quantity": s.stock_quantity, "price": float(s.price),
             "availability": s.stock_quantity > 0,
             "snapshot_time": ts.isoformat(), "source": source.value,
+            "seller_price": float(s.seller_price) if s.seller_price is not None else None,
+            "marketing_price": float(s.marketing_price) if s.marketing_price is not None else None,
+            "commission_pct": float(s.commission_pct) if s.commission_pct is not None else None,
         })
     if rows:
         for i in range(0, len(rows), _INSERT_BATCH):
