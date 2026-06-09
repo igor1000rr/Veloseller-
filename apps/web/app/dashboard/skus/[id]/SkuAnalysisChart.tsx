@@ -136,7 +136,7 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
     if (!active || !payload || !payload.length) return null;
     const p = payload[0].payload;
     const isoDate = p.date as string;
-    const events = changelogByDate?.[isoDate] ?? [];
+    const events = cl?.[isoDate] ?? [];
     const pc = priceChanges.find((x) => x.date === isoDate);
 
     return (
