@@ -114,7 +114,7 @@ def compute_metrics_for_sku(
     adj_vel = vel_mod.adjusted_velocity(consumption, median_30d_vel, excluded_in_stock_days, in_stock_days)
 
     confidence = calculate_confidence(
-        period_days, repl_days, anom_days, miss_days,
+        effective_period_days, repl_days, anom_days, miss_days,
         sales_like_days=sales_like_days,
     )
     cov_days = cov_mod.coverage_days(current_stock, adj_vel)
