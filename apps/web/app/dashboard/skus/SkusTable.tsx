@@ -128,7 +128,7 @@ export function SkusTable({
                   {isUnderestimated && (
                     <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">{t("sku.list.underestimated")}</span>
                   )}
-                  {(p.brand || p.category) && (
+                  {(p.brand || p.category || (p.tags && p.tags.length > 0)) && (
                     <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                       {p.brand && (
                         <Link href={`/dashboard/skus?brand=${encodeURIComponent(p.brand)}` as any}
@@ -144,6 +144,13 @@ export function SkusTable({
                           {p.category}
                         </Link>
                       )}
+                      {(p.tags ?? []).map((tag: string) => (
+                        <Link key={tag} href={`/dashboard/skus?tag=${encodeURIComponent(tag)}` as any}
+                              className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[11px] tracking-wider border border-violet-200 bg-violet-50 text-violet-700 hover:border-violet-400 hover:text-violet-900 transition"
+                              title={tag}>
+                          #{tag}
+                        </Link>
+                      ))}
                     </div>
                   )}
                 </td>
