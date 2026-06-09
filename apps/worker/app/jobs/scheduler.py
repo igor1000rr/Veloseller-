@@ -24,6 +24,7 @@ import logging
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
 
 from app.config import settings
 from app.db import execute_minimal, fetch_all, get_supabase
