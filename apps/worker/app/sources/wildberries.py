@@ -310,6 +310,7 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
         if not names_by_vendor:
             logger.warning("WB FBS: no cards found from Content API — nothing to fetch")
             return []
+        commission_map = _fetch_wb_commission(cli, token)
 
         # Обратный маппинг: barcode → vendorCode (для агрегации остатков по supplierArticle)
         barcode_to_vendor: dict[str, str] = {}
