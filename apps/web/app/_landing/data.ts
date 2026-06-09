@@ -224,3 +224,18 @@ export const segments = isEn
         ],
       },
     ];
+
+/**
+ * Полоса с реальными цифрами (правка 10, #8) — между Showcase и Features.
+ * Только РФ-прод (veloseller.ru); числа заданы вручную (Игорь, 09.06.2026).
+ * TODO авто-апдейт раз в месяц: месячный агрегат по базе → system_settings → читать здесь.
+ * На .com (isEn) LandingStats возвращает null — это РФ-специфичные объёмы.
+ */
+export const liveStats = [
+  { value: "1 883", unit: "", label: "SKU под анализом" },
+  { value: "2", unit: "", label: "склада подключено" },
+  { value: "3,88", unit: "млн ₽", label: "потерянной выручки найдено" },
+  { value: "92", unit: "млн ₽", label: "замороженных остатков" },
+];
+
+export const liveStatsCaption = "Реальные данные, обновляются автоматически раз в месяц.";
