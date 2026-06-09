@@ -78,3 +78,55 @@ export async function clearAllUserNotes(): Promise<{ ok: boolean; cleared?: numb
     return { ok: false, error: e?.message ?? "unknown error" };
   }
 }
+
+/**
+ * Сохранить произвольные теги по SKU (правка 10, #6).
+ * Теги — свободные строки (бренд/категория/поставщик/что угодно, юзер сам).
+ * Нормализация: trim, без пустых, дедуп без учёта регистра, лимит 20 × 40 символов.
+ * Пишем только свои строки (seller_id) + RLS на products — defense in depth.
+ */
+export async function saveProductTags(
+  productId: string,
+  tags: string[],
+): Promise<{ ok: boolean; tags?: string[]; error?: string }> {
+  if (!productId || typeof productId !== "string") {
+    return { ok: false, error: "invalid product id" };
+  }
+  if (!Array.isArray(tags)) {
+    return { ok: false, error: "invalid tags" };
+  }
+  const seen = new Set<string>();
+  const clean: string[] = [];
+  for (const raw of tags) {
+    if (typeof raw !== "string") continue;
+    const tag = raw.trim().slice(0, 40);
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    clean.push(tag);
+    if (clean.length >= 20) break;
+  }
+  // Пустой список → null (чтобы строка не висела с {}).
+  const finalTags = clean.length ? clean : null;
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { ok: false, error: "unauthorized" };
+    }
+    const { error } = await supabase
+      .from("products")
+      .update({ tags: finalTags })
+      .eq("product_id", productId)
+      .eq("seller_id", user.id);
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+    revalidatePath("/dashboard/skus");
+    return { ok: true, tags: clean };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "unknown error" };
+  }
+}
