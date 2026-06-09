@@ -544,6 +544,9 @@ def fetch_snapshots(
                 product_name=real_name or None,
                 stock_quantity=s["qty"],
                 price=prices_by_pid.get(pid, Decimal("0")),
+                seller_price=seller_price_by_pid.get(pid),
+                marketing_price=marketing_by_pid.get(pid),
+                commission_pct=commission_by_pid.get(pid),
                 snapshot_time=now,
             ))
 
