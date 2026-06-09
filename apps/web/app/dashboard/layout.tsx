@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import AppHeader from "../_components/AppHeader";
 import FreshDataGuard from "../_components/FreshDataGuard";
+import EmbedChrome from "../_components/EmbedChrome";
+import SkuDrawer from "../_components/SkuDrawer";
 import { listWarehouses, getSelectedWarehouse } from "@/lib/warehouse";
 
 export const dynamic = "force-dynamic";
