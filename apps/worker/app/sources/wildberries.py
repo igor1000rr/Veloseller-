@@ -116,6 +116,48 @@ def _fetch_card_names(cli: httpx.Client, token: str) -> dict[str, str]:
     return names
 
 
+COMMISSION_URL = "https://common-api.wildberries.ru/api/v1/tariffs/commission"
+
+
+def _fetch_wb_commission(cli: httpx.Client, token: str) -> dict[str, dict]:
+    """Комиссия WB по предмету (subjectName) из Tariffs API (#5).
+
+    Returns: {subject_name.lower(): {"fbo": Decimal|None, "fbs": Decimal|None}}.
+      fbo = kgvpSupplier  (продажа со склада WB),
+      fbs = kgvpMarketplace (продажа со склада продавца).
+    Ключ — предмет (его же пишем в category), поэтому в снапшоте резолвим по subject.
+    Best-effort: при ошибке (в т.ч. если у токена нет категории «Тарифы») — пустая
+    карта, комиссия останется null, в юнит-экономике это просто ручной ввод.
+    """
+    out: dict[str, dict] = {}
+    try:
+        def _call():
+            resp = cli.get(COMMISSION_URL, params={"locale": "ru"},
+                           headers={"Authorization": token}, timeout=30.0)
+            resp.raise_for_status()
+            return resp.json() or {}
+        data = with_retry(_call, base_delay=5.0, max_delay=30.0)
+        report = data.get("report")
+        if not report and isinstance(data.get("data"), dict):
+            report = data["data"].get("report")
+        def _dec(v):
+            if v in (None, ""):
+                return None
+            try:
+                return Decimal(str(v))
+            except Exception:
+                return None
+        for r in (report or []):
+            subj = (r.get("subjectName") or "").strip().lower()
+            if not subj:
+                continue
+            out[subj] = {"fbo": _dec(r.get("kgvpSupplier")), "fbs": _dec(r.get("kgvpMarketplace"))}
+        logger.info("WB commission tariffs: %d subjects", len(out))
+    except Exception as e:
+        logger.warning("WB tariffs/commission fetch failed: %s", e)
+    return out
+
+
 def fetch_snapshots(token: str) -> list[SnapshotInput]:
     """FBO snapshots (склады WB) через Statistics API."""
     now = datetime.now(timezone.utc)
