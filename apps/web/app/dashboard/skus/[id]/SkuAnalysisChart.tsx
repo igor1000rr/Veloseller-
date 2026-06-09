@@ -9,6 +9,12 @@ import { LOCALE } from "@/lib/features";
 
 const isEn = LOCALE === "en";
 
+// Правка 10 (#3): две линии цены — цена продавца и факт. цена со скидками МП.
+const L = {
+  sellerPrice: isEn ? "Your price" : "Ваша цена",
+  marketingPrice: isEn ? "Price w/ discounts" : "Цена со скидками",
+};
+
 // Правка 10 (#4): переключатель деления графика 1d/7d/1m. Дневные точки
 // ресемплятся в недельные/месячные бакеты: velocity — среднее за период,
 // price/stock — значение на конец периода, availability — мажоритарно (для OOS-полос).
