@@ -235,9 +235,14 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
         <Line yAxisId="velocity" type="monotone" dataKey="velocity" stroke="#3f6212"
               strokeWidth={2.5} dot={{ r: 3, fill: "#3f6212", stroke: "#fff", strokeWidth: 1.5 }} name="TVelo" />
 
-        {/* Цена (Rule 12.2 — точки изменения) */}
-        <Line yAxisId="price" type="monotone" dataKey="price" stroke="#7c3aed"
-              strokeWidth={2} strokeDasharray="4 4" dot={false} name={t("sku.chart.price")} />
+        {/* Цена со скидками (факт.) — фиолетовая пунктирная (как раньше выглядела линия цены),
+            фолбэк на price для исторических точек до появления раздельных полей (#3) */}
+        <Line yAxisId="price" type="monotone" dataKey={(d: any) => d.marketingPrice ?? d.price} stroke="#7c3aed"
+              strokeWidth={2} strokeDasharray="4 4" dot={false} name={L.marketingPrice} connectNulls />
+        {/* Ваша цена (номинал, что ставит продавец) — янтарная сплошная.
+            Расхождение с фиолетовой = манипуляция маркетплейса скидками (#3) */}
+        <Line yAxisId="price" type="monotone" dataKey={(d: any) => d.sellerPrice ?? d.price} stroke="#d97706"
+              strokeWidth={1.5} dot={false} name={L.sellerPrice} connectNulls />
 
         {/* Rule 12.2 — vertical markers на каждое изменение цены */}
         {priceChanges.map((pc, i) => (
