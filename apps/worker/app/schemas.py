@@ -42,6 +42,14 @@ class SnapshotInput(BaseModel):
     stock_quantity: int = Field(ge=0)
     price: Decimal = Field(ge=0)
     snapshot_time: Optional[datetime] = None
+    # Доп. поля (правки 10): цена продавца / факт. цена со скидками (#3),
+    # комиссия маркетплейса в % (#5), бренд и категория для тегов (#6).
+    # Все опциональны — источник заполняет что может, остальное пишется как null.
+    seller_price: Optional[Decimal] = None
+    marketing_price: Optional[Decimal] = None
+    commission_pct: Optional[Decimal] = None
+    brand: Optional[str] = None
+    category: Optional[str] = None
 
 
 class IngestPayload(BaseModel):
