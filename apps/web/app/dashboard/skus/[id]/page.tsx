@@ -47,7 +47,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
       .single(),
     supabase
       .from("inventory_snapshots")
-      .select("snapshot_time,stock_quantity,price,availability")
+      .select("snapshot_time,stock_quantity,price,availability,seller_price,marketing_price,commission_pct")
       .eq("product_id", id)
       .gte("snapshot_time", day60Ago)
       .order("snapshot_time"),
