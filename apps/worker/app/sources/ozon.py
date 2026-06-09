@@ -294,6 +294,12 @@ def _fetch_snapshots_fbo(client_id: str, api_key: str, page_size: int = 1000) ->
 
         # 4. Цены через /v5/product/info/prices (best-effort, как в основном пути)
         prices_by_pid: dict[str, Decimal] = {}
+        # Параллельные мапы для доп. полей (правки 10): цена продавца (price.price),
+        # факт. цена со скидкой (price.marketing_price) — #3, комиссия % — #5.
+        # Существующий prices_by_pid (= marketing||price||min) НЕ трогаем: на нём метрики.
+        seller_price_by_pid: dict[str, Decimal] = {}
+        marketing_by_pid: dict[str, Decimal] = {}
+        commission_by_pid: dict[str, Decimal] = {}
 
         for i in range(0, len(product_ids), 1000):
             batch = product_ids[i : i + 1000]
@@ -458,6 +464,12 @@ def fetch_snapshots(
 
         # 3. Цены через /v5/product/info/prices
         prices_by_pid: dict[str, Decimal] = {}
+        # Параллельные мапы для доп. полей (правки 10): цена продавца (price.price),
+        # факт. цена со скидкой (price.marketing_price) — #3, комиссия % — #5.
+        # Существующий prices_by_pid (= marketing||price||min) НЕ трогаем: на нём метрики.
+        seller_price_by_pid: dict[str, Decimal] = {}
+        marketing_by_pid: dict[str, Decimal] = {}
+        commission_by_pid: dict[str, Decimal] = {}
 
         for i in range(0, len(product_ids), 1000):
             batch = product_ids[i : i + 1000]
