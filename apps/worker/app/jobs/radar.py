@@ -238,7 +238,7 @@ def poll_brand(
                 .limit(1)
                 .execute()
             )
-            parent_id = parent.data["id"] if parent.data else None
+            parent_id = parent.data[0]["id"] if parent.data else None
             if parent_id:
                 for point in result.history:
                     sb.table("radar_query_history").upsert({
