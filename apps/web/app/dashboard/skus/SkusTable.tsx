@@ -5,8 +5,8 @@
  * Александр 04.06.2026: артикул — без ссылки и чёрным. Ссылка для проваливания
  * в карточку SKU — название товара (зелёное, правка от 01.06.2026).
  */
-import Link from "next/link";
 import { VelocitySparkline } from "./VelocitySparkline";
+import SkuLink from "./SkuLink";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 import { NotesCell } from "./NotesCell";
 import { t } from "@/lib/i18n";
