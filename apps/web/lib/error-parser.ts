@@ -117,12 +117,14 @@ export function parseApiError(input: unknown, fallbackTitle?: string): ParsedErr
     };
   }
 
-  // Rate limit
+  // Rate limit. WB Statistics API режет /supplier/stocks до ~1 req/60s — для него
+  // отдаём отдельную, более понятную формулировку (это не «поломка», а норма).
   if (lower.includes("rate limit") || lower.includes("429") || lower.includes("too many requests")) {
+    const isWb = lower.includes("wildberries") || lower.includes("statistics-api");
     return {
       kind: "rate_limit",
-      title: t("error.rateLimit.title"),
-      message: t("error.rateLimit.message"),
+      title: isWb ? t("error.rateLimitWb.title") : t("error.rateLimit.title"),
+      message: isWb ? t("error.rateLimitWb.message") : t("error.rateLimit.message"),
       raw: text,
     };
   }

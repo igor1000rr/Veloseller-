@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import SyncButton from "../SyncButton";
 import DeleteButton from "../DeleteButton";
+import { ConnectionErrorHint } from "../ConnectionErrorHint";
+import { parseApiError } from "@/lib/error-parser";
 import { Icons } from "../../_components/Icons";
 
 export const dynamic = "force-dynamic";
@@ -39,7 +41,7 @@ export default async function ConnectionDetailPage({
   // БАГ 73: явно выбираем колонки + config отдельно для фильтрации
   const { data: conn } = await supabase
     .from("data_connections")
-    .select("id,name,source,marketplace,status,last_sync_at,last_error,created_at,config")
+    .select("id,name,source,marketplace,warehouse_kind,status,last_sync_at,last_error,created_at,config")
     .eq("id", id)
     .eq("seller_id", user.id)
     .maybeSingle();
@@ -48,6 +50,9 @@ export default async function ConnectionDetailPage({
 
   // Фильтруем config — sensitive поля заменяем на маски
   const displayConfig = safeConfig(conn.config as Record<string, any> | null);
+
+  // Сырой last_error превращаем в человеческую подсказку (как на списке складов)
+  const parsed = conn.last_error ? parseApiError(conn.last_error) : null;
 
   // Количество snapshots от этой connection (история синков)
   const { count: snapshotsCount } = await supabase
@@ -85,14 +90,21 @@ export default async function ConnectionDetailPage({
           </div>
           <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium flex items-center gap-3 flex-wrap">
             {conn.name}
-            <StatusBadgeFull status={conn.status} />
+            <StatusBadgeFull status={conn.status} errorKind={parsed?.kind ?? null} />
           </h1>
           <p className="mt-1.5 font-mono text-xs text-ink-hush uppercase tracking-wider">
             {sourceLabel(conn.source, conn.marketplace)} · подключён {new Date(conn.created_at).toLocaleString("ru-RU")}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <SyncButton connectionId={conn.id} source={conn.source} />
+          <SyncButton
+            connectionId={conn.id}
+            source={conn.source}
+            warehouseKind={conn.warehouse_kind}
+            marketplace={conn.marketplace}
+            lastError={conn.last_error}
+            lastSyncAt={conn.last_sync_at}
+          />
           <DeleteButton connectionId={conn.id} connectionName={conn.name} variant="full" />
         </div>
       </div>
@@ -105,15 +117,8 @@ export default async function ConnectionDetailPage({
         <KpiCard label="Создан"           value={new Date(conn.created_at).toLocaleString("ru-RU")} small />
       </div>
 
-      {/* Last error */}
-      {conn.last_error && (
-        <div className="mb-6 rounded-2xl border border-rose/30 bg-rose/5 p-5 md:p-6">
-          <div className="flex items-center gap-2 mb-3">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-rose font-semibold">Ошибка последнего синка</span>
-          </div>
-          <pre className="font-mono text-xs text-rose whitespace-pre-wrap break-all overflow-x-auto">{conn.last_error}</pre>
-        </div>
-      )}
+      {/* Подсказка по последней ошибке синка */}
+      {parsed && <ConnectionErrorHint parsed={parsed} className="mb-6" />}
 
       {/* Config (с замаскированными sensitive значениями) */}
       <div className="mb-6 rounded-2xl border border-line bg-paper p-5 md:p-6">
@@ -187,7 +192,8 @@ function KpiCard({ label, value, small }: { label: string; value: React.ReactNod
   );
 }
 
-function StatusBadgeFull({ status }: { status: string | null }) {
+function StatusBadgeFull({ status, errorKind }: { status: string | null; errorKind?: string | null }) {
+  const TRANSIENT: Record<string, string> = { rate_limit: "лимит API", marketplace_down: "МП недоступен", network: "нет связи" };
   const map: Record<string, { label: string; cls: string }> = {
     active:  { label: "активен",       cls: "text-lime-deep border-lime-deep/30 bg-lime-soft" },
     syncing: { label: "синхронизация", cls: "text-azure border-azure/30 bg-azure/10" },
@@ -195,7 +201,10 @@ function StatusBadgeFull({ status }: { status: string | null }) {
     paused:  { label: "пауза",         cls: "text-ink-hush border-line-2 bg-bg-soft" },
     error:   { label: "ошибка",        cls: "text-rose border-rose/30 bg-rose/10" },
   };
-  const s = map[status || ""] || map.paused;
+  let s = map[status || ""] || map.paused;
+  if (status === "error" && errorKind && TRANSIENT[errorKind]) {
+    s = { label: TRANSIENT[errorKind], cls: "text-orange border-orange/40 bg-orange/10" };
+  }
   return (
     <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2.5 py-1 rounded border font-semibold ${s.cls}`}>
       {s.label}

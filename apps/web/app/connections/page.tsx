@@ -3,6 +3,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import SyncButton from "./SyncButton";
 import ResumeButton from "./ResumeButton";
 import DeleteButton from "./DeleteButton";
+import { ConnectionErrorHint } from "./ConnectionErrorHint";
+import { parseApiError } from "@/lib/error-parser";
 import { Icons } from "../_components/Icons";
 
 export const dynamic = "force-dynamic";
@@ -75,6 +77,7 @@ export default async function ConnectionsPage() {
         {connections?.length ? (
           connections.map((c: any) => {
             const isPaused = c.status === "paused";
+            const parsed = c.last_error ? parseApiError(c.last_error) : null;
             return (
               <div key={c.id} className={`rounded-2xl border p-5 md:p-6 hover:shadow-sm transition ${
                 isPaused ? "border-orange/40 bg-orange/[0.02]" : "border-line bg-paper"
@@ -88,7 +91,7 @@ export default async function ConnectionsPage() {
                       <span className="font-display text-lg font-medium text-ink group-hover:text-lime-deep transition truncate">
                         {c.name}
                       </span>
-                      <StatusBadge status={c.status} failureCount={c.failure_count ?? 0} />
+                      <StatusBadge status={c.status} failureCount={c.failure_count ?? 0} errorKind={parsed?.kind ?? null} />
                       <span className="font-mono text-[10px] text-ink-hush opacity-0 group-hover:opacity-100 transition">
                         детали →
                       </span>
@@ -112,21 +115,19 @@ export default async function ConnectionsPage() {
                     {isPaused ? (
                       <ResumeButton connectionId={c.id} />
                     ) : (
-                      <SyncButton connectionId={c.id} source={c.source} />
+                      <SyncButton
+                        connectionId={c.id}
+                        source={c.source}
+                        warehouseKind={c.warehouse_kind}
+                        marketplace={c.marketplace}
+                        lastError={c.last_error}
+                        lastSyncAt={c.last_sync_at}
+                      />
                     )}
                     <DeleteButton connectionId={c.id} connectionName={c.name} variant="compact" />
                   </div>
                 </div>
-                {c.last_error && (
-                  <details className="mt-3 group" open={isPaused}>
-                    <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-widest text-rose hover:opacity-80 transition select-none">
-                      Текст последней ошибки
-                    </summary>
-                    <pre className="mt-2 p-3 bg-rose/5 border border-rose/20 rounded text-[11px] text-rose font-mono overflow-x-auto whitespace-pre-wrap break-all">
-                      {c.last_error}
-                    </pre>
-                  </details>
-                )}
+                {parsed && <ConnectionErrorHint parsed={parsed} />}
               </div>
             );
           })
@@ -152,7 +153,10 @@ export default async function ConnectionsPage() {
   );
 }
 
-function StatusBadge({ status, failureCount }: { status: string | null; failureCount: number }) {
+function StatusBadge({ status, failureCount, errorKind }: { status: string | null; failureCount: number; errorKind?: string | null }) {
+  // Временные сбои (лимит API / МП лежит / нет сети) показываем мягким янтарным
+  // тоном — это «подожди», а не «поломка». Жёсткий красный остаётся для реальных ошибок.
+  const TRANSIENT: Record<string, string> = { rate_limit: "лимит API", marketplace_down: "МП недоступен", network: "нет связи" };
   const map: Record<string, { label: string; cls: string }> = {
     active:   { label: "активен",     cls: "text-lime-deep border-lime-deep/30 bg-lime-soft" },
     syncing:  { label: "синхронизация", cls: "text-azure border-azure/30 bg-azure/10" },
@@ -160,7 +164,10 @@ function StatusBadge({ status, failureCount }: { status: string | null; failureC
     paused:   { label: "авто-пауза",  cls: "text-orange border-orange/40 bg-orange/10 font-bold" },
     error:    { label: "ошибка",      cls: "text-rose border-rose/30 bg-rose/10" },
   };
-  const s = map[status || ""] || map.pending;
+  let s = map[status || ""] || map.pending;
+  if (status === "error" && errorKind && TRANSIENT[errorKind]) {
+    s = { label: TRANSIENT[errorKind], cls: "text-orange border-orange/40 bg-orange/10" };
+  }
   const showCount = (status === "error" || status === "paused") && failureCount > 0;
   return (
     <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold ${s.cls}`}>
