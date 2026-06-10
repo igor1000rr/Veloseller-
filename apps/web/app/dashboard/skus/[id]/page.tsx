@@ -238,7 +238,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
       )}
 
       {unitPrice > 0 && (
-        <UnitEconomics priceRub={unitPrice} commissionPct={unitCommission} costRub={(product as any).cost_price != null ? Number((product as any).cost_price) : null} />
+        <UnitEconomics priceRub={unitPrice} commissionPct={unitCommission} costRub={(product as any).cost_price != null ? Number((product as any).cost_price) : null} productId={id} />
       )}
 
       {(elasticity ?? []).length > 0 && (
