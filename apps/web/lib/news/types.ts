@@ -23,4 +23,8 @@ export type NewsPost = {
   category: NewsCategory;
   readingMinutes: number;
   content: string;
+  // Опциональные поля: явные связанные посты и теги для подбора похожих.
+  // Если у поста их нет — getRelatedPosts падает обратно на категорию.
+  tags?: string[];
+  related?: string[];
 };
