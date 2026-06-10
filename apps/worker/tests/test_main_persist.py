@@ -96,12 +96,12 @@ class TestEnsureProductsBatching:
             _ensure_products(MagicMock(), "seller-1", None, snaps)
 
     def test_upsert_includes_connection_id(self):
-        """REGRESSION: products upsert должен включать connection_id в каждой строке."""
+        """REGRESSION: products upsert (через RPC bulk_upsert_products) включает connection_id в каждой строке."""
         snaps = [_mk_snap("X1"), _mk_snap("X2")]
         mock_sb = MagicMock()
-        upsert_payloads = []
-        mock_sb.table.return_value.upsert.side_effect = lambda rows, on_conflict=None: (
-            upsert_payloads.append((rows, on_conflict))
+        rpc_payloads = []
+        mock_sb.rpc.side_effect = lambda fn, params=None: (
+            rpc_payloads.append((fn, params))
             or MagicMock(execute=MagicMock(return_value=MagicMock()))
         )
         _setup_mock_for_select(mock_sb, [
@@ -111,9 +111,10 @@ class TestEnsureProductsBatching:
 
         _ensure_products(mock_sb, "seller-1", CONN_ID, snaps)
 
-        assert len(upsert_payloads) == 1
-        rows, on_conflict = upsert_payloads[0]
-        assert on_conflict == "seller_id,connection_id,sku"
+        assert len(rpc_payloads) == 1
+        fn, params = rpc_payloads[0]
+        assert fn == "bulk_upsert_products"
+        rows = params["p_rows"]
         # Каждая строка имеет connection_id
         for row in rows:
             assert row["connection_id"] == CONN_ID
