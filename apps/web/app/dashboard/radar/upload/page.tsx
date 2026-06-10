@@ -28,7 +28,8 @@ export default async function RadarUploadPage() {
         <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Загрузка прайса</h1>
         <p className="mt-1 text-sm text-ink-muted max-w-xl">
           Загрузите CSV или XLSX прайс поставщика — ИИ извлечёт список брендов.
-          После загрузки откроется страница подтверждения списка.
+          После обработки здесь появятся статус, число строк и извлечённых
+          брендов. Затем перейдите к брендам, чтобы подтвердить список.
         </p>
       </div>
 
