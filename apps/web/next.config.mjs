@@ -2,8 +2,25 @@
 
 // CSP в режиме Report-Only: не блокирует загрузку, но репортит нарушения
 // (в консоль браузера). Это безопасный первый шаг — строгий enforcing CSP
-// вслепую сломал бы Supabase/Sentry/Stripe. После проверки реальных нарушений
+// вслепую сломал бы Supabase/Stripe. После проверки реальных нарушений в консоли
 // заголовок можно переименовать в "Content-Security-Policy" (enforcing).
+//
+// Хост Supabase берём из env: инстанс self-hosted (не *.supabase.co), поэтому
+// connect-src обязан матчить реальный домен — иначе при enforcing CSP заблокирует
+// auth/data/realtime. Гард: при пустом/битом URL падаем на дефолт *.supabase.co.
+function supabaseCspHosts() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  try {
+    if (url) {
+      const host = new URL(url).host;
+      return { https: `https://${host}`, wss: `wss://${host}` };
+    }
+  } catch {
+    // битый URL — используем дефолт ниже
+  }
+  return { https: "https://*.supabase.co", wss: "wss://*.supabase.co" };
+}
+const sbCsp = supabaseCspHosts();
 const cspReportOnly = [
   "default-src 'self'",
   "base-uri 'self'",
@@ -13,7 +30,7 @@ const cspReportOnly = [
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sentry.io https://*.ingest.sentry.io",
+  `connect-src 'self' ${sbCsp.https} ${sbCsp.wss} https://*.sentry.io https://*.ingest.sentry.io`,
   "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
   "form-action 'self' https://auth.robokassa.ru",
 ].join("; ");
