@@ -46,7 +46,8 @@ def test_generate_excel_produces_valid_xlsx():
         "products": {"sku": "SKU001", "product_name": "Товар 1"},
     }]
     dead = [{
-        "coverage_days": 250, "adjusted_velocity": 0.1, "frozen_inventory_value": 30000,
+        "coverage_days": 250, "adjusted_velocity": 0.1,
+        "current_stock": 100, "current_price": 300, "inventory_segment": "dead_inventory_risk",
         "products": {"sku": "SKU999", "product_name": "Неликвид"},
     }]
     sb = _make_sb_with_data(store_metrics, top_losses, dead)
