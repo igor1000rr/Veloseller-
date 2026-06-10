@@ -108,9 +108,9 @@
 
   "sku.filters.period": "Период",
 
-  "sku.filters.section.period": "Период и расчёт",
+  "sku.filters.section.period": "Параметры расчёта",
 
-  "sku.filters.section.metrics": "Фильтры метрик",
+  "sku.filters.section.metrics": "Фильтры показателей",
   "sku.filters.calc": "Рассчитать",
   "sku.filters.includeInactive": "Включить SKU без активности",
   "sku.filters.inactiveHint": "Товары с нулевым остатком и без движений за последние 30 дней. По умолчанию скрыты — их не нужно учитывать в большинстве сценариев.",
