@@ -107,6 +107,10 @@
   "sku.col.reorderDays": "Reorder ({n}d)",
 
   "sku.filters.period": "Period",
+
+  "sku.filters.section.period": "Period & calculation",
+
+  "sku.filters.section.metrics": "Metric filters",
   "sku.filters.calc": "Calculate",
   "sku.filters.includeInactive": "Include inactive SKUs",
   "sku.filters.inactiveHint": "Items with zero stock and no movement in the last 30 days. Hidden by default — no need to consider them in most cases.",
