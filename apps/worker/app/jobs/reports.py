@@ -143,9 +143,9 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             threshold = int(params.get("coverage_days_threshold", 180))
             res = (
                 sb.table("tvelo_metrics")
-                .select("coverage_days,adjusted_velocity,current_stock,current_price,products!inner(sku,product_name,seller_id)")
+                .select("coverage_days,adjusted_velocity,current_stock,current_price,inventory_segment,products!inner(sku,product_name,seller_id)")
                 .eq("products.seller_id", seller_id)
-                .gt("coverage_days", threshold)
+                .or_(f"coverage_days.gt.{threshold},inventory_segment.eq.dead_inventory_risk")
                 .order("coverage_days", desc=True)
                 .limit(SHEET_ROW_LIMIT)
                 .execute()
@@ -434,7 +434,7 @@ def _build_sheet_frozen_stock(wb, rows: list[dict], currency: str) -> None:
             sku, name,
             int(r.get("current_stock") or 0),
             round(float(r.get("adjusted_velocity") or 0), 2),
-            int(r.get("coverage_days") or 0),
+            (int(r["coverage_days"]) if r.get("coverage_days") is not None else "∞"),
             round(_calc_frozen_money(r), 0),
         ])
 
