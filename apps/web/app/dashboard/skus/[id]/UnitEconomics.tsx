@@ -108,6 +108,22 @@ export function UnitEconomics({ priceRub, commissionPct, costRub, productId }: {
         <Field label={L.ads} suffix="%" value={ads} onChange={setAds} />
       </div>
 
+      {(costDirty || costStatus === "saved" || costStatus === "error") && (
+        <div className="mt-2 flex items-center gap-2">
+          {costDirty && (
+            <button
+              onClick={saveCost}
+              disabled={costStatus === "saving"}
+              className="text-xs font-mono uppercase tracking-wider px-3 py-1.5 rounded bg-lime-deep text-paper hover:bg-lime-deep/90 disabled:opacity-40 transition"
+            >
+              {costStatus === "saving" ? L.saving : L.saveCost}
+            </button>
+          )}
+          {costStatus === "saved" && <span className="text-xs font-mono text-lime-deep">✓ {L.saved}</span>}
+          {costStatus === "error" && <span className="text-xs font-mono text-rose">{L.errorLabel}</span>}
+        </div>
+      )}
+
       <div className="mt-4 grid grid-cols-3 gap-2 sm:gap-3">
         <Result label={L.spend} value={`−${fmt(spend)} ${RUB}`} color="text-ink-soft" />
         <Result label={L.profit} value={`${profit < 0 ? "−" : ""}${fmt(Math.abs(profit))} ${RUB}`} color={profitColor} big />
