@@ -170,31 +170,23 @@ async def extract_brands(
         "sample": list(models)[:5],
     })
 
-    # 5. Запись брендов в БД
-    current_approved = (
-        sb.table("radar_brands").select("id", count="exact", head=True)
-        .eq("seller_id", seller_id).eq("status", "approved").execute()
-    )
-    current_approved_count = getattr(current_approved, "count", 0) or 0
-    available_slots = max(0, brands_limit - current_approved_count)
-
+    # 5. Запись брендов в БД — ВСЕ извлечённые попадают в excluded (на ревью).
+    # Пользователь сам восстановит те, что хочет отслеживать (правка Александра:
+    # ИИ неидеален, финальный отбор за человеком). Лимит тарифа проверяется при
+    # восстановлении бренда в approved, а не здесь.
     brands_inserted = 0
     brands_marked_excluded = 0
-    for i, brand in enumerate(detection.brands):
-        status = "approved" if i < available_slots else "excluded"
+    for brand in detection.brands:
         try:
             sb.table("radar_brands").upsert({
                 "seller_id": seller_id,
                 "name": brand.name,
                 "name_normalized": brand.name_normalized,
                 "source": "price",
-                "status": status,
+                "status": "excluded",
                 "sku_count": brand.sku_count,
             }, on_conflict="seller_id,name_normalized").execute()
-            if status == "approved":
-                brands_inserted += 1
-            else:
-                brands_marked_excluded += 1
+            brands_marked_excluded += 1
         except Exception:
             logger.exception("radar_brands upsert failed",
                              extra={"seller_id": seller_id, "brand": brand.name})
