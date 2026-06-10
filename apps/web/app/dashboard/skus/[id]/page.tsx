@@ -6,7 +6,7 @@ import { UnitEconomics } from "./UnitEconomics";
 import { TagsEditor } from "./TagsEditor";
 import { HealthKpi } from "./HealthTooltip";
 import { buildHealthBreakdown, buildConfidenceBreakdown } from "./health-breakdown";
-import { Icons } from "../../../_components/Icons";
+import BackToSkus from "./BackToSkus";
 import { InfoTooltip } from "../../../_components/InfoTooltip";
 import { t } from "@/lib/i18n";
 
