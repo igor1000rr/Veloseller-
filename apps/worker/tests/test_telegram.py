@@ -75,3 +75,39 @@ def test_format_alerts_products_as_list():
     alerts = [{"kind": "low_stock", "message": "x", "products": [{"sku": "SKU"}]}]
     out = format_alerts_digest(alerts)
     assert "SKU" in out
+
+
+# ─── Gateway-режим (.ru шлёт через EU-воркер) ───────────────────────
+
+def test_send_message_via_gateway(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_GATEWAY_URL", "https://gw.example.com")
+    monkeypatch.setenv("TELEGRAM_GATEWAY_SECRET", "gw-secret")
+    from app.telegram import send_message
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = {"ok": True}
+    with patch("app.telegram.httpx.post", return_value=resp) as post:
+        assert send_message("123", "hi") is True
+        assert post.call_args[0][0].endswith("/telegram/send")
+        assert post.call_args.kwargs["headers"]["X-Gateway-Secret"] == "gw-secret"
+
+
+def test_send_message_gateway_not_ok(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_GATEWAY_URL", "https://gw.example.com")
+    monkeypatch.setenv("TELEGRAM_GATEWAY_SECRET", "gw-secret")
+    from app.telegram import send_message
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = {"ok": False}
+    with patch("app.telegram.httpx.post", return_value=resp):
+        assert send_message("123", "hi") is False
+
+
+def test_send_document_via_gateway(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_GATEWAY_URL", "https://gw.example.com")
+    monkeypatch.setenv("TELEGRAM_GATEWAY_SECRET", "gw-secret")
+    from app.telegram import send_document
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = {"ok": True}
+    with patch("app.telegram.httpx.post", return_value=resp) as post:
+        assert send_document("123", b"xxxx", "r.xlsx", caption="c") is True
+        assert post.call_args[0][0].endswith("/telegram/send-document")
+        assert "document" in post.call_args.kwargs["files"]
