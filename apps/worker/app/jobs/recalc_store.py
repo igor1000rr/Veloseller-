@@ -14,9 +14,9 @@ from app.db import execute_minimal
 from app.engine.lost_revenue import average_stockout_price
 from app.engine.store import (
     SkuHealthInput, SkuValue, concentration_50, demand_weight,
-    frozen_inventory_value, total_inventory_value, warehouse_health_score,
+    total_inventory_value, warehouse_health_score,
 )
-from app.schemas import EventType
+from app.schemas import EventType, InventorySegment
 
 logger = logging.getLogger("veloseller.recalc")
 
@@ -62,9 +62,16 @@ def _compute_aggregates(sku_data):
     ]
     inv_conc = concentration_50(inv_items)
     dem_conc = concentration_50(dem_items)
-    coverage_by_sku = {item["pid"]: item["metric"].coverage_days for item in active_sku_data}
     total_value = total_inventory_value(sku_health_inputs)
-    frozen_value = frozen_inventory_value(sku_health_inputs, coverage_by_sku)
+    # Замороженные деньги = сумма stock×price по SKU с сегментом DEAD_INVENTORY_RISK.
+    # Сегмент — единый источник правды неликвида: покрывает и coverage > 180, и
+    # «мёртвый по скорости» (adj_vel=0 при долгом наличии без продаж), который раньше
+    # с coverage=None молча выпадал из frozen.
+    frozen_value = sum(
+        item["current_stock"] * item["current_price"]
+        for item in active_sku_data
+        if item["metric"].segment == InventorySegment.DEAD_INVENTORY_RISK
+    )
     wh_score = warehouse_health_score(sku_health_inputs)
     seg_distribution = {}
     for item in active_sku_data:
@@ -80,7 +87,7 @@ def _compute_aggregates(sku_data):
     )
     dead_count = sum(
         1 for item in sku_data
-        if item["metric"].coverage_days is not None and item["metric"].coverage_days > 180
+        if item["metric"].segment == InventorySegment.DEAD_INVENTORY_RISK
     )
 
     # inactive_sku_count — SKU с нулевым остатком И без движений за период.
