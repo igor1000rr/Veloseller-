@@ -143,9 +143,9 @@ function BrandRow({
           {brand.name}
         </span>
         <span className={`font-mono text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
-          brand.source === "ai" ? "bg-azure/10 text-azure" : "bg-bg-soft text-ink-hush"
+          brand.source === "manual" ? "bg-bg-soft text-ink-hush" : "bg-azure/10 text-azure"
         }`}>
-          {brand.source === "ai" ? "ai" : "manual"}
+          {brand.source === "manual" ? "manual" : brand.source === "price" ? "прайс" : "ai"}
         </span>
         {brand.sku_count != null && brand.sku_count > 0 && (
           <span className="font-mono text-[10px] text-ink-hush">
