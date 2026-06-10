@@ -243,7 +243,7 @@ export function SkusFilters({
 
         {/* Правка 10 (#1): «Стереть заметки» — деструктивный тумблер (оранжевый),
             всегда доступен; чистит все заметки селлера при «Рассчитать». */}
-        <div className="flex items-center gap-2 pt-6">
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setEraseNotes((v) => !v)}
