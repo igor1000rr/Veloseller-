@@ -376,11 +376,14 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
 
     with httpx.Client(timeout=120.0) as cli:
         # 1. Карточки с баркодами (самый важный шаг — без этого не работает)
-        names_by_vendor, skus_by_vendor = _fetch_card_data(cli, token, with_skus=True)
+        names_by_vendor, skus_by_vendor, subjects_by_card, brands_by_card = _fetch_card_data(cli, token, with_skus=True)
         if not names_by_vendor:
             logger.warning("WB FBS: no cards found from Content API — nothing to fetch")
             return []
         commission_map = _fetch_wb_commission(cli, token)
+        # Цены по ВСЕМ товарам (FBO+FBS) — Statistics /supplier/stocks ниже даёт цену
+        # лишь для товаров с FBO-остатком, поэтому здесь добираем цены по vendorCode.
+        prices_disc = _fetch_wb_prices(cli, token)
 
         # Обратный маппинг: barcode → vendorCode (для агрегации остатков по supplierArticle)
         barcode_to_vendor: dict[str, str] = {}
