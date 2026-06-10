@@ -150,7 +150,11 @@ export function SkusFilters({
   const today = new Date().toISOString().slice(0, 10);
 
   return (
-    <div className="space-y-3 p-3 sm:p-4 rounded-xl border border-line bg-bg-soft">
+    <div className="space-y-3">
+      {/* Группировка по макету Александра (правки 7): две секции —
+          «Период и расчёт» и «Фильтры метрик». Цвета/токены — наши. */}
+      <section className="space-y-3 p-3 sm:p-4 rounded-xl border border-line bg-bg-soft">
+        <SectionHeader label={t("sku.filters.section.period")} />
       <div className="flex items-start gap-x-6 gap-y-3 flex-wrap">
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-1.5 flex-wrap">
@@ -265,8 +269,12 @@ export function SkusFilters({
       <p className="text-[11px] text-ink-hush leading-relaxed">
         {t("sku.filters.periodHelp")}
       </p>
+      </section>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
+      {/* METRIC FILTERS — 4 диапазонных фильтра отдельными карточками */}
+      <section className="space-y-3 p-3 sm:p-4 rounded-xl border border-line bg-bg-soft">
+        <SectionHeader label={t("sku.filters.section.metrics")} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <RangeField
           label={t("sku.filters.stock.label")}
           hint={t("sku.filters.stock.hint")}
@@ -310,6 +318,18 @@ export function SkusFilters({
           onMaxChange={setCoverageMax}
         />
       </div>
+      </section>
+    </div>
+  );
+}
+
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <div className="inline-flex items-center gap-2">
+      <span className="size-1 rounded-full bg-lime-deep" />
+      <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">
+        {label}
+      </span>
     </div>
   );
 }
@@ -328,7 +348,7 @@ function RangeField({
   maxPlaceholder?: string;
 }) {
   return (
-    <div>
+    <div className="rounded-lg border border-line bg-paper p-3">
       <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-1.5">
         {label}
       </label>
