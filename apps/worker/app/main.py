@@ -949,3 +949,29 @@ async def telegram_send(request: Request, x_gateway_secret: Optional[str] = Head
         raise HTTPException(400, "chat_id and text required")
     ok = send_message(chat_id, text, parse_mode=((payload or {}).get("parse_mode") or "HTML"))
     return {"ok": ok}
+
+
+@app.post("/telegram/send-document")
+async def telegram_send_document(request: Request, x_gateway_secret: Optional[str] = Header(None)) -> dict:
+    """Шлюз отправки файла (Excel/PDF отчёты) для инстансов без доступа к Telegram (.ru).
+
+    Принимает multipart: поле document (файл) + chat_id, опц. caption/parse_mode,
+    заголовок X-Gateway-Secret. Шлёт через бот-токен EU-воркера.
+    """
+    expected = _os.environ.get("TELEGRAM_GATEWAY_SECRET")
+    if not expected:
+        raise HTTPException(500, "Server misconfigured: TELEGRAM_GATEWAY_SECRET not set")
+    if not x_gateway_secret or not hmac.compare_digest(x_gateway_secret, expected):
+        raise HTTPException(403, "Forbidden")
+    from app.telegram import send_document
+    form = await request.form()
+    chat_id = str(form.get("chat_id") or "")
+    upload = form.get("document")
+    if not chat_id or upload is None or not hasattr(upload, "read"):
+        raise HTTPException(400, "chat_id and document required")
+    file_bytes = await upload.read()
+    caption = str(form.get("caption") or "")
+    parse_mode = str(form.get("parse_mode") or "HTML")
+    filename = getattr(upload, "filename", None) or "report.bin"
+    ok = send_document(chat_id, file_bytes, filename, caption=caption, parse_mode=parse_mode)
+    return {"ok": ok}
