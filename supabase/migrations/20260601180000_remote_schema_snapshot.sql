@@ -276,7 +276,7 @@ create table public.report_history (
   file_name text,
   file_size_bytes integer,
   error_message text,
-  sent_date date default ((sent_at AT TIME ZONE 'UTC'::text))::date,
+  sent_date date generated always as (((sent_at AT TIME ZONE 'UTC'::text))::date) stored,
   storage_path text
 );
 
