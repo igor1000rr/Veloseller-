@@ -842,6 +842,51 @@ def job_recalc_all() -> dict:
     return result
 
 
+def _bind_telegram_local(seller_id: str, chat_id: str) -> bool:
+    """Пишет telegram_chat_id в локальную базу этого воркера (инстанс 'c')."""
+    try:
+        sb = get_supabase()
+        res = sb.table("sellers").update({
+            "telegram_chat_id": chat_id, "notify_telegram": True,
+        }).eq("id", seller_id).execute()
+        return bool(res.data)
+    except Exception:
+        logger.exception("telegram local bind failed", extra={"chat_id": chat_id})
+        return False
+
+
+def _bind_telegram_remote_ru(seller_id: str, chat_id: str) -> bool:
+    """Привязка для инстанса 'r': дёргаем bind-эндпоинт .ru — он пишет СВОЮ базу.
+
+    EU не лезет в .ru-базу напрямую (изоляция данных сохраняется): идёт только
+    авторизованный HTTP-вызов EU → .ru с общим секретом RU_BIND_SECRET.
+    """
+    base = _os.environ.get("RU_BIND_URL")
+    secret = _os.environ.get("RU_BIND_SECRET")
+    if not base or not secret:
+        logger.warning("RU bind не настроен — пропускаю (нет RU_BIND_URL/RU_BIND_SECRET)")
+        return False
+    try:
+        import httpx
+        r = httpx.post(
+            base,
+            json={"seller_id": seller_id, "chat_id": chat_id},
+            headers={"X-Bind-Secret": secret},
+            timeout=15.0,
+        )
+        return r.status_code == 200 and bool((r.json() or {}).get("ok"))
+    except Exception:
+        logger.exception("telegram remote ru bind failed", extra={"chat_id": chat_id})
+        return False
+
+
+def _bind_telegram(instance: str, seller_id: str, chat_id: str) -> bool:
+    """Маршрутизация привязки по метке инстанса: 'r' → .ru по HTTP, иначе локальная база."""
+    if instance == "r":
+        return _bind_telegram_remote_ru(seller_id, chat_id)
+    return _bind_telegram_local(seller_id, chat_id)
+
+
 @app.post("/telegram/webhook")
 async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Optional[str] = Header(None)) -> dict:
     from app.telegram import send_message
@@ -866,22 +911,41 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         return {"ok": True}
     if text.startswith("/start"):
         parts = text.split(maxsplit=1)
-        # Привязываем ТОЛЬКО по подписанному токену (см. app.telegram_link).
-        # Сырой UUID больше не принимаем — это закрывает hijack чужой привязки:
-        # раньше любой, кто знал seller_id, мог перенаправить чужие уведомления
-        # себе через /start <uuid>.
-        seller_id = verify_telegram_link_token(parts[1].strip()) if len(parts) == 2 and parts[1] else None
-        if seller_id:
-            try:
-                sb = get_supabase()
-                res = sb.table("sellers").update({
-                    "telegram_chat_id": chat_id, "notify_telegram": True,
-                }).eq("id", seller_id).execute()
-                if res.data:
-                    send_message(chat_id, "✅ <b>Telegram подключён!</b>\n\nТеперь вы будете получать ежедневный digest по важным уведомлениям.")
-                    return {"ok": True, "linked": True}
-            except Exception:
-                logger.exception("telegram linking failed", extra={"chat_id": chat_id})
+        # Привязка ТОЛЬКО по подписанному токену (см. app.telegram_link) — сырой
+        # UUID не принимаем (закрытый hijack). Метка инстанса в токене решает,
+        # в чью базу писать: единый бот на EU обслуживает и .com, и .ru.
+        verified = verify_telegram_link_token(parts[1].strip()) if len(parts) == 2 and parts[1] else None
+        if verified:
+            instance, seller_id = verified
+            if _bind_telegram(instance, seller_id, chat_id):
+                send_message(chat_id, "✅ <b>Telegram подключён!</b>\n\nТеперь вы будете получать ежедневный digest по важным уведомлениям.")
+                return {"ok": True, "linked": True}
         send_message(chat_id, "Привет! Я бот <b>Veloseller</b>. Чтобы подключить уведомления, откройте Veloseller и нажмите кнопку «Подключить Telegram» в настройках.")
         return {"ok": True, "linked": False}
     return {"ok": True}
+
+
+@app.post("/telegram/send")
+async def telegram_send(request: Request, x_gateway_secret: Optional[str] = Header(None)) -> dict:
+    """Шлюз отправки Telegram для инстансов без доступа к api.telegram.org (.ru — Барн).
+
+    Принимает {chat_id, text, parse_mode?} с заголовком X-Gateway-Secret и шлёт
+    через бот-токен этого (EU) воркера. Так РФ-воркер уведомляет своих селлеров,
+    не обращаясь к Telegram напрямую.
+    """
+    expected = _os.environ.get("TELEGRAM_GATEWAY_SECRET")
+    if not expected:
+        raise HTTPException(500, "Server misconfigured: TELEGRAM_GATEWAY_SECRET not set")
+    if not x_gateway_secret or not hmac.compare_digest(x_gateway_secret, expected):
+        raise HTTPException(403, "Forbidden")
+    from app.telegram import send_message
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+    chat_id = str((payload or {}).get("chat_id") or "")
+    text = (payload or {}).get("text") or ""
+    if not chat_id or not text:
+        raise HTTPException(400, "chat_id and text required")
+    ok = send_message(chat_id, text, parse_mode=((payload or {}).get("parse_mode") or "HTML"))
+    return {"ok": ok}
