@@ -283,11 +283,11 @@ def _ensure_products(sb, seller_id: str, connection_id: str, snapshots: list[Sna
         "brand": s.brand,
         "category": s.category,
     } for s in snapshots]
+    # upsert через RPC bulk_upsert_products: brand/category НЕ затираются NULL,
+    # если источник на этом синке их не отдал (COALESCE на стороне БД сохраняет
+    # последнее известное значение). product_name обновляется всегда.
     for i in range(0, len(rows), _PRODUCTS_IN_BATCH):
-        sb.table("products").upsert(
-            rows[i:i + _PRODUCTS_IN_BATCH],
-            on_conflict="seller_id,connection_id,sku",
-        ).execute()
+        sb.rpc("bulk_upsert_products", {"p_rows": rows[i:i + _PRODUCTS_IN_BATCH]}).execute()
 
     all_skus = [s.sku for s in snapshots]
     sku_to_pid: dict[str, str] = {}
