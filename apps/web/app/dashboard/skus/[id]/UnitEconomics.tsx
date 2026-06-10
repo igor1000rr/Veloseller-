@@ -36,9 +36,12 @@ const L = {
 
 const RUB = "₽";
 
-export function UnitEconomics({ priceRub, commissionPct, costRub }: { priceRub: number; commissionPct: number | null; costRub?: number | null }) {
+export function UnitEconomics({ priceRub, commissionPct, costRub, productId }: { priceRub: number; commissionPct: number | null; costRub?: number | null; productId: string }) {
   const [price, setPrice] = useState<string>(priceRub ? priceRub.toFixed(0) : "");
   const [cost, setCost] = useState<string>(costRub != null ? String(costRub) : "");
+  const [savedCost, setSavedCost] = useState<string>(costRub != null ? String(costRub) : "");
+  const [costStatus, setCostStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [, startTransition] = useTransition();
   const [commission, setCommission] = useState<string>(commissionPct != null ? String(commissionPct) : "");
   const [logistics, setLogistics] = useState<string>("1");
   const [acquiring, setAcquiring] = useState<string>("2");
