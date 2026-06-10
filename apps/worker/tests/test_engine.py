@@ -62,8 +62,20 @@ class TestClassifyEvent:
         assert et == EventType.REPLENISHMENT_LIKE and ex is True
 
     def test_anomaly(self):
-        et, ex = classify_event(-11, 2.0, True)
+        # floor=15: при median=2 порог = max(15, 5×2) = 15 → аномалия только выше floor
+        et, ex = classify_event(-16, 2.0, True)
         assert et == EventType.ANOMALY_LIKE and ex is True
+
+    def test_low_base_spike_not_anomaly(self):
+        # Низкооборачиваемый SKU (median=2): спайк 12 шт — реальная продажа, НЕ аномалия.
+        # Раньше срабатывало при > 10 (5×median), теперь floor поднимает порог до 15.
+        et, ex = classify_event(-12, 2.0, True)
+        assert et == EventType.SALES_LIKE and ex is False
+
+    def test_anomaly_high_median_multiplier_dominates(self):
+        # При высокой медиане доминирует 5×median: median=10 → порог = max(15, 50) = 50
+        assert classify_event(-40, 10.0, True)[0] == EventType.SALES_LIKE
+        assert classify_event(-60, 10.0, True)[0] == EventType.ANOMALY_LIKE
 
     def test_no_history_no_anomaly(self):
         et, _ = classify_event(-100, None, True)
@@ -103,6 +115,16 @@ class TestVelocity:
 
     def test_adjusted_zero_in_stock(self):
         assert velocity.adjusted_velocity(10, 2.0, 3, 0) == 0.0
+
+    def test_soft_velocity_basic(self):
+        assert velocity.soft_velocity([2, 2, 2]) == 2.0
+
+    def test_soft_velocity_empty(self):
+        assert velocity.soft_velocity([]) == 0.0
+
+    def test_soft_velocity_trims_extreme(self):
+        # 100 — экстремум (> 5×median=10), отсекается; медиана по [2,2,2,3] = 2
+        assert velocity.soft_velocity([2, 2, 2, 3, 100], extreme_factor=5.0) == 2.0
 
 
 # ============================================================================
