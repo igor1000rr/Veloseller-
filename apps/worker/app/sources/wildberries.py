@@ -28,6 +28,10 @@ logger = logging.getLogger("veloseller.wb")
 STOCKS_URL = "https://statistics-api.wildberries.ru/api/v1/supplier/stocks"
 CARDS_URL = "https://content-api.wildberries.ru/content/v2/get/cards/list"
 MARKETPLACE_API = "https://marketplace-api.wildberries.ru"
+# Discounts-Prices API — цены по ВСЕМ товарам (FBO+FBS), в отличие от Statistics
+# /supplier/stocks (только товары с FBO-остатком). Требует категорию «Цены и скидки».
+PRICES_URL = "https://discounts-prices-api.wildberries.ru/api/v2/list/goods/filter"
+PRICES_PAGE_LIMIT = 1000
 
 CARDS_PAGE_SIZE = 100
 MAX_CARDS_PAGES = 1000
