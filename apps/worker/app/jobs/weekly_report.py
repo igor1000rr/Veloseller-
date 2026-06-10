@@ -122,9 +122,12 @@ def _build_dead_inventory_sheet(wb, dead: list[dict], currency: str) -> None:
         ws.append([
             products.get("sku") or "—",
             products.get("product_name") or "—",
-            int(row.get("coverage_days") or 0),
+            (int(row["coverage_days"]) if row.get("coverage_days") is not None else "∞"),
             round(float(row.get("adjusted_velocity") or 0), 2),
-            _format_money(row.get("frozen_inventory_value"), currency),
+            _format_money(
+                float(row.get("current_stock") or 0) * float(row.get("current_price") or 0),
+                currency,
+            ),
         ])
 
     _column_widths(ws, {"A": 22, "B": 40, "C": 16, "D": 22, "E": 22})
@@ -165,13 +168,14 @@ def _generate_excel_for_seller(sb, seller_id: str, currency: str = "RUB") -> Opt
         )
         top_losses = top_losses_res.data or []
 
-        # Неликвид: coverage > 180
+        # Неликвид: сегмент dead_inventory_risk (coverage > 180 + мёртвый по скорости).
+        # Раньше селектили несуществующую колонку frozen_inventory_value — запрос падал.
         dead_res = (
             sb.table("tvelo_metrics")
-            .select("coverage_days,adjusted_velocity,frozen_inventory_value,products!inner(sku,product_name,seller_id)")
+            .select("coverage_days,adjusted_velocity,current_stock,current_price,inventory_segment,products!inner(sku,product_name,seller_id)")
             .eq("products.seller_id", seller_id)
-            .gt("coverage_days", 180)
-            .order("frozen_inventory_value", desc=True)
+            .eq("inventory_segment", "dead_inventory_risk")
+            .order("current_stock", desc=True)
             .limit(200)
             .execute()
         )
