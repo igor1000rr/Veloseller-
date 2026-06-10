@@ -45,6 +45,46 @@ class TestPipelineEdgeCases:
         assert m.in_stock_days == 7
         assert m.stockout_days == 0
 
+    def test_all_anomaly_soft_velocity_rescue(self):
+        """Деадлок-в-0 fix: период из одних anomaly_like с реальным расходом теперь
+        даёт adjusted_velocity > 0 через soft-velocity, а не 0 (ложно «мёртвый»)."""
+        ps, pe = date(2026, 1, 1), date(2026, 1, 7)
+        aggs = [
+            _agg(date(2026, 1, 1 + i), stock=100 - i * 10,
+                 event=EventType.ANOMALY_LIKE, delta=-10, excluded=True)
+            for i in range(7)
+        ]
+        m = compute_metrics_for_sku(str(uuid4()), ps, pe, aggs, current_stock=30)
+        # soft median по дельтам [10]*7 = 10 → adj = (0 + 10*7)/7 = 10
+        assert m.adjusted_velocity == pytest.approx(10.0, abs=0.01)
+        assert m.coverage_days == pytest.approx(3.0, abs=0.01)
+        assert m.confirmed_velocity == 0.0  # чистых sales_like нет — оценка грубая
+
+    def test_dead_inventory_segment_when_no_sales_long_in_stock(self):
+        """Мёртвый неликвид: 30 дней в наличии, ноль продаж, остаток > 0 →
+        segment DEAD_INVENTORY_RISK (а не INSUFFICIENT_DATA) → попадёт в frozen."""
+        ps, pe = date(2026, 1, 1), date(2026, 1, 30)
+        aggs = [
+            _agg(date(2026, 1, 1 + i), stock=50, event=EventType.NO_CHANGE, delta=0)
+            for i in range(30)
+        ]
+        m = compute_metrics_for_sku(str(uuid4()), ps, pe, aggs, current_stock=50)
+        assert m.adjusted_velocity == 0.0
+        assert m.coverage_days is None
+        assert m.segment == InventorySegment.DEAD_INVENTORY_RISK
+
+    def test_new_product_not_marked_dead(self):
+        """Страж новизны: товар в наличии лишь 5 дней без продаж НЕ считается мёртвым
+        (in_stock_days < порога) — остаётся INSUFFICIENT_DATA."""
+        ps, pe = date(2026, 1, 1), date(2026, 1, 5)
+        aggs = [
+            _agg(date(2026, 1, 1 + i), stock=50, event=EventType.NO_CHANGE, delta=0)
+            for i in range(5)
+        ]
+        m = compute_metrics_for_sku(str(uuid4()), ps, pe, aggs, current_stock=50)
+        assert m.adjusted_velocity == 0.0
+        assert m.segment == InventorySegment.INSUFFICIENT_DATA
+
     def test_all_missing_data_period_not_stockout(self):
         """БАГ 1 FIX: 7 дней все MISSING_DATA → stockout_days=0, in_stock_days=0.
 
