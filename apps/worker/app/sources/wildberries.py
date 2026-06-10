@@ -120,7 +120,7 @@ def _fetch_card_data(cli: httpx.Client, token: str, with_skus: bool = False) -> 
         logger.warning("WB cards fetch hit MAX_CARDS_PAGES=%d", MAX_CARDS_PAGES)
 
     logger.info("WB cards fetched: %d, with_skus=%s", len(names), with_skus)
-    return names, skus_map
+    return names, skus_map, subjects, brands
 
 
 def _fetch_card_names(cli: httpx.Client, token: str) -> dict[str, str]:
