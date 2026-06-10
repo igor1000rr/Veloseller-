@@ -221,9 +221,12 @@ export function SkusFilters({
             {t("sku.filters.calc")}
           </button>
         </div>
+      </div>
 
+      {/* Опции — отдельной строкой с разделителем, чтобы не сливались с полями расчёта */}
+      <div className="flex items-center gap-x-6 gap-y-2 flex-wrap pt-3 border-t border-line">
         {showInactiveToggle && (
-          <div className="flex items-center gap-2 pt-6">
+          <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={toggleInactive}
