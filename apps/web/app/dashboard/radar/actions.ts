@@ -147,6 +147,22 @@ export async function actionExcludeBrand(brandId: string) {
   revalidatePath("/dashboard/radar/brands");
 }
 
+/**
+ * Удалить бренд полностью (вместе со всеми его запросами — CASCADE на radar_queries).
+ * Правка Александра: ИИ может извлечь мусорный бренд, либо селлер перестал его
+ * возить — нужна возможность убрать совсем, а не только исключить.
+ */
+export async function actionDeleteBrand(brandId: string) {
+  const { sb, user } = await getUser();
+  await sb.from("radar_brands")
+    .delete()
+    .eq("id", brandId)
+    .eq("seller_id", user.id);
+  await logAction(sb, user.id, null, "brand_deleted");
+  revalidatePath("/dashboard/radar");
+  revalidatePath("/dashboard/radar/brands");
+}
+
 export async function actionAddBrandManual(name: string) {
   const { sb, user } = await getUser();
   const trimmed = name.trim();
