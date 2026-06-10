@@ -129,8 +129,23 @@ def compute_metrics_for_sku(
 
     adj_vel = vel_mod.adjusted_velocity(consumption, median_30d_vel, excluded_in_stock_days, in_stock_days)
 
+    # Bracketed-gap softening (перестраховка от даунтайма/миграции): MISSING-день ВНУТРИ
+    # периода (после него ещё есть реальный снапшот) — «обрамлённый» провал. Суммарный
+    # расход за дыру известен из снапшотов до и после, теряется лишь посуточная разбивка,
+    # поэтому штрафуем такой день вполовину (settings.bracketed_gap_weight). Хвостовой
+    # провал (после последнего реального дня — «не знаем, что сейчас») остаётся полным.
+    last_real_idx = -1
+    for i, a in enumerate(daily_aggregates):
+        if a.event_type != EventType.MISSING_DATA:
+            last_real_idx = i
+    bracketed_miss = sum(
+        1 for i, a in enumerate(daily_aggregates)
+        if a.event_type == EventType.MISSING_DATA and i < last_real_idx
+    )
+    effective_miss_days = (miss_days - bracketed_miss) + settings.bracketed_gap_weight * bracketed_miss
+
     confidence = calculate_confidence(
-        effective_period_days, repl_days, anom_days, miss_days,
+        effective_period_days, repl_days, anom_days, effective_miss_days,
         sales_like_days=sales_like_days,
     )
     cov_days = cov_mod.coverage_days(current_stock, adj_vel)
