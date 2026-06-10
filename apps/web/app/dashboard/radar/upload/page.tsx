@@ -49,7 +49,6 @@ export default async function RadarUploadPage() {
                     <span>{new Date(u.created_at).toLocaleString("ru")}</span>
                     <span>строк: {u.rows_total ?? "—"}</span>
                     <span>брендов: {u.brands_extracted ?? "—"}</span>
-                    {u.ai_cost_usd != null && <span>${Number(u.ai_cost_usd).toFixed(4)}</span>}
                   </div>
                 </div>
                 <StatusBadge status={u.status} error={u.error_message} />
