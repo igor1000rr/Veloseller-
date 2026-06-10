@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   const { sb, userId, brandsLimit } = auth;
 
   // Rate-limit чтобы не загадили БД ботом
-  const limited = enforceRateLimit(req, RATE_LIMITS.DEFAULT, userId);
+  const limited = enforceRateLimit(req, RATE_LIMITS.WRITE, userId);
   if (limited) return limited;
 
   let body: { name?: string };
