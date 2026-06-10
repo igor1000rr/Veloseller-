@@ -486,3 +486,31 @@ class TestTelegramSend:
             headers={"X-Gateway-Secret": "whatever"},
         )
         assert r.status_code == 500
+
+    def test_send_document_no_header_returns_403(self):
+        r = client.post(
+            "/telegram/send-document",
+            data={"chat_id": "1"},
+            files={"document": ("r.xlsx", b"xxxx")},
+        )
+        assert r.status_code == 403
+
+    def test_send_document_valid_sends(self):
+        with patch("app.telegram.send_document", return_value=True) as send:
+            r = client.post(
+                "/telegram/send-document",
+                data={"chat_id": "123", "caption": "report"},
+                files={"document": ("r.xlsx", b"xxxx")},
+                headers={"X-Gateway-Secret": self.GATEWAY_SECRET},
+            )
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        send.assert_called_once()
+
+    def test_send_document_missing_doc_returns_400(self):
+        r = client.post(
+            "/telegram/send-document",
+            data={"chat_id": "123"},
+            headers={"X-Gateway-Secret": self.GATEWAY_SECRET},
+        )
+        assert r.status_code == 400
