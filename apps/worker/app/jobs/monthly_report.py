@@ -179,7 +179,7 @@ def _fetch_top_frozen(sb, seller_id: str, limit: int = 10) -> list[dict]:
             sb.table("tvelo_metrics")
             .select("current_stock,current_price,coverage_days,products!inner(sku,product_name,seller_id)")
             .eq("products.seller_id", seller_id)
-            .gt("coverage_days", 180)
+            .eq("inventory_segment", "dead_inventory_risk")
             .gt("current_stock", 0)
             .limit(500)
             .execute()
