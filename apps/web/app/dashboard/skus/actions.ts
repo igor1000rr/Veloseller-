@@ -130,3 +130,45 @@ export async function saveProductTags(
     return { ok: false, error: e?.message ?? "unknown error" };
   }
 }
+
+/**
+ * Сохранить себестоимость по SKU (ручной ввод из карточки, блок Юнит-экономика).
+ * Массовый импорт пишет то же поле products.cost_price через воркер — здесь
+ * ручная правка одного товара. Пустое/невалидное значение очищает себестоимость.
+ * Пишем только свои строки (seller_id) + RLS на products — defense in depth.
+ */
+export async function saveCostPrice(
+  productId: string,
+  cost: number | null,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!productId || typeof productId !== "string") {
+    return { ok: false, error: "invalid product id" };
+  }
+  let finalCost: number | null = null;
+  if (cost != null) {
+    if (typeof cost !== "number" || !isFinite(cost) || cost < 0) {
+      return { ok: false, error: "invalid cost" };
+    }
+    finalCost = cost;
+  }
+
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { ok: false, error: "unauthorized" };
+    }
+    const { error } = await supabase
+      .from("products")
+      .update({ cost_price: finalCost, cost_price_updated_at: new Date().toISOString() })
+      .eq("product_id", productId)
+      .eq("seller_id", user.id);
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+    revalidatePath("/dashboard/skus");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "unknown error" };
+  }
+}
