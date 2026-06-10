@@ -25,14 +25,20 @@ TELEGRAM_TEST_HEADERS = {"X-Telegram-Bot-Api-Secret-Token": TELEGRAM_TEST_SECRET
 TELEGRAM_LINK_TEST_SECRET = "test-link-secret"
 
 
-def _mint_link_token(seller_id: str, ttl: int = 1800, secret: str = TELEGRAM_LINK_TEST_SECRET) -> str:
+def _mint_link_token(
+    seller_id: str,
+    ttl: int = 1800,
+    secret: str = TELEGRAM_LINK_TEST_SECRET,
+    instance: str = "",
+) -> str:
     """Генерит валидный подписанный токен привязки — как apps/web/lib/telegram-link.ts.
 
-    Формат: <uuidHex32>_<expHex>_<sigHex16>, sig = HMAC_SHA256(msg, secret)[:16].
+    Формат: [<instance>_]<uuidHex32>_<expHex>_<sigHex16>, sig = HMAC_SHA256(msg, secret)[:16].
+    instance="" → старый формат без метки (воркер трактует как 'c').
     """
     uuid_hex = seller_id.replace("-", "").lower()
     exp_hex = format(int(time.time()) + ttl, "x")
-    msg = f"{uuid_hex}_{exp_hex}"
+    msg = f"{instance}_{uuid_hex}_{exp_hex}" if instance else f"{uuid_hex}_{exp_hex}"
     sig = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()[:16]
     return f"{msg}_{sig}"
 
