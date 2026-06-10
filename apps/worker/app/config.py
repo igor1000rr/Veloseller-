@@ -28,6 +28,14 @@ class Settings(BaseSettings):
 
     # Расчётные константы из спеки
     anomaly_multiplier: float = 5.0
+    # Минимальный абсолютный порог аномалии: защищает низкооборачиваемые SKU
+    # (медиана 1-3 шт/день) от ложной классификации реальных спайков как anomaly.
+    anomaly_floor: int = 15
+    # Отсечка экстремальных выбросов в soft-velocity (× медианы дней-расхода).
+    soft_velocity_extreme_factor: float = 5.0
+    # Мин. дней в наличии без единой продажи, чтобы счесть SKU неликвидом
+    # (страж: новый товар без истории не помечается мёртвым).
+    dead_min_tracked_days: int = 30
     initial_confidence: float = 95.0
     confidence_floor: float = 40.0
     median_window_days: int = 30
