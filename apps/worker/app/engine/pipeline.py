@@ -26,8 +26,9 @@ from typing import Optional
 from app.engine import coverage as cov_mod
 from app.engine import health as health_mod
 from app.engine import velocity as vel_mod
+from app.config import settings
 from app.engine.confidence import calculate_confidence
-from app.schemas import EventType, TVeloMetric
+from app.schemas import EventType, InventorySegment, TVeloMetric
 
 
 @dataclass
@@ -111,6 +112,21 @@ def compute_metrics_for_sku(
         history_for_median = [abs(d) for d in sales_like_deltas]
     median_30d_vel = vel_mod.median_30d_velocity(history_for_median)
 
+    # Деадлок-в-0 fix: если чистых sales_like дней мало/нет, медиана = 0 и
+    # adjusted_velocity схлопывается в 0 — товар выглядит мёртвым, хотя реально
+    # расходовался спайками (всё ушло в anomaly_like/excluded). Берём грубую
+    # soft-velocity по всем дням-расхода без экстремальных выбросов. Confidence
+    # при этом остаётся низкой (мало sales_like) — оценка честно помечена как грубая.
+    if median_30d_vel <= 0:
+        soft_consumption = [
+            abs(a.delta_stock) for a in daily_aggregates
+            if a.delta_stock is not None and a.delta_stock < 0
+            and a.event_type in (EventType.SALES_LIKE, EventType.ANOMALY_LIKE)
+        ]
+        median_30d_vel = vel_mod.soft_velocity(
+            soft_consumption, settings.soft_velocity_extreme_factor
+        )
+
     adj_vel = vel_mod.adjusted_velocity(consumption, median_30d_vel, excluded_in_stock_days, in_stock_days)
 
     confidence = calculate_confidence(
@@ -120,6 +136,17 @@ def compute_metrics_for_sku(
     cov_days = cov_mod.coverage_days(current_stock, adj_vel)
     health = health_mod.sku_health_score(stockout_days, effective_period_days, cov_days, confidence.final)
     segment = health_mod.inventory_segment(cov_days)
+    # Мёртвый неликвид: coverage=None (adj_vel=0 даже после soft → расхода вообще
+    # не было), но товар реально лежал в наличии достаточно дней (in_stock_days >=
+    # порога) при ненулевом остатке. Без этого он молча уходит в INSUFFICIENT_DATA
+    # и выпадает из frozen/dead-метрик. Страж по in_stock_days отсекает и
+    # «всё пропущено» (in_stock≈0), и новый товар (мало дней наблюдения).
+    if (
+        segment == InventorySegment.INSUFFICIENT_DATA
+        and current_stock > 0
+        and in_stock_days >= settings.dead_min_tracked_days
+    ):
+        segment = InventorySegment.DEAD_INVENTORY_RISK
 
     return TVeloMetric(
         product_id=product_id,
