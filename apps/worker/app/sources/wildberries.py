@@ -88,6 +88,13 @@ def _fetch_card_data(cli: httpx.Client, token: str, with_skus: bool = False) -> 
             title = (card.get("title") or "").strip()
             if vendor_code and title:
                 names[vendor_code] = title
+            if vendor_code:
+                subj = (card.get("subjectName") or "").strip()
+                if subj and vendor_code not in subjects:
+                    subjects[vendor_code] = subj
+                brand = (card.get("brand") or "").strip()
+                if brand and vendor_code not in brands:
+                    brands[vendor_code] = brand
             if with_skus and vendor_code:
                 # Каждый размер (sizes[]) имеет свои баркоды (skus[])
                 for size in (card.get("sizes") or []):
