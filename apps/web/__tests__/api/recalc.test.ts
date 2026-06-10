@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 
 const getUserMock = vi.fn();
 vi.mock("@/lib/supabase/server", () => ({
@@ -18,7 +19,7 @@ describe("POST /api/jobs/recalc", () => {
   it("без авторизации — 401", async () => {
     getUserMock.mockResolvedValue({ data: { user: null } });
     const { POST } = await import("@/app/api/jobs/recalc/route");
-    const res = await POST();
+    const res = await POST(new NextRequest("http://localhost/api/jobs/recalc", { method: "POST" }));
     expect(res.status).toBe(401);
   });
 
@@ -26,7 +27,7 @@ describe("POST /api/jobs/recalc", () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "user-123" } } });
     (global.fetch as any).mockResolvedValue({ ok: true, json: async () => ({ metrics_written: 5 }) });
     const { POST } = await import("@/app/api/jobs/recalc/route");
-    const res = await POST();
+    const res = await POST(new NextRequest("http://localhost/api/jobs/recalc", { method: "POST" }));
     expect(res.status).toBe(200);
     expect(global.fetch).toHaveBeenCalledWith(
       "http://worker:8001/jobs/recalc/user-123",
@@ -41,7 +42,7 @@ describe("POST /api/jobs/recalc", () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     (global.fetch as any).mockResolvedValue({ ok: false, status: 500, text: async () => "Internal error" });
     const { POST } = await import("@/app/api/jobs/recalc/route");
-    const res = await POST();
+    const res = await POST(new NextRequest("http://localhost/api/jobs/recalc", { method: "POST" }));
     expect(res.status).toBe(502);
   });
 
@@ -49,7 +50,7 @@ describe("POST /api/jobs/recalc", () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     (global.fetch as any).mockRejectedValue(new Error("ECONNREFUSED"));
     const { POST } = await import("@/app/api/jobs/recalc/route");
-    const res = await POST();
+    const res = await POST(new NextRequest("http://localhost/api/jobs/recalc", { method: "POST" }));
     expect(res.status).toBe(502);
   });
 });
