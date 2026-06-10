@@ -171,6 +171,63 @@ def _fetch_wb_commission(cli: httpx.Client, token: str) -> dict[str, dict]:
     return out
 
 
+def _fetch_wb_prices(cli: httpx.Client, token: str) -> dict[str, tuple[Decimal, Decimal]]:
+    """Цены ВСЕХ товаров продавца (FBO+FBS) через Discounts-Prices API v2.
+
+    Statistics API /supplier/stocks отдаёт цену только для товаров с FBO-остатком,
+    поэтому у чисто FBS-товаров (нет на складе WB) цена там отсутствует. Этот
+    endpoint возвращает цену по каждому товару независимо от схемы продажи.
+
+    Returns: {vendorCode: (nominal_price, discount_pct)} (Decimal).
+    Требует у токена категорию «Цены и скидки». Best-effort: при ошибке — {}.
+    """
+    out: dict[str, tuple[Decimal, Decimal]] = {}
+    offset = 0
+    pages = 0
+    try:
+        while pages < MAX_CARDS_PAGES:
+            pages += 1
+
+            def _call(off=offset):
+                resp = cli.get(
+                    PRICES_URL,
+                    params={"limit": PRICES_PAGE_LIMIT, "offset": off},
+                    headers={"Authorization": token},
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                return resp.json() or {}
+
+            data = with_retry(_call, base_delay=5.0, max_delay=30.0)
+            goods = ((data.get("data") or {}).get("listGoods")) or []
+            if not goods:
+                break
+            for g in goods:
+                vendor = (g.get("vendorCode") or "").strip()
+                if not vendor or vendor in out:
+                    continue
+                nominal = None
+                for s in (g.get("sizes") or []):
+                    pv = s.get("price")
+                    if pv:
+                        nominal = Decimal(str(pv))
+                        break
+                if nominal is None:
+                    continue
+                try:
+                    disc = Decimal(str(g.get("discount") or 0))
+                except Exception:
+                    disc = Decimal("0")
+                out[vendor] = (nominal, disc)
+            if len(goods) < PRICES_PAGE_LIMIT:
+                break
+            offset += PRICES_PAGE_LIMIT
+        logger.info("WB discounts-prices: %d vendorCodes", len(out))
+    except Exception as e:
+        logger.warning("WB discounts-prices fetch failed: %s", e)
+    return out
+
+
 def fetch_snapshots(token: str) -> list[SnapshotInput]:
     """FBO snapshots (склады WB) через Statistics API."""
     now = datetime.now(timezone.utc)
