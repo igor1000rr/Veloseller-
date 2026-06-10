@@ -51,6 +51,12 @@ def _make_item(
     segment: Optional[InventorySegment] = None,
 ) -> dict:
     """Сформировать item в формате sku_data (см. recalc_seller)."""
+    # Если segment не задан явно — выводим из coverage_days как пайплайн
+    # (inventory_segment): cov>180 ⇒ DEAD_INVENTORY_RISK и т.д. Держит мок
+    # консистентным с реальной метрикой (dead/frozen теперь по сегменту).
+    if segment is None and coverage_days is not None:
+        from app.engine.health import inventory_segment
+        segment = inventory_segment(coverage_days)
     return {
         "pid": pid,
         "metric": _FakeMetric(
