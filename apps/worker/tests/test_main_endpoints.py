@@ -401,3 +401,88 @@ class TestTelegramWebhook:
         os.environ.pop("TELEGRAM_WEBHOOK_SECRET", None)
         r = client.post("/telegram/webhook", json={"update_id": 1})
         assert r.status_code == 500
+
+    def test_start_with_instance_c_token_links_locally(self):
+        """Токен с меткой 'c' пишет chat_id в локальную базу воркера."""
+        mock_sb = MagicMock()
+        mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
+            data=[{"id": VALID_UUID}]
+        )
+        token = _mint_link_token(VALID_UUID, instance="c")
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.telegram.send_message", return_value=True):
+            r = client.post(
+                "/telegram/webhook",
+                json={"message": {"text": f"/start {token}", "chat": {"id": 777}}},
+                headers=TELEGRAM_TEST_HEADERS,
+            )
+        assert r.status_code == 200
+        assert r.json()["linked"] is True
+
+    def test_start_with_instance_r_token_routes_remote(self):
+        """Токен с меткой 'r' уходит в .ru через HTTP-bind, локальная база не трогается."""
+        token = _mint_link_token(VALID_UUID, instance="r")
+        with patch("app.main._bind_telegram_remote_ru", return_value=True) as remote, \
+             patch("app.main.get_supabase") as get_sb, \
+             patch("app.telegram.send_message", return_value=True):
+            r = client.post(
+                "/telegram/webhook",
+                json={"message": {"text": f"/start {token}", "chat": {"id": 888}}},
+                headers=TELEGRAM_TEST_HEADERS,
+            )
+        assert r.status_code == 200
+        assert r.json()["linked"] is True
+        remote.assert_called_once()
+        get_sb.assert_not_called()
+
+
+class TestTelegramSend:
+    """Шлюз /telegram/send: РФ-воркер шлёт сюда, EU отправляет через бот-токен."""
+
+    GATEWAY_SECRET = "test-gateway-secret"
+
+    def setup_method(self):
+        os.environ["TELEGRAM_GATEWAY_SECRET"] = self.GATEWAY_SECRET
+
+    def teardown_method(self):
+        os.environ.pop("TELEGRAM_GATEWAY_SECRET", None)
+
+    def test_no_header_returns_403(self):
+        r = client.post("/telegram/send", json={"chat_id": "1", "text": "hi"})
+        assert r.status_code == 403
+
+    def test_wrong_secret_returns_403(self):
+        r = client.post(
+            "/telegram/send",
+            json={"chat_id": "1", "text": "hi"},
+            headers={"X-Gateway-Secret": "nope"},
+        )
+        assert r.status_code == 403
+
+    def test_valid_secret_sends(self):
+        with patch("app.telegram.send_message", return_value=True) as send:
+            r = client.post(
+                "/telegram/send",
+                json={"chat_id": "123", "text": "hi"},
+                headers={"X-Gateway-Secret": self.GATEWAY_SECRET},
+            )
+        assert r.status_code == 200
+        assert r.json()["ok"] is True
+        send.assert_called_once()
+
+    def test_missing_fields_returns_400(self):
+        r = client.post(
+            "/telegram/send",
+            json={"chat_id": "123"},
+            headers={"X-Gateway-Secret": self.GATEWAY_SECRET},
+        )
+        assert r.status_code == 400
+
+    def test_no_gateway_secret_env_returns_500(self):
+        os.environ.pop("TELEGRAM_GATEWAY_SECRET", None)
+        r = client.post(
+            "/telegram/send",
+            json={"chat_id": "1", "text": "hi"},
+            headers={"X-Gateway-Secret": "whatever"},
+        )
+        assert r.status_code == 500
