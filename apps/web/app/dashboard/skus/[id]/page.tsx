@@ -1,5 +1,4 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { SkuAnalysisChart, type ChartPoint } from "./SkuAnalysisChart";
 import { ReorderPanel } from "./ReorderPanel";
