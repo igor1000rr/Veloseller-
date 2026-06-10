@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 import { _resetRateLimits } from "@/lib/rate-limit";
 
 const getUserMock = vi.fn();
@@ -26,7 +27,7 @@ describe("POST /api/alerts/[id]/ack", () => {
   it("без авторизации — 401", async () => {
     getUserMock.mockResolvedValue({ data: { user: null } });
     const { POST } = await import("@/app/api/alerts/[id]/ack/route");
-    const res = await POST(new Request("http://x"), { params: Promise.resolve({ id: "a1" }) });
+    const res = await POST(new NextRequest("http://x"), { params: Promise.resolve({ id: "a1" }) });
     expect(res.status).toBe(401);
   });
 
@@ -34,7 +35,7 @@ describe("POST /api/alerts/[id]/ack", () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     updateChainMock.mockResolvedValue({ error: { message: "permission denied" }, count: null });
     const { POST } = await import("@/app/api/alerts/[id]/ack/route");
-    const res = await POST(new Request("http://x"), { params: Promise.resolve({ id: "a1" }) });
+    const res = await POST(new NextRequest("http://x"), { params: Promise.resolve({ id: "a1" }) });
     expect(res.status).toBe(500);
     const body = await res.json();
     // БАГ 78: error.message НЕ должен утечь наружу — возвращаем общий текст.
@@ -46,7 +47,7 @@ describe("POST /api/alerts/[id]/ack", () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     updateChainMock.mockResolvedValue({ error: null, count: 0 });
     const { POST } = await import("@/app/api/alerts/[id]/ack/route");
-    const res = await POST(new Request("http://x"), { params: Promise.resolve({ id: "a1" }) });
+    const res = await POST(new NextRequest("http://x"), { params: Promise.resolve({ id: "a1" }) });
     expect(res.status).toBe(404);
   });
 
@@ -54,7 +55,7 @@ describe("POST /api/alerts/[id]/ack", () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     updateChainMock.mockResolvedValue({ error: null, count: 1 });
     const { POST } = await import("@/app/api/alerts/[id]/ack/route");
-    const res = await POST(new Request("http://x"), { params: Promise.resolve({ id: "a1" }) });
+    const res = await POST(new NextRequest("http://x"), { params: Promise.resolve({ id: "a1" }) });
     expect(res.status).toBe(200);
     expect((await res.json()).ok).toBe(true);
   });
