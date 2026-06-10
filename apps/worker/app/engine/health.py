@@ -9,6 +9,7 @@ def sku_health_score(
     period_days: int,
     coverage_days_value: Optional[float],
     confidence_score: float,
+    dead_no_velocity: bool = False,
 ) -> HealthBreakdown:
     stockout_pen = min(40.0, stockout_days / period_days * 40) if period_days > 0 else 0.0
     low_cov_pen = 0.0
@@ -19,6 +20,10 @@ def sku_health_score(
             low_cov_pen = (7 - max(cov, 0)) / 7 * 25
         if cov > 180:
             dead_pen = min(25.0, (cov - 180) / 180 * 25)
+    elif dead_no_velocity:
+        # Неликвид без скорости (coverage=None, adj_vel=0 при долгом наличии):
+        # бесконечное покрытие = худший случай → максимальный dead-штраф.
+        dead_pen = 25.0
     conf_pen = max(0.0, (100 - confidence_score) * 0.2)
     final = max(0, min(100, 100 - stockout_pen - low_cov_pen - dead_pen - conf_pen))
     return HealthBreakdown(
