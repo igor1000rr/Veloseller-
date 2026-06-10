@@ -101,7 +101,7 @@
   "sku.col.reorder": "Закупка",
   "sku.col.confidence": "ДСТ",
   "sku.col.health": "Health",
-  "sku.col.lostRevenue": "Потерянная выручка",
+  "sku.col.lostRevenue": "Упущено, ₽",
   "sku.col.notes": "Заметки",
   "sku.col.oosDays": "Дней без наличия ({n}д)",
   "sku.col.reorderDays": "Закупка ({n}д)",
