@@ -17,6 +17,7 @@ from app.jobs.recalc import recalc_all_sellers, recalc_seller, recalc_seller_all
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.logger import JsonFormatter, setup_logger
 from app.radar.api import router as radar_router
+from app.cost_import_api import router as cost_import_router
 from app.schemas import SnapshotInput, SourceType
 from app.sources import csv_upload, feed as feed_src, google_sheet, ozon, shopify, wildberries
 from app.telegram_link import verify_telegram_link_token
