@@ -51,7 +51,10 @@ def classify_event(
     if (
         median_30d_abs_delta is not None
         and median_30d_abs_delta > 0
-        and abs(delta_stock) > settings.anomaly_multiplier * median_30d_abs_delta
+        and abs(delta_stock) > max(
+            float(settings.anomaly_floor),
+            settings.anomaly_multiplier * median_30d_abs_delta,
+        )
     ):
         return EventType.ANOMALY_LIKE, True
     return EventType.SALES_LIKE, False
