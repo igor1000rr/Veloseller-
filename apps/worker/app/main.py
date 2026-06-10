@@ -247,6 +247,8 @@ def require_worker_secret(x_worker_secret: Optional[str] = Header(None)) -> None
 # Подключаем Radar роутер. /radar/* endpoints защищены через
 # require_worker_secret на уровне роутера (передаём dependency).
 app.include_router(radar_router, dependencies=[Depends(require_worker_secret)])
+# Импорт себестоимости (массовая загрузка из карточки товара) — тот же worker-secret.
+app.include_router(cost_import_router, dependencies=[Depends(require_worker_secret)])
 
 
 @app.get("/health")
