@@ -34,6 +34,10 @@ export async function POST(req: NextRequest) {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
+  // Rate limit — парсинг прайса (pandas/openpyxl на worker'е) дорогая операция.
+  const limited = enforceRateLimit(req, RATE_LIMITS.EXPENSIVE, user.id);
+  if (limited) return limited;
+
   // Проверка тарифа.
   const { data: seller } = await sb
     .from("sellers")
