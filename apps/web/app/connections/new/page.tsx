@@ -362,7 +362,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
         {isWb && (
           <div>
             <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">
-              {isWbFbs ? "Токен WB (Статистика + Маркетплейс + Контент)" : "Статистический токен"}
+              {isWbFbs ? "Токен WB (Статистика + Маркетплейс + Контент + Цены и скидки)" : "Статистический токен"}
             </label>
             <input required type="password" value={wbToken} onChange={(e) => setWbToken(e.target.value)}
               className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
