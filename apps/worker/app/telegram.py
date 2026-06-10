@@ -1,10 +1,20 @@
 """Telegram bot notifications. Без gRPC/long-polling — только Bot API send_message.
 Ссылки в дайджесте ведут на /dashboard/alerts (текущий URL).
+
+Gateway-режим: если задан TELEGRAM_GATEWAY_URL (инстанс без прямого доступа к
+api.telegram.org — например .ru под блокировкой РКН), и send_message, и
+send_document уходят НЕ напрямую в Telegram, а через EU-воркер
+(POST {gateway}/telegram/send[-document], заголовок X-Gateway-Secret). На EU/.com
+переменная не задана → шлём напрямую через бот-токен. Так весь существующий код
+отправки (дайджесты, Radar, отчёты, алерты) маршрутизируется через EU без правок
+в местах вызова.
 """
 from __future__ import annotations
 import html
 import logging
 import os
+from typing import Optional
+
 import httpx
 
 logger = logging.getLogger("veloseller.telegram")
@@ -17,9 +27,72 @@ def _app_url() -> str:
     return raw.split(",")[0].strip().rstrip("/")
 
 
+def _gateway_url() -> Optional[str]:
+    """База EU-шлюза, если этот инстанс шлёт через него (.ru). Иначе None (EU/.com)."""
+    raw = os.getenv("TELEGRAM_GATEWAY_URL")
+    return raw.split(",")[0].strip().rstrip("/") if raw else None
+
+
+def _send_message_via_gateway(chat_id: str, text: str, parse_mode: str) -> bool:
+    base = _gateway_url()
+    secret = os.getenv("TELEGRAM_GATEWAY_SECRET")
+    if not base or not secret:
+        logger.warning("gateway send: нет TELEGRAM_GATEWAY_URL/SECRET")
+        return False
+    try:
+        r = httpx.post(
+            f"{base}/telegram/send",
+            json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode},
+            headers={"X-Gateway-Secret": secret},
+            timeout=20.0,
+        )
+        if r.status_code != 200:
+            logger.warning("Telegram gateway send %s: %s", r.status_code, r.text[:200])
+            return False
+        return bool((r.json() or {}).get("ok"))
+    except Exception as e:
+        logger.exception("Telegram gateway send error: %s", e)
+        return False
+
+
+def _send_document_via_gateway(
+    chat_id: str, file_bytes: bytes, filename: str, caption: str, parse_mode: str
+) -> bool:
+    base = _gateway_url()
+    secret = os.getenv("TELEGRAM_GATEWAY_SECRET")
+    if not base or not secret:
+        logger.warning("gateway sendDocument: нет TELEGRAM_GATEWAY_URL/SECRET")
+        return False
+    try:
+        files = {"document": (filename, file_bytes, "application/octet-stream")}
+        data = {"chat_id": chat_id}
+        if caption:
+            data["caption"] = caption
+            data["parse_mode"] = parse_mode
+        r = httpx.post(
+            f"{base}/telegram/send-document",
+            data=data,
+            files=files,
+            headers={"X-Gateway-Secret": secret},
+            timeout=60.0,
+        )
+        if r.status_code != 200:
+            logger.warning("Telegram gateway sendDocument %s: %s", r.status_code, r.text[:200])
+            return False
+        return bool((r.json() or {}).get("ok"))
+    except Exception as e:
+        logger.exception("Telegram gateway sendDocument error: %s", e)
+        return False
+
+
 def send_message(chat_id: str, text: str, *, parse_mode: str = "HTML") -> bool:
+    if not chat_id:
+        return False
+    # Инстанс без прямого доступа к Telegram (.ru) — через EU-шлюз.
+    if _gateway_url():
+        return _send_message_via_gateway(chat_id, text, parse_mode)
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token or not chat_id:
+    if not token:
         return False
     try:
         r = httpx.post(
@@ -43,9 +116,13 @@ def send_document(
     caption: str = "",
     parse_mode: str = "HTML",
 ) -> bool:
-    """Шлёт файл в telegram через Bot API sendDocument."""
+    """Шлёт файл в telegram через Bot API sendDocument (или через EU-шлюз для .ru)."""
+    if not chat_id:
+        return False
+    if _gateway_url():
+        return _send_document_via_gateway(chat_id, file_bytes, filename, caption, parse_mode)
     token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token or not chat_id:
+    if not token:
         return False
     try:
         files = {
