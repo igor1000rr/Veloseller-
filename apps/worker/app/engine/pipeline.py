@@ -134,18 +134,23 @@ def compute_metrics_for_sku(
         sales_like_days=sales_like_days,
     )
     cov_days = cov_mod.coverage_days(current_stock, adj_vel)
-    health = health_mod.sku_health_score(stockout_days, effective_period_days, cov_days, confidence.final)
-    segment = health_mod.inventory_segment(cov_days)
-    # Мёртвый неликвид: coverage=None (adj_vel=0 даже после soft → расхода вообще
-    # не было), но товар реально лежал в наличии достаточно дней (in_stock_days >=
-    # порога) при ненулевом остатке. Без этого он молча уходит в INSUFFICIENT_DATA
-    # и выпадает из frozen/dead-метрик. Страж по in_stock_days отсекает и
-    # «всё пропущено» (in_stock≈0), и новый товар (мало дней наблюдения).
-    if (
-        segment == InventorySegment.INSUFFICIENT_DATA
+    # Мёртвый неликвид: coverage=None (adj_vel=0 даже после soft → расхода вообще не
+    # было), но товар реально лежал в наличии достаточно дней (in_stock_days >= порога)
+    # при ненулевом остатке. Без этого он молча уходит в INSUFFICIENT_DATA и выпадает
+    # из frozen/dead/health. Страж по in_stock_days отсекает и «всё пропущено»
+    # (in_stock≈0), и новый товар (мало дней наблюдения). Флаг идёт и в health
+    # (максимальный dead-штраф), и в сегмент.
+    is_dead_no_velocity = (
+        cov_days is None
         and current_stock > 0
         and in_stock_days >= settings.dead_min_tracked_days
-    ):
+    )
+    health = health_mod.sku_health_score(
+        stockout_days, effective_period_days, cov_days, confidence.final,
+        dead_no_velocity=is_dead_no_velocity,
+    )
+    segment = health_mod.inventory_segment(cov_days)
+    if is_dead_no_velocity:
         segment = InventorySegment.DEAD_INVENTORY_RISK
 
     return TVeloMetric(
