@@ -244,6 +244,15 @@ class TestHealth:
         h = sku_health_score(0, 30, None, 100.0)
         assert h.low_coverage == 0.0 and h.dead_inventory == 0.0
 
+    def test_dead_no_velocity_max_penalty(self):
+        # Неликвид без скорости (coverage=None, adj_vel=0 при долгом наличии):
+        # максимальный dead-штраф 25, хотя coverage не вычислен.
+        h = sku_health_score(0, 30, None, 100.0, dead_no_velocity=True)
+        assert h.dead_inventory == 25.0
+        # тот же coverage=None без флага штрафа не даёт
+        h2 = sku_health_score(0, 30, None, 100.0, dead_no_velocity=False)
+        assert h2.dead_inventory == 0.0
+
     def test_floor_zero(self):
         h = sku_health_score(30, 30, 0.0, 40.0)
         assert h.final == 23
