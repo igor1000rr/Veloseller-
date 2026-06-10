@@ -51,6 +51,8 @@ def _fetch_card_data(cli: httpx.Client, token: str, with_skus: bool = False) -> 
     """
     names: dict[str, str] = {}
     skus_map: dict[str, list[str]] = {}
+    subjects: dict[str, str] = {}
+    brands: dict[str, str] = {}
     cursor_updated_at = None
     cursor_nm_id = None
     pages = 0
