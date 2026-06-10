@@ -79,9 +79,9 @@ async def extract_brands(
     3. detect_models_from_price — извлечение моделей (V11, GBH2-26)
     4. Сохраняем модели в radar_price_models (для wordstat_matcher)
     5. Обновляем radar_price_uploads (status, metrics)
-    6. Создаём radar_brands (status=approved в пределах лимита тарифа)
-    7. Остальные пишутся как excluded — в UI показываются в FOMO-тизере
-    8. Возвращаем {brands_count, brands_approved, models_saved}
+    6. Создаём radar_brands — ВСЕ извлечённые как excluded (на ревью).
+       Пользователь сам восстановит нужные; лимит проверяется при восстановлении.
+    7. Возвращаем {brands_count, brands_approved, models_saved}
 
     Идемпотентность: если upload уже processed (status=completed),
     повторный вызов вернёт текущий результат без перерасчёта.
