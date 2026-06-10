@@ -294,3 +294,31 @@ class TestPipelineEdgeCases:
         assert m.stockout_days == 0
         # 7 sales + 3 missing/10 → 95 - 30 = 65
         assert m.confidence_score == 65.0
+
+    def test_bracketed_missing_softened(self):
+        """Перестраховка: MISSING-дни ВНУТРИ периода (после них есть реальные данные)
+        штрафуются вполовину — провал миграции/даунтайма не валит confidence как
+        настоящая хвостовая дыра.
+
+        4 sales + 4 missing(внутри) + 2 sales = 10 дней. 4 «обрамлённых» missing × 0.5 = 2
+        эффективных. missing_pen = 2/10×100 = 20 (а не 40). 6 sales_like < 7 → low_pen = 5.
+        confidence = 95 − 20 − 5 = 70.
+        """
+        ps, pe = date(2026, 1, 1), date(2026, 1, 10)
+        aggs = []
+        for i in range(4):
+            aggs.append(_agg(date(2026, 1, 1 + i), stock=100 - i * 2,
+                             event=EventType.SALES_LIKE, delta=-2))
+        for i in range(4):
+            aggs.append(_agg(date(2026, 1, 5 + i), stock=92,
+                             event=EventType.MISSING_DATA, delta=None,
+                             availability=False, excluded=True))
+        for i in range(2):
+            aggs.append(_agg(date(2026, 1, 9 + i), stock=92 - (i + 1) * 2,
+                             event=EventType.SALES_LIKE, delta=-2))
+        m = compute_metrics_for_sku(str(uuid4()), ps, pe, aggs, current_stock=88)
+        # 4 обрамлённых missing × 0.5 = 2 эфф. / 10 = 20%
+        assert m.confidence_breakdown.missing_data == pytest.approx(20.0, abs=0.01)
+        # 6 sales_like → low_pen = 35×(1−6/7) = 5
+        assert m.confidence_breakdown.low_history == pytest.approx(5.0, abs=0.01)
+        assert m.confidence_score == pytest.approx(70.0, abs=0.01)
