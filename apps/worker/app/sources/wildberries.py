@@ -452,10 +452,17 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
     snapshots = []
     for vendor_code, title in names_by_vendor.items():
         qty = stocks_by_vendor.get(vendor_code, 0)
-        price = prices_by_vendor.get(vendor_code, Decimal("0"))
-        disc = discount_by_vendor.get(vendor_code, Decimal("0"))
+        # Цена: приоритет Discounts-Prices (есть у всех товаров), фолбэк — Statistics.
+        if vendor_code in prices_disc:
+            price, disc = prices_disc[vendor_code]
+        else:
+            price = prices_by_vendor.get(vendor_code, Decimal("0"))
+            disc = discount_by_vendor.get(vendor_code, Decimal("0"))
         marketing = (price * (Decimal("1") - disc / Decimal("100"))).quantize(Decimal("0.01")) if price else Decimal("0")
-        subj_key = (subject_by_vendor.get(vendor_code) or "").lower()
+        # Предмет/бренд: приоритет карточкам Content API (есть у всех), фолбэк — Statistics.
+        subject = subjects_by_card.get(vendor_code) or subject_by_vendor.get(vendor_code)
+        brand = brands_by_card.get(vendor_code) or brand_by_vendor.get(vendor_code)
+        subj_key = (subject or "").lower()
         comm = commission_map.get(subj_key, {}).get("fbs") if subj_key else None
         snapshots.append(SnapshotInput(
             sku=vendor_code,
@@ -465,8 +472,8 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
             seller_price=(price if price else None),
             marketing_price=(marketing if price else None),
             commission_pct=comm,
-            brand=(brand_by_vendor.get(vendor_code) or None),
-            category=(subject_by_vendor.get(vendor_code) or None),
+            brand=(brand or None),
+            category=(subject or None),
             snapshot_time=now,
         ))
 
