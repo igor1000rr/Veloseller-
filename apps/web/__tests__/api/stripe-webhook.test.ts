@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 
 const constructEventMock = vi.fn();
 const subscriptionsRetrieveMock = vi.fn();
@@ -46,7 +47,7 @@ async function callWebhook(body: string, sig: string | null) {
   const { POST } = await import("@/app/api/stripe/webhook/route");
   const headers = new Headers();
   if (sig) headers.set("stripe-signature", sig);
-  return POST(new Request("http://localhost/api/stripe/webhook", { method: "POST", headers, body }));
+  return POST(new NextRequest("http://localhost/api/stripe/webhook", { method: "POST", headers, body }));
 }
 
 describe("POST /api/stripe/webhook", () => {

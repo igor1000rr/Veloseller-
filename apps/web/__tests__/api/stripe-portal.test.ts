@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 
 // БАГ 29: тесты обновлены под whitelist origin. Дефолт APP_URL = первый из списка.
 process.env.APP_URL = "https://veloseller.ru,https://app.veloseller.com";
@@ -25,7 +26,7 @@ beforeEach(() => {
 });
 
 function req(origin = "https://app.veloseller.com") {
-  return new Request("http://x", { method: "POST", headers: { origin } });
+  return new NextRequest("http://x", { method: "POST", headers: { origin } });
 }
 
 describe("POST /api/stripe/portal", () => {

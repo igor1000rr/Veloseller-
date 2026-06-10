@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 
 // БАГ 29: тесты обновлены под новое поведение — origin теперь whitelist
 // из APP_URL env, а не user-controlled header. Дефолт APP_URL = https://veloseller.ru
@@ -37,7 +38,7 @@ beforeEach(() => {
 });
 
 function req(body: any, origin = "https://app.veloseller.com") {
-  return new Request("http://x", { method: "POST", headers: { "Content-Type": "application/json", origin }, body: JSON.stringify(body) });
+  return new NextRequest("http://x", { method: "POST", headers: { "Content-Type": "application/json", origin }, body: JSON.stringify(body) });
 }
 
 describe("POST /api/stripe/checkout", () => {

@@ -56,6 +56,7 @@ describe("lib/crypto", () => {
     const { encrypt } = await import("@/lib/crypto");
     const enc = encrypt("secret");
     process.env.SECRET_ENCRYPTION_KEY = Buffer.alloc(32, 2).toString("base64");
+    // @ts-expect-error vite cache-bust query (?v=2) форсит свежий модуль; tsc его не резолвит
     const fresh = await import("@/lib/crypto?v=2");
     expect(() => fresh.decrypt(enc)).toThrow();
   });
