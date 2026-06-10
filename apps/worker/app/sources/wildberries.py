@@ -39,7 +39,7 @@ MAX_CARDS_PAGES = 1000
 FBS_STOCKS_BATCH = 1000
 
 
-def _fetch_card_data(cli: httpx.Client, token: str, with_skus: bool = False) -> tuple[dict[str, str], dict[str, list[str]]]:
+def _fetch_card_data(cli: httpx.Client, token: str, with_skus: bool = False) -> tuple[dict[str, str], dict[str, list[str]], dict[str, str], dict[str, str]]:
     """Тянем все карточки продавца через Content API.
 
     Returns:
