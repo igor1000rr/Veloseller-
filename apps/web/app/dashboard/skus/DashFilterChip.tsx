@@ -113,7 +113,7 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
           {t("sku.filter.fromOverview")}
         </span>
         <span className="text-sm text-ink font-medium">
-          {FILTER_LABELS[filter]}
+          {FILTER_LABELS[filter] ?? filter}
         </span>
       </div>
 
