@@ -149,9 +149,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
   return (
     <div className="space-y-6">
       <header>
-        <Link href="/dashboard/skus" className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition py-1">
-          <span className="rotate-180"><Icons.ArrowRight size={12} /></span> {t("sku.detail.allSku")}
-        </Link>
+        <BackToSkus label={t("sku.detail.allSku")} />
         <div className="mt-3 flex items-baseline gap-2 sm:gap-3 flex-wrap">
           <h1 className="font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium text-ink break-words">{product.product_name}</h1>
         </div>
