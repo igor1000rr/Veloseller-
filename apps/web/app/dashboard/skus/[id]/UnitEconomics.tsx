@@ -27,7 +27,11 @@ const L = {
   margin: isEn ? "Margin" : "Маржа",
   spend: isEn ? "Fees + cost" : "Расходы + с/с",
   fromApi: isEn ? "from API" : "из API",
-  note: isEn ? "Values aren't saved yet — for quick modeling." : "Значения пока не сохраняются — для быстрой прикидки.",
+  note: isEn ? "Cost is saved; the rest is for quick modeling." : "Себестоимость сохраняется; остальное — для быстрой прикидки.",
+  saveCost: isEn ? "Save cost" : "Сохранить себестоимость",
+  saving: isEn ? "saving…" : "сохранение…",
+  saved: isEn ? "saved" : "сохранено",
+  errorLabel: isEn ? "error" : "ошибка",
 };
 
 const RUB = "₽";
