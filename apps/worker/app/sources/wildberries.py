@@ -125,7 +125,7 @@ def _fetch_card_data(cli: httpx.Client, token: str, with_skus: bool = False) -> 
 
 def _fetch_card_names(cli: httpx.Client, token: str) -> dict[str, str]:
     """Legacy shim — без баркодов, для старых вызовов в fetch_snapshots."""
-    names, _ = _fetch_card_data(cli, token, with_skus=False)
+    names, _, _, _ = _fetch_card_data(cli, token, with_skus=False)
     return names
 
 
