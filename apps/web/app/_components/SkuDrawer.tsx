@@ -26,6 +26,17 @@ export default function SkuDrawer() {
     return () => window.removeEventListener("velo:open-sku", onOpen as EventListener);
   }, []);
 
+  // Закрытие из карточки в iframe: BackToSkus в embed-режиме шлёт это сообщение
+  // вместо навигации, чтобы не грузить список SKU внутрь панели (см. BackToSkus.tsx).
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin) return;
+      if ((e.data as { type?: string } | null)?.type === "velo:close-sku") setId(null);
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setId(null); };
