@@ -144,7 +144,11 @@ function Field({ label, suffix, value, onChange, hint, highlight }: {
         {label}
         {hint && <span className="ml-1 text-azure normal-case tracking-normal">· {hint}</span>}
       </span>
-      <div className="mt-1 flex items-center rounded-xl border border-line bg-paper focus-within:border-lime-deep transition overflow-hidden">
+      <div className={`mt-1 flex items-center rounded-xl border bg-paper transition overflow-hidden ${
+        highlight
+          ? "border-lime-deep ring-2 ring-lime-deep/30 bg-lime-soft/20"
+          : "border-line focus-within:border-lime-deep"
+      }`}>
         <input
           type="number"
           inputMode="decimal"
