@@ -73,6 +73,31 @@ export async function DELETE(req: NextRequest) {
   }
 
   try {
+    // GDPR: удаляем файлы отчётов из Storage ДО удаления строк report_history
+    // (они снимаются каскадом при удалении sellers). Бакет report-files приватный,
+    // путь = "<seller_id>/<дата>/<файл>". Сбой Storage не должен блокировать
+    // удаление аккаунта — логируем и продолжаем.
+    try {
+      const { data: reportRows } = await admin
+        .from("report_history")
+        .select("storage_path")
+        .eq("seller_id", sellerId)
+        .not("storage_path", "is", null);
+      const paths = (reportRows || [])
+        .map((r) => r.storage_path as string)
+        .filter(Boolean);
+      if (paths.length > 0) {
+        const { error: rmErr } = await admin.storage.from("report-files").remove(paths);
+        if (rmErr) {
+          console.error("[account-delete] Storage cleanup failed", { sellerId, error: rmErr.message });
+        } else {
+          console.log("[account-delete] Storage report files removed", { sellerId, count: paths.length });
+        }
+      }
+    } catch (e: any) {
+      console.error("[account-delete] Storage cleanup exception", { sellerId, error: e?.message });
+    }
+
     const productsRes = await admin.from("products").select("product_id").eq("seller_id", sellerId);
     const productIds = (productsRes.data || []).map(p => p.product_id);
 
