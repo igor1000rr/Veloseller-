@@ -368,7 +368,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
               className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
             {isWbFbs && (
               <p className="mt-1.5 font-mono text-[11px] text-ink-hush">
-                Для FBS нужны три категории прав: Статистика (цены), Маркетплейс (остатки FBS), Контент (карточки).
+                Для FBS нужны права: Маркетплейс (остатки FBS), Контент (карточки → бренд/категория), Цены и скидки (цены товаров), Статистика (продажи).
               </p>
             )}
           </div>
