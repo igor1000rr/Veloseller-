@@ -89,7 +89,11 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
   }
 
   const currentThreshold = threshold ?? defaultThreshold(filter);
-  const description = FILTER_DESCRIPTIONS[filter](currentThreshold);
+  // Защита от неизвестного фильтра (напр. "active" из DashboardFilter, которого
+  // нет в карте чипа): без неё FILTER_DESCRIPTIONS[filter] === undefined и вызов
+  // undefined(...) роняет страницу SKU. Тип DashFilter/DashboardFilter
+  // синхронизируется отдельно в type-cleanup.
+  const description = (FILTER_DESCRIPTIONS[filter] ?? (() => ""))(currentThreshold);
 
   // Префикс для подписи рядом с input — зависит от фильтра.
   const thresholdPrefix =
