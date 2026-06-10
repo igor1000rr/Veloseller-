@@ -63,8 +63,12 @@ export function QueriesTable({ queries, tab }: { queries: Query[]; tab: Tab }) {
               <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Бренд</th>
               <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Частота</th>
               <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Тренд</th>
-              <th className="text-center px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">WB</th>
-              <th className="text-center px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">OZON</th>
+              <th className="text-center px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
+                <span className="inline-flex items-center justify-center gap-1">WB <InfoTooltip text="Пользователи уже искали этот товар в WB — подтверждение спроса в маркетплейсе" /></span>
+              </th>
+              <th className="text-center px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">
+                <span className="inline-flex items-center justify-center gap-1">OZON <InfoTooltip text="Пользователи уже искали этот товар в OZON — подтверждение спроса в маркетплейсе" /></span>
+              </th>
               <th className="text-left px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Появилось</th>
               <th className="text-right px-4 py-3 font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Действия</th>
             </tr>
