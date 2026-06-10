@@ -31,9 +31,9 @@ const L = {
 
 const RUB = "₽";
 
-export function UnitEconomics({ priceRub, commissionPct }: { priceRub: number; commissionPct: number | null }) {
+export function UnitEconomics({ priceRub, commissionPct, costRub }: { priceRub: number; commissionPct: number | null; costRub?: number | null }) {
   const [price, setPrice] = useState<string>(priceRub ? priceRub.toFixed(0) : "");
-  const [cost, setCost] = useState<string>("");
+  const [cost, setCost] = useState<string>(costRub != null ? String(costRub) : "");
   const [commission, setCommission] = useState<string>(commissionPct != null ? String(commissionPct) : "");
   const [logistics, setLogistics] = useState<string>("1");
   const [acquiring, setAcquiring] = useState<string>("2");
