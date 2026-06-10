@@ -1,11 +1,13 @@
 "use client";
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 export default function UploadForm() {
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [done, setDone] = useState(false);
   const router = useRouter();
 
   const submit = async () => {
@@ -20,8 +22,11 @@ export default function UploadForm() {
       setError(err.error ?? `HTTP ${res.status}`);
       return;
     }
+    // Правка Александра (#0): НЕ уводим пользователя со страницы прайсов —
+    // остаёмся здесь, где «История загрузок» сразу покажет статус, число строк
+    // и извлечённых брендов. Явный следующий шаг — ссылка на бренды ниже.
+    setDone(true);
     startTransition(() => {
-      router.push("/dashboard/radar/brands");
       router.refresh();
     });
   };
@@ -31,7 +36,7 @@ export default function UploadForm() {
       <input
         type="file"
         accept=".csv,.xlsx,.xls,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        onChange={e => setFile(e.target.files?.[0] ?? null)}
+        onChange={e => { setFile(e.target.files?.[0] ?? null); setDone(false); }}
         className="block w-full text-sm text-ink-muted file:mr-4 file:px-4 file:py-2 file:rounded-lg file:border-0 file:bg-ink file:text-paper file:font-mono file:uppercase file:text-xs file:tracking-wider file:font-semibold hover:file:bg-ink-soft cursor-pointer"
       />
       {file && (
@@ -53,6 +58,14 @@ export default function UploadForm() {
         Формат: CSV (UTF-8) или XLSX. До 50 МБ. ИИ извлечёт бренды и составит
         список для финальной редакции пользователя.
       </p>
+      {done && (
+        <div className="mt-4 rounded-lg border border-lime-deep/40 bg-lime-soft px-4 py-3 text-sm">
+          <span className="text-ink">Прайс обработан — статус, число строк и брендов смотрите в истории ниже.</span>{" "}
+          <Link href={"/dashboard/radar/brands" as any} className="font-semibold text-lime-deep hover:underline whitespace-nowrap">
+            Перейти к брендам →
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
