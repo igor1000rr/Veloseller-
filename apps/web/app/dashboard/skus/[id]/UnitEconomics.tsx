@@ -135,8 +135,8 @@ export function UnitEconomics({ priceRub, commissionPct, costRub, productId }: {
   );
 }
 
-function Field({ label, suffix, value, onChange, hint }: {
-  label: string; suffix: string; value: string; onChange: (v: string) => void; hint?: string;
+function Field({ label, suffix, value, onChange, hint, highlight }: {
+  label: string; suffix: string; value: string; onChange: (v: string) => void; hint?: string; highlight?: boolean;
 }) {
   return (
     <label className="block">
