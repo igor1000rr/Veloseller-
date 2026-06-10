@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import crypto from "crypto";
 
 // 50MB лимит на загрузку. Прайс 5000 SKU в OZON/WB обычно ~2-5 МБ.
