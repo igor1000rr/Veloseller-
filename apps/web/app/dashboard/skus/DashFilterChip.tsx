@@ -13,11 +13,12 @@ type DashFilter =
   | "dead_inventory"
   | "oos"
   | "inactive"
+  | "active"
   | "frequently_oos"
   | "inventory_concentration"
   | "demand_concentration";
 
-const FILTER_LABELS: Record<DashFilter, string> = {
+const FILTER_LABELS: Partial<Record<DashFilter, string>> = {
   low_stock:               t("sku.filter.lowStock.label"),
   lost_revenue:            t("sku.filter.lostRevenue.label"),
   dead_inventory:          t("sku.filter.dead.label"),
@@ -28,7 +29,7 @@ const FILTER_LABELS: Record<DashFilter, string> = {
   demand_concentration:    t("sku.filter.demandConc.label"),
 };
 
-const FILTER_DESCRIPTIONS: Record<DashFilter, (threshold: number) => string> = {
+const FILTER_DESCRIPTIONS: Partial<Record<DashFilter, (threshold: number) => string>> = {
   low_stock:               (n) => t("sku.filter.lowStock.desc", { n }),
   lost_revenue:            () => t("sku.filter.lostRevenue.desc"),
   dead_inventory:          (n) => t("sku.filter.dead.desc", { n }),
