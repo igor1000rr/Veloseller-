@@ -7,7 +7,7 @@ type Brand = {
   id: string;
   name: string;
   status: "approved" | "excluded";
-  source: "ai" | "manual";
+  source: "ai" | "manual" | "price";
   sku_count: number | null;
   avg_price: number | null;
   created_at: string;
