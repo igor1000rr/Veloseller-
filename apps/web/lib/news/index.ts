@@ -40,7 +40,7 @@ export function getRelatedPosts(slug: string, limit = 3): NewsPost[] {
       post: p,
       score:
         (p.category === post.category ? 2 : 0) +
-        p.tags.filter((t) => post.tags.includes(t)).length,
+        (p.tags || []).filter((t: string) => (post.tags || []).includes(t)).length,
     }))
     .sort((a, b) => b.score - a.score);
 
