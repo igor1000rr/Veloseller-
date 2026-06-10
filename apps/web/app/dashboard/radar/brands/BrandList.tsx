@@ -1,7 +1,7 @@
 "use client";
 import { useTransition } from "react";
 import Link from "next/link";
-import { actionApproveBrand, actionExcludeBrand } from "../actions";
+import { actionApproveBrand, actionExcludeBrand, actionDeleteBrand } from "../actions";
 
 type Brand = {
   id: string;
@@ -115,6 +115,22 @@ function BrandRow({
     });
   };
 
+  // Правка Александра: удалить бренд совсем (мусор от ИИ или больше не возим).
+  // Деструктивно (CASCADE на запросы) — подтверждаем.
+  const onDelete = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (pending) return;
+    if (!window.confirm(`Удалить бренд «${brand.name}» и все его сигналы? Действие необратимо.`)) return;
+    startTransition(async () => {
+      try {
+        await actionDeleteBrand(brand.id);
+      } catch (err: any) {
+        alert(err?.message ?? "Ошибка");
+      }
+    });
+  };
+
   return (
     <div className={`flex items-center justify-between gap-3 px-4 py-3 ${!last ? "border-b border-line" : ""} ${muted ? "opacity-60" : ""} hover:bg-bg-soft/40 transition`}>
       <Link
@@ -140,20 +156,30 @@ function BrandRow({
           →
         </span>
       </Link>
-      <button
-        onClick={onAction}
-        disabled={buttonDisabled}
-        title={isExcluded && restoreDisabled
-          ? `Лимит исчерпан (${brandsLimit ?? 0} брендов). Исключите другой бренд или перейдите на старший тариф.`
-          : undefined}
-        className={`text-xs font-mono uppercase tracking-wider px-3 py-1.5 rounded transition disabled:opacity-40 disabled:cursor-not-allowed ${
-          brand.status === "approved"
-            ? "text-ink-muted hover:text-orange border border-line hover:border-orange/40"
-            : "text-lime-deep border border-lime-deep/40 hover:bg-lime-soft"
-        }`}
-      >
-        {brand.status === "approved" ? "Исключить" : "Восстановить"}
-      </button>
+      <div className="flex items-center gap-2 shrink-0">
+        <button
+          onClick={onAction}
+          disabled={buttonDisabled}
+          title={isExcluded && restoreDisabled
+            ? `Лимит исчерпан (${brandsLimit ?? 0} брендов). Исключите другой бренд или перейдите на старший тариф.`
+            : undefined}
+          className={`text-xs font-mono uppercase tracking-wider px-3 py-1.5 rounded transition disabled:opacity-40 disabled:cursor-not-allowed ${
+            brand.status === "approved"
+              ? "text-ink-muted hover:text-orange border border-line hover:border-orange/40"
+              : "text-lime-deep border border-lime-deep/40 hover:bg-lime-soft"
+          }`}
+        >
+          {brand.status === "approved" ? "Исключить" : "Восстановить"}
+        </button>
+        <button
+          onClick={onDelete}
+          disabled={pending}
+          title="Удалить бренд и все его сигналы"
+          className="text-xs font-mono uppercase tracking-wider px-3 py-1.5 rounded transition disabled:opacity-40 text-ink-muted hover:text-rose border border-line hover:border-rose/40"
+        >
+          Удалить
+        </button>
+      </div>
     </div>
   );
 }
