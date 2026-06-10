@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 import { _resetRateLimits } from "@/lib/rate-limit";
 
 const getUserMock = vi.fn();
@@ -24,7 +25,7 @@ beforeEach(() => {
 });
 
 function makeReq(body: any) {
-  return new Request("http://x", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return new NextRequest("http://x", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 }
 
 describe("PATCH /api/products/[id]/reorder", () => {
@@ -76,7 +77,7 @@ describe("PATCH /api/products/[id]/reorder", () => {
 
   it("невалидный JSON в body — пустой update — 400", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
-    const req = new Request("http://x", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "not-json" });
+    const req = new NextRequest("http://x", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: "not-json" });
     const { PATCH } = await import("@/app/api/products/[id]/reorder/route");
     const res = await PATCH(req, { params: Promise.resolve({ id: "p1" }) });
     expect(res.status).toBe(400);

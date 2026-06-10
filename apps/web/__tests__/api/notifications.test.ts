@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextRequest } from "next/server";
 import { _resetRateLimits } from "@/lib/rate-limit";
 
 const getUserMock = vi.fn();
@@ -24,7 +25,7 @@ beforeEach(() => {
 });
 
 function req(body: any) {
-  return new Request("http://x", {
+  return new NextRequest("http://x", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
