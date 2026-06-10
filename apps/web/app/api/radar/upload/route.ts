@@ -12,15 +12,13 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60; // Ожидание worker'а ~10-30 сек.
 
 /**
- * POST /api/radar/upload — прокси к worker'у для извлечения брендов ИИ.
+ * POST /api/radar/upload — прокси к worker'у для извлечения брендов из прайса.
  *
  * Почему через worker, а не в Next.js:
  *   1. У worker'а (Python/FastAPI) уже есть openpyxl/pandas — не нужно
  *      тащить xlsx в Node.js (было проблемой с CDN tarball).
- *   2. Worker держит OPENROUTER_API_KEY (это secret, хранится в .env в
- *      одном месте вместе с остальными ключами worker'а).
- *   3. Био-обработка (15-30 сек) блокирует Next.js function — лучше
- *      вынести на worker где это нормальный процесс.
+ *   2. Парсинг прайса (частотный анализатор, без внешних AI) живёт на worker'е
+ *      вместе с остальной логикой Radar (15-30 сек — нормальный процесс).
  *
  * Flow:
  *   1. Auth + проверка тарифа.
