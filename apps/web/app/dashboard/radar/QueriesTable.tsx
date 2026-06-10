@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { InfoTooltip } from "../../_components/InfoTooltip";
 
 type Tab = "early" | "new" | "watching" | "archived";
 
