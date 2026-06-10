@@ -60,6 +60,28 @@ export function UnitEconomics({ priceRub, commissionPct, costRub, productId }: {
   const fmt = (v: number) => Math.round(v).toLocaleString(isEn ? "en-US" : "ru-RU");
   const profitColor = profit > 0 ? "text-lime-deep" : profit < 0 ? "text-rose" : "text-ink";
 
+  const costDirty = cost.trim() !== savedCost.trim();
+  const saveCost = () => {
+    const trimmed = cost.trim();
+    let parsed: number | null = null;
+    if (trimmed !== "") {
+      const v = parseFloat(trimmed.replace(",", "."));
+      if (!isFinite(v) || v < 0) { setCostStatus("error"); return; }
+      parsed = v;
+    }
+    setCostStatus("saving");
+    startTransition(async () => {
+      const res = await saveCostPrice(productId, parsed);
+      if (res.ok) {
+        setSavedCost(trimmed);
+        setCostStatus("saved");
+        setTimeout(() => setCostStatus((s) => (s === "saved" ? "idle" : s)), 2000);
+      } else {
+        setCostStatus("error");
+      }
+    });
+  };
+
   return (
     <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
       <div className="flex items-center gap-2">
