@@ -175,7 +175,7 @@ export default async function AdminRadarPage() {
       {/* Топ-затраты на AI */}
       {topUploads && topUploads.length > 0 && (
         <section>
-          <SectionTitle>Топ Upload'ов по стоимости AI</SectionTitle>
+          <SectionTitle>Топ Upload&apos;ов по стоимости AI</SectionTitle>
           <div className="rounded-2xl border border-line bg-paper overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-bg-soft border-b border-line">

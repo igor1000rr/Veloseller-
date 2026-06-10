@@ -98,7 +98,7 @@ export function ColumnsPicker() {
 
   useEffect(() => {
     if (!open) return;
-    const onClick = (e: MouseEvent) => {
+    const onClick = (e: Event) => {
       const target = e.target as HTMLElement;
       if (!target.closest("[data-columns-picker]")) {
         setOpen(false);

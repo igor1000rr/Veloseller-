@@ -117,7 +117,7 @@ async function applySubscription(sb: ReturnType<typeof adminClient>, sub: Stripe
   const priceId = sub.items.data[0]?.price.id;
   const plan = priceId ? PLAN_BY_PRICE[priceId] : undefined;
 
-  const rawPeriodEnd = (sub as any).current_period_end ?? sub.items.data[0]?.current_period_end;
+  const rawPeriodEnd = (sub as any).current_period_end ?? (sub.items.data[0] as any)?.current_period_end;
   const periodEndIso = (typeof rawPeriodEnd === "number" && rawPeriodEnd > 0)
     ? new Date(rawPeriodEnd * 1000).toISOString()
     : null;

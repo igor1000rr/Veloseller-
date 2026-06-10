@@ -6,7 +6,7 @@ export function getStripe(): Stripe {
   if (_stripe) return _stripe;
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error("STRIPE_SECRET_KEY не задан в env");
-  _stripe = new Stripe(key, { apiVersion: "2024-06-20" });
+  _stripe = new Stripe(key, { apiVersion: "2024-06-20" as Stripe.LatestApiVersion });
   return _stripe;
 }
 

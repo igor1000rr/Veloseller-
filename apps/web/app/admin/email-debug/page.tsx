@@ -112,7 +112,7 @@ export default async function EmailDebugPage() {
         {!resendKey && (
           <p className="mt-4 text-sm text-rose">
             ⚠ RESEND_API_KEY не задан — это основная причина почему почта не работает.
-            Добавьте в <code className="font-mono text-xs bg-bg-soft px-1">apps/web/.env.production</code> (и в worker'е).
+            Добавьте в <code className="font-mono text-xs bg-bg-soft px-1">apps/web/.env.production</code> (и в worker&apos;е).
           </p>
         )}
       </section>
