@@ -17,7 +17,7 @@ from app.engine.alerts import (
 from app.engine.health import is_underestimated_sku
 from app.engine.pipeline import compute_metrics_for_sku
 from app.engine.price import calculate_elasticity, detect_price_changes
-from app.schemas import EventType
+from app.schemas import EventType, InventorySegment
 
 # Перенесено в соседние модули 05.06.2026 (инцидент egress, recalc.py перерос
 # лимит передачи MCP). Реэкспорт сохраняет старые импорты тестов и кода.
@@ -200,7 +200,7 @@ def _upsert_or_skip_alert(sb, seller_id, product_id, kind, message, payload):
 _HYSTERESIS_KEEP_CHECKS = {
     "low_stock":         lambda m: should_keep_low_stock_active(m.coverage_days),
     "critical_stock":    lambda m: should_keep_critical_active(m.coverage_days),
-    "dead_inventory":    lambda m: should_keep_dead_active(m.coverage_days),
+    "dead_inventory":    lambda m: should_keep_dead_active(m.coverage_days) or m.segment == InventorySegment.DEAD_INVENTORY_RISK,
     "repeated_stockout": lambda m: should_keep_repeated_stockout_active(m.stockout_days),
 }
 
@@ -212,8 +212,12 @@ def _write_alerts(sb, seller_id, product_id, m, underestimated):
         desired_alerts.append(("critical_stock", f"Coverage {cov:.1f} дн — критически мало"))
     elif low_stock_alert(cov):
         desired_alerts.append(("low_stock", f"Coverage {cov:.1f} дн — мало"))
-    if dead_inventory_alert(cov):
-        desired_alerts.append(("dead_inventory", f"Coverage {cov:.0f} дн — заморожен"))
+    if dead_inventory_alert(cov) or m.segment == InventorySegment.DEAD_INVENTORY_RISK:
+        dead_msg = (
+            f"Coverage {cov:.0f} дн — заморожен" if cov is not None
+            else f"Нет продаж при остатке {m.current_stock} — заморожен"
+        )
+        desired_alerts.append(("dead_inventory", dead_msg))
     if repeated_stockout_alert(m.stockout_days):
         desired_alerts.append(("repeated_stockout", f"{m.stockout_days} дней OOS за период"))
     if underestimated:
