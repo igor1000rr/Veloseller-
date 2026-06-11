@@ -123,6 +123,20 @@ export function SkusTable({
                   {/* Александр 04.06.2026: артикул без гиперссылки, чёрным. */}
                   <span className="text-ink font-medium">{p.sku}</span>
                 </td>
+                {/* Александр 11.06.2026: бренд — отдельный столбец между SKU и Названием
+                    (из API). Из ячейки названия бренд и категория убраны — остаются
+                    только теги, чтобы строки не были слишком широкими. */}
+                <td className="col-skucol-brand px-3 sm:px-4 py-3">
+                  {p.brand ? (
+                    <Link href={`/dashboard/skus?brand=${encodeURIComponent(p.brand)}` as any}
+                          className="font-mono text-[11px] uppercase tracking-wider text-ink-soft hover:text-azure transition"
+                          title={p.brand}>
+                      {p.brand}
+                    </Link>
+                  ) : (
+                    <span className="text-ink-hush">—</span>
+                  )}
+                </td>
                 <td className="col-skucol-name px-3 sm:px-4 py-3">
                   {/* Александр 01.06.2026: название — ссылка для проваливания в SKU.
                       04.06.2026: артикул больше не ссылка, название — единственный вход в карточку. */}
