@@ -211,7 +211,7 @@ export function SkusTable({
           })}
           {!rows.length && (
             <tr>
-              <td colSpan={14} className="px-3 sm:px-4 py-12 text-center text-ink-muted text-sm">
+              <td colSpan={15} className="px-3 sm:px-4 py-12 text-center text-ink-muted text-sm">
                 {selectedName
                   ? t("sku.list.emptySelected", { name: selectedName })
                   : t("sku.list.emptyNone")}
