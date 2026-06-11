@@ -20,12 +20,13 @@ import { t } from "@/lib/i18n";
  */
 
 export type ColumnKey =
-  | "sku" | "name" | "stock" | "price" | "tvelo" | "trend"
+  | "sku" | "brand" | "name" | "stock" | "price" | "tvelo" | "trend"
   | "coverage" | "oos" | "sales" | "reorder" | "confidence" | "health"
   | "lost_revenue" | "notes";
 
 export const ALL_COLUMNS: { key: ColumnKey; label: string; required?: boolean }[] = [
   { key: "sku",          label: t("sku.col.sku"),                required: true },
+  { key: "brand",        label: t("sku.col.brand") },
   { key: "name",         label: t("sku.col.name"),           required: true },
   { key: "stock",        label: t("sku.col.stock") },
   { key: "price",        label: t("sku.col.price") },
