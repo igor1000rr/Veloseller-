@@ -171,6 +171,18 @@ export default async function SkusPage({ searchParams }: {
   const selected = await getSelectedWarehouse(supabase, user.id);
   const warehouseCreatedAt = selected?.created_at ?? null;
 
+  // Правки 12 (#3): значения для выпадашек бренд/категория/тег. Один RPC,
+  // distinct по селлеру (+ склад). Если RPC ещё не накатан или данных нет —
+  // пустые списки (выпадашки просто не покажутся), список SKU не ломается.
+  const { data: facetsRows } = await supabase.rpc("get_skus_facets", {
+    p_seller_id: user.id,
+    p_connection_id: selected?.id ?? null,
+  });
+  const facets = (facetsRows as any[] | null)?.[0];
+  const brandOptions: string[] = facets?.brands ?? [];
+  const categoryOptions: string[] = facets?.categories ?? [];
+  const tagOptions: string[] = facets?.tags ?? [];
+
   const { data: rangesRows } = await supabase.rpc("get_skus_filter_ranges", {
     p_seller_id: user.id,
     p_connection_id: selected?.id ?? null,
