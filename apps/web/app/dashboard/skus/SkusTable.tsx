@@ -52,14 +52,20 @@ export function SkusTable({
         <thead className="bg-bg-soft border-b border-line">
           <tr>
             <Th col="sku">{t("sku.col.sku")}</Th>
+            <Th col="brand">{t("sku.col.brand")}</Th>
             <Th col="name">{t("sku.col.name")}</Th>
             <Th col="stock" align="right">{t("sku.col.stock")}</Th>
             <Th col="price" align="right">{t("sku.col.price")}</Th>
             <Th col="tvelo" align="right">{t("sku.col.tvelo")}</Th>
             <Th col="trend" align="center">{t("sku.col.trend")}</Th>
             <Th col="coverage" align="right">{t("sku.col.coverage")}</Th>
-            {/* Александр 01.06.2026: "OOS" → "Дней без наличия" */}
-            <Th col="oos" align="right">{t("sku.col.oosDays", { n: displayPeriodDays })}</Th>
+            {/* Александр 11.06.2026: «Дней без наличия (Nд)» → «OOS» + тултип (узкие строки) */}
+            <Th col="oos" align="right">
+              <span className="inline-flex items-center">
+                {t("sku.col.oos")}
+                <InfoTooltip text={t("sku.col.oosTip", { n: displayPeriodDays })} />
+              </span>
+            </Th>
             <Th col="sales" align="right">
               <span className="inline-flex items-center">
                 {t("sku.col.sales")}
