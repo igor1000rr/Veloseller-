@@ -144,7 +144,15 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
   // (что реально платит покупатель) + комиссия МП из API как стартовый дефолт.
   const lastSnap = snapshots && snapshots.length ? snapshots[snapshots.length - 1] : null;
   const unitPrice = lastSnap ? Number((lastSnap as any).marketing_price ?? lastSnap.price ?? 0) : price;
-  const unitCommission = lastSnap && (lastSnap as any).commission_pct != null ? Number((lastSnap as any).commission_pct) : null;
+  // Комиссия: берём самую свежую НЕпустую ставку из окна снапшотов. Ozon /v5
+  // для части товаров не отдаёт sales_percent на каждом синке, поэтому последний
+  // снапшот мог оказаться без неё — раньше из-за этого «комиссия из API» не
+  // подгружалась, хотя ранее значение было. Скан с конца находит последнюю known.
+  let unitCommission: number | null = null;
+  for (let i = (snapshots?.length ?? 0) - 1; i >= 0; i--) {
+    const c = (snapshots as any)[i]?.commission_pct;
+    if (c != null) { unitCommission = Number(c); break; }
+  }
 
   return (
     <div className="space-y-6">
