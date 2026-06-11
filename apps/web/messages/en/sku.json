@@ -104,6 +104,8 @@
   "sku.col.lostRevenue": "Lost revenue",
   "sku.col.notes": "Notes",
   "sku.col.oosDays": "Days OOS ({n}d)",
+  "sku.col.oosTip": "Days out of stock during the period ({n}d)",
+  "sku.col.brand": "Brand",
   "sku.col.reorderDays": "Reorder ({n}d)",
 
   "sku.filters.period": "Period",
