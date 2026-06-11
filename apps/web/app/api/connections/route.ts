@@ -150,29 +150,37 @@ export async function POST(req: NextRequest) {
     }, { status: 400 });
   }
 
-  // 4. Проверяем лимит складов из тарифа
+  // 4. Проверяем лимит складов из тарифа.
+  // ВАЖНО: чтение лимита — МЯГКАЯ проверка, не блокер создания. Инцидент
+  // 11.06.2026: при устаревшем кэше схемы PostgREST (после DDL колонки
+  // plan_warehouses_limit) этот select возвращал ошибку → роут отдавал
+  // «DB error» и создание ЛЮБОГО склада падало. При этом /connections
+  // рендерился, т.к. там maybeSingle + дефолт 15 и ошибка игнорируется.
+  // Делаем роут таким же устойчивым: не можем прочитать лимит/счётчик —
+  // дефолтим и продолжаем. Реальная запись (INSERT ниже) сама вернёт ошибку,
+  // если с правами/БД что-то не так.
   const { data: seller, error: sellerErr } = await supabase
     .from("sellers")
     .select("plan_warehouses_limit, plan")
     .eq("id", user.id)
-    .single();
-  if (sellerErr || !seller) {
-    console.error("[connections-create] seller fetch error:", sellerErr?.message);
-    return NextResponse.json({ error: "DB error" }, { status: 500 });
+    .maybeSingle();
+  if (sellerErr) {
+    console.warn("[connections-create] seller read failed, defaulting limit:", sellerErr.message);
   }
-  const limit = seller.plan_warehouses_limit ?? 15;
+  const limit = seller?.plan_warehouses_limit ?? 15;
+  const planName = seller?.plan ?? "текущего тарифа";
 
   const { count: existingCount, error: countErr } = await supabase
     .from("data_connections")
     .select("id", { count: "exact", head: true })
     .eq("seller_id", user.id);
   if (countErr) {
-    console.error("[connections-create] count error:", countErr.message);
-    return NextResponse.json({ error: "DB error" }, { status: 500 });
+    console.warn("[connections-create] count read failed, skipping limit check:", countErr.message);
   }
-  if ((existingCount ?? 0) >= limit) {
+  // Лимит применяем только если счётчик реально прочитан — иначе не блокируем.
+  if (!countErr && (existingCount ?? 0) >= limit) {
     return NextResponse.json({
-      error: `Достигнут лимит складов для тарифа «${seller.plan}» (${limit}). Обновите тариф или удалите неактивные склады.`,
+      error: `Достигнут лимит складов для тарифа «${planName}» (${limit}). Обновите тариф или удалите неактивные склады.`,
       code: "warehouse_limit_reached",
       limit,
       current: existingCount ?? 0,
