@@ -104,6 +104,8 @@
   "sku.col.lostRevenue": "Упущено, ₽",
   "sku.col.notes": "Заметки",
   "sku.col.oosDays": "Дней без наличия ({n}д)",
+  "sku.col.oosTip": "Количество дней без наличия за период ({n} дн)",
+  "sku.col.brand": "Бренд",
   "sku.col.reorderDays": "Закупка ({n}д)",
 
   "sku.filters.period": "Период",
