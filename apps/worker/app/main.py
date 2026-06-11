@@ -578,6 +578,17 @@ def _run_wb_sync_bg(
         if warehouse_kind == "wb_fbs":
             snapshots = wildberries.fetch_fbs_snapshots(token)
             wb_flow = "fbs"
+            # DIAG (временно): образец ответа WB Content API → _wb_cards_debug.
+            try:
+                _sample = getattr(wildberries._fetch_card_data, "last_fbs_debug", None)
+                if _sample:
+                    sb.table("_wb_cards_debug").upsert({
+                        "connection_id": connection_id,
+                        "captured_at": datetime.now(timezone.utc).isoformat(),
+                        "sample": dict(_sample),
+                    }).execute()
+            except Exception:
+                logger.warning("wb fbs debug capture write failed", extra={"connection_id": connection_id})
         else:
             snapshots = wildberries.fetch_snapshots(token)
             wb_flow = "fbo"
