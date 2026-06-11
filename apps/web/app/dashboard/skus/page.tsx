@@ -566,6 +566,7 @@ export default async function SkusPage({ searchParams }: {
             );
           })}
         </div>
+        <SkuAttributeFilters brands={brandOptions} categories={categoryOptions} tags={tagOptions} />
         <div className="flex items-center gap-2 ml-auto">
           <ColumnsPicker />
           <div className={`inline-flex gap-1 rounded-lg border bg-paper p-1 ${
