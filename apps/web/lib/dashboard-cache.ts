@@ -13,23 +13,31 @@ export type DashboardComputed = {
 };
 
 /**
- * Штамп последнего пересчёта селлера (recalc_jobs.updated_at).
+ * Штамп свежести метрик склада = max(warehouse_metrics.computed_at) по
+ * (seller_id, connection_id). Читается НЕ из кэша, на каждый заход (дёшево —
+ * desc-limit 1 по seller+connection), через service-role.
  *
- * Читается НЕ из кэша, на каждый заход (дёшево — одна индексная
- * строка), через service-role, чтобы не зависеть от RLS recalc_jobs.
- * Кладётся в ключ кэша агрегатов: новый пересчёт меняет updated_at →
- * новый штамп → промах кэша → свежие данные. Инвалидация не нужна.
+ * ВАЖНО (почему НЕ recalc_jobs.updated_at): recalc_jobs — это лок-таблица,
+ * и её updated_at на практике отстаёт от реального пересчёта (наблюдали лаг
+ * до 9 дней: метрики пересчитаны, а строка лока не тронута). warehouse_metrics
+ * пишется тем же пересчётом, что и tvelo_metrics, поэтому его computed_at честно
+ * двигается на каждом пересчёте. Кладётся в ключ кэша агрегатов:
+ * новый пересчёт → новый computed_at → промах кэша → свежие данные.
  */
-export async function getRecalcStamp(sellerId: string): Promise<string> {
+export async function getMetricsStamp(
+  sellerId: string,
+  connectionId: string,
+): Promise<string> {
   const sb = createServiceClient();
   const { data } = await sb
-    .from("recalc_jobs")
-    .select("updated_at")
+    .from("warehouse_metrics")
+    .select("computed_at")
     .eq("seller_id", sellerId)
-    .order("updated_at", { ascending: false })
+    .eq("connection_id", connectionId)
+    .order("computed_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  return (data?.updated_at as string | undefined) ?? "none";
+  return (data?.computed_at as string | undefined) ?? "none";
 }
 
 async function fetchComputed(
@@ -55,16 +63,15 @@ async function fetchComputed(
 }
 
 /**
- * Кэш тяжёлых агрегатов дашборда (2 RPC с оконными функциями по
- * tvelo_metrics). Ключ = [seller_id, склад, период, штамп пересчёта].
+ * Кэш тяжёлых агрегатов дашборда (2 RPC с оконными функциями по tvelo_metrics).
+ * Ключ = [seller_id, склад, период, штамп свежести метрик].
  *
  * БЕЗОПАСНОСТЬ: sellerId ЗДЕСЬ ВСЕГДА должен быть id аутентифицированного
- * пользователя (вызывающий берёт его из auth.getUser()). Обе RPC
- * скоупятся строго по p_seller_id (SECURITY INVOKER, search_path=''),
- * поэтому service-role + явный sellerId возвращает данные ровно этого селлера.
+ * пользователя (вызывающий берёт его из auth.getUser()). Обе RPC скоупятся
+ * строго по p_seller_id (SECURITY INVOKER, search_path=''), поэтому service-role +
+ * явный sellerId возвращает данные ровно этого селлера.
  *
- * revalidate=86400 — страховочный потолок вытеснения на случай, если штамп
- * не менялся (напр. селлер без строки в recalc_jobs).
+ * revalidate=86400 — страховочный потолок вытеснения.
  */
 export function getDashboardComputed(
   sellerId: string,

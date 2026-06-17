@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const { rpcCalls, eqCalls, stampRow } = vi.hoisted(() => ({
   rpcCalls: [] as Array<{ name: string; params: any }>,
   eqCalls: [] as Array<{ col: string; val: any }>,
-  stampRow: { value: { updated_at: "2026-06-15T07:55:21.061Z" } as any },
+  stampRow: { value: { computed_at: "2026-06-17T02:52:49.224Z" } as any },
 }));
 
 // unstable_cache в тесте — сквозной (просто исполняет функцию).
@@ -40,12 +40,12 @@ vi.mock("@/lib/supabase/service", () => ({
   },
 }));
 
-import { getRecalcStamp, getDashboardComputed } from "@/lib/dashboard-cache";
+import { getMetricsStamp, getDashboardComputed } from "@/lib/dashboard-cache";
 
 beforeEach(() => {
   rpcCalls.length = 0;
   eqCalls.length = 0;
-  stampRow.value = { updated_at: "2026-06-15T07:55:21.061Z" };
+  stampRow.value = { computed_at: "2026-06-17T02:52:49.224Z" };
 });
 
 describe("dashboard-cache — изоляция арендатора", () => {
@@ -72,15 +72,16 @@ describe("dashboard-cache — изоляция арендатора", () => {
     expect(rpcCalls.every((c) => c.params.p_connection_id === "conn-2")).toBe(true);
   });
 
-  it("getRecalcStamp фильтрует recalc_jobs по seller_id и возвращает updated_at", async () => {
-    const stamp = await getRecalcStamp("seller-A");
+  it("getMetricsStamp фильтрует warehouse_metrics по seller_id И connection_id", async () => {
+    const stamp = await getMetricsStamp("seller-A", "conn-1");
     expect(eqCalls).toContainEqual({ col: "seller_id", val: "seller-A" });
-    expect(stamp).toBe("2026-06-15T07:55:21.061Z");
+    expect(eqCalls).toContainEqual({ col: "connection_id", val: "conn-1" });
+    expect(stamp).toBe("2026-06-17T02:52:49.224Z");
   });
 
-  it("getRecalcStamp → 'none', если строки пересчёта нет", async () => {
+  it("getMetricsStamp → 'none', если метрик нет", async () => {
     stampRow.value = null;
-    const stamp = await getRecalcStamp("seller-A");
+    const stamp = await getMetricsStamp("seller-A", "conn-1");
     expect(stamp).toBe("none");
   });
 });
