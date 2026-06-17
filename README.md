@@ -162,6 +162,8 @@ Price Elasticity
 
 **Деплой:** GitHub Actions → SSH → `deploy/finalize.sh` на Hostland VPS (Ubuntu 24.04). Сервисы под systemd: `veloseller-web`, `veloseller-worker`.
 
+**База:** Supabase **self-hosted** на том же VPS (`api.veloseller.ru`) — ушли с Supabase Cloud из-за egress-квот. Скрипты переезда лежат в `deploy/supabase/`.
+
 ---
 
 ## 🛠 Tech Stack
