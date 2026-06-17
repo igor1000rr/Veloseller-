@@ -40,13 +40,16 @@ fi
 chmod 600 "$WEB_ENV" "$WORKER_ENV"
 
 # ===== Web =====
-# npm ci требует package-lock.json. Если его нет — делаем npm install (он создаст lock).
-if [ -f "$DEPLOY_DIR/package-lock.json" ]; then
+# npm ci требует package-lock.json в синхроне с package.json.
+# На VPS мог остаться stale lockfile от прошлого npm install (не в git) — тогда ci падает.
+# Источник истины: lockfile только если он закоммичен в репозиторий.
+if git -C "$DEPLOY_DIR" ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
   log "npm ci (корень монорепо — все workspace-зависимости)…"
-  sudo -u "$DEPLOY_USER" -H bash -c "cd $DEPLOY_DIR && npm ci --no-audit --no-fund"
+  sudo -u "$DEPLOY_USER" -H bash -c "cd $DEPLOY_DIR && npm ci --legacy-peer-deps --no-audit --no-fund"
 else
-  log "package-lock.json отсутствует — делаем npm install (5-10 мин)…"
-  sudo -u "$DEPLOY_USER" -H bash -c "cd $DEPLOY_DIR && npm install --no-audit --no-fund"
+  rm -f "$DEPLOY_DIR/package-lock.json"
+  log "package-lock.json не в git — npm install (5-10 мин)…"
+  sudo -u "$DEPLOY_USER" -H bash -c "cd $DEPLOY_DIR && npm install --legacy-peer-deps --no-audit --no-fund"
 fi
 
 log "npm run build (Next.js production build, может занять 3-5 мин)…"
