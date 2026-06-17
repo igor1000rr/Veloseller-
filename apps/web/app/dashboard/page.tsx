@@ -75,13 +75,18 @@ export default async function DashboardOverview({ searchParams }: {
   // и пользователь должен это явно увидеть.
   const showDataWarmupBanner = daysOfWarehouseHistory <= 7;
 
-  const { data: warehouseMetricsRows } = await supabase
-    .rpc("get_warehouse_dashboard_metrics", {
-      p_seller_id: user.id,
-      p_connection_id: currentWarehouseId,
-      p_period_days: periodDays,
-    });
-  const wm = (warehouseMetricsRows as any[] | null)?.[0] ?? null;
+  // A1: тяжёлые агрегаты (2 RPC с оконными функциями по tvelo_metrics)
+  // кэшируем по штампу пересчёта (recalc_jobs.updated_at). Данные меняются
+  // раз в сутки — ключ включает seller_id, склад, период и штамп, новый
+  // пересчёт сам инвалидирует кэш. Подробности — в lib/dashboard-cache.ts.
+  const recalcStamp = await getRecalcStamp(user.id);
+  const dashboardComputed = await getDashboardComputed(
+    user.id,
+    currentWarehouseId,
+    periodDays,
+    recalcStamp,
+  );
+  const wm = dashboardComputed.wm;
 
   const [warehouseHistoryRes, storeHistoryRes] = await Promise.all([
     supabase
