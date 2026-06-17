@@ -31,7 +31,7 @@ chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR/apps" 2>/dev/null || true
 chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR/supabase" 2>/dev/null || true
 chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR/.git" 2>/dev/null || true
 # Корневые файлы npm workspaces — владелец npm-юзер
-chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR"/{package.json,package-lock.json,pnpm-workspace.yaml} 2>/dev/null || true
+chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR"/{package.json,package-lock.json} 2>/dev/null || true
 chown "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR"/{README.md,TODO.md,.gitignore,.env.example,docker-compose.yml} 2>/dev/null || true
 if [ -d "$DEPLOY_DIR/node_modules" ]; then
   chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_DIR/node_modules"
