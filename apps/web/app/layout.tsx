@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geologica, Onest, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { CookieBanner } from "./_components/CookieBanner";
+import { YandexMetrika } from "./_components/YandexMetrika";
 import { LOCALE } from "@/lib/features";
 
 // .com задаёт NEXT_PUBLIC_SITE_URL=https://<домен>; дефолт — РФ-прод.
@@ -141,6 +142,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang={LOCALE} className={`${display.variable} ${body.variable} ${mono.variable}`}>
       <body className="min-h-screen">
+        <YandexMetrika />
         {children}
         <CookieBanner />
       </body>
