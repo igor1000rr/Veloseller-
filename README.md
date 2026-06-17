@@ -222,8 +222,8 @@ Price Elasticity
 ## ⚡ Quick Start (для разработчиков)
 
 ```bash
-# 1. Supabase Cloud
-#    Создать проект, прогнать миграции из supabase/migrations/ в SQL Editor
+# 1. Supabase (прод — self-hosted на api.veloseller.ru; для локалки можно Cloud-проект)
+#    Прогнать миграции из supabase/migrations/ в SQL Editor
 
 # 2. Web
 git clone https://github.com/igor1000rr/Veloseller-.git
