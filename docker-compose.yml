@@ -1,5 +1,5 @@
-# Локальная разработка worker. Web запускается через pnpm dev:web отдельно.
-# Supabase используется Cloud — Postgres локальный не нужен.
+# Локальная разработка worker. Web запускается через npm run dev:web отдельно.
+# Supabase — внешний (self-hosted на api.veloseller.ru), локальный Postgres не нужен.
 services:
   worker:
     build: ./apps/worker
