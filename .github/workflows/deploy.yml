@@ -110,8 +110,9 @@ jobs:
           fi
 
           echo "→ 3) Open redirect защита: /auth/callback?next=https://evil.com не ведёт на evil.com"
-          # NOTE: Location временно показывает localhost:3000 (см. issue #2),
-          # но главное — не evil.com. Эта проверка строже: падаем на любом внешнем домене.
+          # FIXED (issue #2): редирект строится от NEXT_PUBLIC_SITE_URL, поэтому
+          # Location указывает на публичный домен (не localhost). Падаем на любом
+          # внешнем домене в Location.
           location=$(curl -s -o /dev/null -w "%{redirect_url}" --max-time 10 \
             "https://$FQDN/auth/callback?next=https%3A%2F%2Fevil.com")
           if echo "$location" | grep -qi "evil.com"; then
