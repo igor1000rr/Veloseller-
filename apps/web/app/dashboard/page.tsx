@@ -109,11 +109,7 @@ export default async function DashboardOverview({ searchParams }: {
   const usingFallback = warehouseHistory.length === 0;
   const chartHistory = usingFallback ? storeHistory : warehouseHistory;
 
-  const { data: velRows } = await supabase
-    .rpc("get_dashboard_velocities", {
-      p_seller_id: user.id,
-      p_connection_id: currentWarehouseId,
-    });
+  const velRows = dashboardComputed.velRows;
   const latestByProduct = new Map<string, { velocity: number; confidence: number | null }>();
   for (const m of (velRows ?? [])) {
     latestByProduct.set(m.product_id, {
