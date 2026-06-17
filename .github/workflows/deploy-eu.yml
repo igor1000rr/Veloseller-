@@ -3,7 +3,8 @@ name: Deploy EU
 # EU (.com, Contabo) деплоится ТОЛЬКО после успешного деплоя .ru
 # (workflow "Deploy") — .ru играет роль канарейки.
 # Включается переменной репозитория DEPLOY_EU_ENABLED=true после настройки
-# EU-секретов (DEPLOY_HOST_EU / DEPLOY_USER_EU / DEPLOY_SSH_KEY_EU). До этого спит.
+# EU-доступа. Host/user — из vars (DEPLOY_HOST_EU/DEPLOY_USER_EU), ключ — из secrets
+# (DEPLOY_SSH_KEY_EU). До включения флага воркфлоу спит.
 on:
   workflow_run:
     workflows: ["Deploy"]
@@ -24,11 +25,11 @@ jobs:
           mkdir -p ~/.ssh
           echo "${{ secrets.DEPLOY_SSH_KEY_EU }}" > ~/.ssh/deploy_key_eu
           chmod 600 ~/.ssh/deploy_key_eu
-          ssh-keyscan -H ${{ secrets.DEPLOY_HOST_EU }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ vars.DEPLOY_HOST_EU }} >> ~/.ssh/known_hosts
 
       - name: Деплой EU через SSH (finalize.sh)
         run: |
-          ssh -i ~/.ssh/deploy_key_eu ${{ secrets.DEPLOY_USER_EU }}@${{ secrets.DEPLOY_HOST_EU }} 'bash -s' << 'EOF'
+          ssh -i ~/.ssh/deploy_key_eu ${{ vars.DEPLOY_USER_EU }}@${{ vars.DEPLOY_HOST_EU }} 'bash -s' << 'EOF'
             set -euo pipefail
             cd /opt/veloseller
             echo "→ git pull (EU)"
@@ -42,7 +43,7 @@ jobs:
 
       - name: Smoke EU — internal /api/health
         run: |
-          ssh -i ~/.ssh/deploy_key_eu ${{ secrets.DEPLOY_USER_EU }}@${{ secrets.DEPLOY_HOST_EU }} 'bash -s' << 'EOF'
+          ssh -i ~/.ssh/deploy_key_eu ${{ vars.DEPLOY_USER_EU }}@${{ vars.DEPLOY_HOST_EU }} 'bash -s' << 'EOF'
             set -euo pipefail
             for i in 1 2 3 4 5; do
               code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 http://127.0.0.1:3000/api/health || true)
