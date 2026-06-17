@@ -9,7 +9,7 @@ import { formatMoney } from "@/lib/format-money";
 import { InfoTooltip } from "../_components/InfoTooltip";
 import { getSelectedWarehouse, listWarehouses, warehouseKindLabel } from "@/lib/warehouse";
 import { t, plural } from "@/lib/i18n";
-import { getRecalcStamp, getDashboardComputed } from "@/lib/dashboard-cache";
+import { getMetricsStamp, getDashboardComputed } from "@/lib/dashboard-cache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
