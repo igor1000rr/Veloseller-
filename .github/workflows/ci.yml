@@ -47,20 +47,20 @@ jobs:
 
   web:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
-          cache-dependency-path: package-lock.json
-      - run: npm ci --legacy-peer-deps --no-audit --no-fund
+      - run: npm install --legacy-peer-deps --no-audit --no-fund
       # TypeScript/ESLint теперь БЛОКИРУЮТ CI (ratchet завершён). Шаги по-прежнему
       # пишут число ошибок в Summary, но падают (exit $STATUS), если ошибки есть.
       # ВНИМАНИЕ: deploy.yml гейтится на success CI — если в коде остались TS/lint
       # ошибки, этот PR покраснеет (и мержить его не надо, пока не вычистите).
       - name: typecheck (tsc --noEmit)
-        working-directory: apps/web
         run: |
           set +e
           npm run typecheck 2>&1 | tee /tmp/tsc.log
@@ -70,7 +70,6 @@ jobs:
           echo "## TypeScript: ${ERRORS} ошибок" >> "$GITHUB_STEP_SUMMARY"
           exit $STATUS
       - name: lint (next lint)
-        working-directory: apps/web
         run: |
           set +e
           npm run lint 2>&1 | tee /tmp/lint.log
@@ -80,11 +79,9 @@ jobs:
           echo "## ESLint: ${ISSUES} замечаний" >> "$GITHUB_STEP_SUMMARY"
           exit $STATUS
       - name: vitest + coverage
-        working-directory: apps/web
         run: npm run test:coverage
       - name: Coverage summary в GitHub Actions Summary
         if: always()
-        working-directory: apps/web
         run: |
           if [ -f coverage/coverage-summary.json ]; then
             node -e "
