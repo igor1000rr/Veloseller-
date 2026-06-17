@@ -9,7 +9,7 @@ let sellerPlan = "pro";
 let sellerLimit = 15;
 
 // from() вызывается трижды:
-//   1) sellers.select("plan_warehouses_limit, plan").eq.single — для лимита
+//   1) sellers.select("plan_warehouses_limit, plan").eq.maybeSingle — для лимита
 //   2) data_connections.select("id", {count}).eq — для подсчёта текущих
 //   3) data_connections.insert(...).select.single — для создания
 vi.mock("@/lib/supabase/server", () => ({
@@ -20,7 +20,7 @@ vi.mock("@/lib/supabase/server", () => ({
         return {
           select: vi.fn(() => ({
             eq: vi.fn(() => ({
-              single: vi.fn().mockResolvedValue({
+              maybeSingle: vi.fn().mockResolvedValue({
                 data: { plan_warehouses_limit: sellerLimit, plan: sellerPlan },
                 error: null,
               }),
