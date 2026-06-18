@@ -183,6 +183,11 @@ def poll_brand(
 
     # 4. Upsert каждой matched фразы в radar_queries
     now_iso = datetime.now(timezone.utc).isoformat()
+    # Suggest WB/OZON (#5, 19.06): подтверждение, что фразу реально ищут в
+    # маркетплейсе. На статус не влияет — только наполняет present_in_*.
+    # matched отсортирован по частоте убыв., поэтому проверяем самые востребованные.
+    suggest_enabled = os.getenv("RADAR_SUGGEST_ENABLED", "1").strip().lower() not in ("0", "false", "")
+    suggest_checks_done = 0
     for mq in matched:
         try:
             existing = (
