@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import AppHeader from "../_components/AppHeader";
 import FreshDataGuard from "../_components/FreshDataGuard";
