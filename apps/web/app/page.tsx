@@ -55,6 +55,7 @@ export default async function LandingPage() {
       <LandingStats />
       <LandingFeatures />
       <LandingSegments />
+      <LandingApps />
       <LandingStory />
       <LandingBottom isAuthed={isAuthed} />
       <LandingFooter isAuthed={isAuthed} />
