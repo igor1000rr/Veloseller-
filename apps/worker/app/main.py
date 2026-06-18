@@ -794,7 +794,7 @@ def ingest_google_sheet(connection_id: str, background_tasks: BackgroundTasks) -
         raise HTTPException(400, "config.sheet_url или config.sheet_id обязателен")
     if not _try_acquire_sync_lock(sb, connection_id):
         return {"started": False, "status": "running", "message": "Sync уже идёт или склад на паузе"}
-    background_tasks.add_task(_run_google_sheet_sync_bg, connection_id, conn.data["seller_id"], sheet, cfg.get("worksheet_index", 0))
+    _dispatch_sync(background_tasks, _run_google_sheet_sync_bg, connection_id, conn.data["seller_id"], sheet, cfg.get("worksheet_index", 0))
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
 
 
