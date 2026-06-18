@@ -58,7 +58,10 @@ function resampleChart(
   const merged: ChangelogByDate = {};
   for (const arr of groups.values()) {
     const last = arr[arr.length - 1];
-    const velAvg = arr.reduce((s, p) => s + (Number(p.velocity) || 0), 0) / arr.length;
+    // velocity: среднее только по дням с наличием (velocity != null). Если все дни
+    // бакета были OOS — null, чтобы линия скорости прервалась, а не падала в 0.
+    const velVals = arr.map((p) => p.velocity).filter((v): v is number => v != null && !Number.isNaN(v));
+    const velAvg = velVals.length ? velVals.reduce((s, v) => s + v, 0) / velVals.length : null;
     const availMean = arr.reduce((s, p) => s + (p.availability ? 1 : 0), 0) / arr.length;
     points.push({
       date: last.date,
