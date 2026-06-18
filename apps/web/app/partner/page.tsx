@@ -1,5 +1,13 @@
 import type { Metadata } from "next";
-import { Eyebrow, MarketingHeader, MarketingFooter } from "../_components/MarketingChrome";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import LandingHeader from "../_landing/Header";
+import LandingFooter from "../_landing/Footer";
+import ScrollToTopButton from "../_components/ScrollToTopButton";
+import PartnerCalculator from "../_components/PartnerCalculator";
+import { Eyebrow } from "../_landing/ui";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export const metadata: Metadata = {
   title: "Партнёрская программа",
@@ -8,10 +16,9 @@ export const metadata: Metadata = {
 };
 
 // Предлагаемые условия — поправь под финальную оферту (всё в константах).
-const SHARE_PCT = 20; // % с каждого платежа приведённого клиента
-const COOKIE_DAYS = 60; // окно атрибуции по реф-ссылке
-const MIN_PAYOUT = "5 000 ₽"; // минимальная сумма к выводу
-const EXAMPLE_ARPU = 2500; // ₽/мес — пример чека клиента для расчёта дохода
+const SHARE_PCT = 20;
+const COOKIE_DAYS = 60;
+const MIN_PAYOUT = "5 000 ₽";
 const PARTNER_EMAIL = "partners@veloseller.ru";
 const PARTNER_TG = ""; // впиши хэндл (напр. veloseller_partners) — появится кнопка Telegram
 
@@ -19,9 +26,6 @@ const MAILTO =
   "mailto:" + PARTNER_EMAIL + "?subject=" +
   encodeURIComponent("Заявка в партнёрскую программу Veloseller");
 
-const ruN = (n: number) => n.toLocaleString("ru-RU");
-
-// Литеральные классы — чтобы Tailwind их сгенерил (динамику purge не видит).
 const CHIP: Record<string, string> = {
   lime: "text-lime-deep bg-lime-soft",
   azure: "text-azure bg-azure/10",
@@ -66,8 +70,6 @@ const WHY = [
   { title: "Материалы и поддержка", text: "Дадим презентации, промо и помощь с онбордингом. Ваша задача — рекомендовать." },
 ];
 
-const SCENARIOS = [5, 15, 30];
-
 const FAQ = [
   { q: "Что значит «пожизненно»?", a: "Пока клиент на платном тарифе, вы получаете долю с каждого его платежа — каждый месяц, а не разово." },
   { q: "Когда и как выплаты?", a: "Раз в месяц при накоплении от " + MIN_PAYOUT + ". На карту, расчётный счёт или как самозанятому — по договору." },
@@ -77,35 +79,39 @@ const FAQ = [
   { q: "Как с налогами?", a: "Выплаты по договору — самозанятым, ИП или физлицу. Налоги вы декларируете самостоятельно." },
 ];
 
-export default function PartnerPage() {
+export default async function PartnerPage() {
+  const supabase = await createSupabaseServerClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  const isAuthed = !!user;
+
   return (
-    <div className="relative min-h-screen bg-paper-warm text-ink overflow-x-hidden">
+    <main className="relative bg-paper-warm text-ink overflow-x-hidden">
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-noise opacity-100 mix-blend-multiply" />
       <div aria-hidden className="pointer-events-none fixed -top-40 -left-40 size-[700px] rounded-full blur-3xl opacity-50" style={{ background: "radial-gradient(closest-side, rgba(132,204,22,0.25), transparent 70%)" }} />
       <div aria-hidden className="pointer-events-none fixed -bottom-40 -right-40 size-[600px] rounded-full blur-3xl opacity-40" style={{ background: "radial-gradient(closest-side, rgba(2,132,199,0.15), transparent 70%)" }} />
 
-      <MarketingHeader />
+      <LandingHeader isAuthed={isAuthed} />
 
-      <section className="relative px-6 py-16 md:py-24">
-        <div className="max-w-4xl mx-auto text-center reveal">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-14 md:py-24">
+        <div className="max-w-3xl mx-auto text-center reveal">
           <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-lime-deep/30 bg-lime-soft">
             <span className="size-1.5 rounded-full bg-lime-deep animate-pulse" />
             <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-lime-deep font-semibold">Партнёрская программа</span>
           </span>
-          <h1 className="mt-6 font-display text-3xl sm:text-4xl md:text-6xl tracking-tight font-medium leading-[1.05]">
+          <h1 className="mt-6 font-display text-4xl sm:text-5xl md:text-6xl tracking-tight font-medium leading-[1.02]">
             Приводите клиентов — получайте{" "}
             <span className="bg-gradient-to-r from-lime-deep to-azure bg-clip-text text-transparent">{SHARE_PCT}%</span>
-            {" "}с их платежей. <span className="text-lime-deep">Пожизненно.</span>
+            {" "}с их платежей. <span className="text-lime-deep italic">Пожизненно.</span>
           </h1>
-          <p className="mt-5 text-ink-muted text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
+          <p className="mt-6 text-ink-muted text-base md:text-lg max-w-2xl mx-auto leading-relaxed">
             Агентствам, консультантам и сервисам для селлеров: рекомендуйте Veloseller и зарабатывайте на каждом платеже клиента, пока он с нами.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <a href={MAILTO} className="rounded-lg bg-ink text-paper px-6 py-3 text-sm font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
+            <a href={MAILTO} className="rounded-lg bg-ink text-paper px-6 py-3.5 text-sm font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
               Стать партнёром
             </a>
-            <a href="#how" className="rounded-lg bg-paper text-ink border border-line px-6 py-3 text-sm font-semibold hover:border-lime-deep/40 transition hover:-translate-y-0.5">
-              Как это работает
+            <a href="#calc" className="rounded-lg bg-paper text-ink border border-line px-6 py-3.5 text-sm font-semibold hover:border-lime-deep/40 transition hover:-translate-y-0.5">
+              Посчитать доход
             </a>
           </div>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-2.5">
@@ -116,14 +122,14 @@ export default function PartnerPage() {
         </div>
       </section>
 
-      <section className="relative px-6 py-12 md:py-16 border-t border-line">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-10 reveal">
-            <Eyebrow>Кому подходит</Eyebrow>
-            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line">
+        <div className="max-w-[1600px] mx-auto">
+          <div className="text-center mb-10 md:mb-14 reveal">
+            <Eyebrow center>Кому подходит</Eyebrow>
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
               Станьте нашим отделом продаж
             </h2>
-            <p className="mt-3 text-ink-muted max-w-2xl mx-auto text-sm md:text-base">
+            <p className="mt-4 text-ink-muted max-w-2xl mx-auto text-sm md:text-base">
               У нас нет огромного отдела продаж — зато есть вы. Кто приводит клиентов лучше всего:
             </p>
           </div>
@@ -131,9 +137,9 @@ export default function PartnerPage() {
             {SEGMENTS.map((s, i) => {
               const a = ACCENTS[i % 4];
               return (
-                <div key={s.title} className={"group reveal rounded-2xl border border-line bg-paper p-6 transition hover:-translate-y-1 hover:shadow-xl " + HOVER[a]} style={{ animationDelay: i * 80 + "ms" }}>
+                <div key={s.title} className={"group reveal rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 transition hover:-translate-y-1 hover:shadow-xl " + HOVER[a]} style={{ animationDelay: i * 80 + "ms" }}>
                   <div className={"flex size-11 items-center justify-center rounded-xl font-mono text-sm font-semibold transition group-hover:scale-110 " + CHIP[a]}>{String(i + 1).padStart(2, "0")}</div>
-                  <h3 className="mt-5 font-display text-lg leading-tight font-medium">{s.title}</h3>
+                  <h3 className="mt-5 font-display text-base sm:text-lg md:text-xl leading-tight font-medium">{s.title}</h3>
                   <p className="mt-2 text-sm text-ink-muted leading-relaxed">{s.text}</p>
                 </div>
               );
@@ -142,11 +148,11 @@ export default function PartnerPage() {
         </div>
       </section>
 
-      <section id="how" className="relative px-6 py-12 md:py-16 border-t border-line bg-bg-soft">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-10 reveal">
-            <Eyebrow>Как это работает</Eyebrow>
-            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium">
+      <section id="how" className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line bg-bg-soft">
+        <div className="max-w-[1600px] mx-auto">
+          <div className="text-center mb-10 md:mb-14 reveal">
+            <Eyebrow center>Как это работает</Eyebrow>
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
               Четыре шага до пассивного дохода
             </h2>
           </div>
@@ -154,9 +160,9 @@ export default function PartnerPage() {
             {STEPS.map((s, i) => {
               const a = ACCENTS[i % 4];
               return (
-                <div key={s.n} className="group reveal rounded-2xl border border-line bg-paper p-6 transition hover:-translate-y-1 hover:shadow-xl" style={{ animationDelay: i * 80 + "ms" }}>
+                <div key={s.n} className="group reveal rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 transition hover:-translate-y-1 hover:shadow-xl" style={{ animationDelay: i * 80 + "ms" }}>
                   <div className={"flex size-11 items-center justify-center rounded-xl font-mono text-sm font-semibold transition group-hover:scale-110 " + CHIP[a]}>{s.n}</div>
-                  <h3 className="mt-5 font-display text-lg leading-tight font-medium">{s.title}</h3>
+                  <h3 className="mt-5 font-display text-base sm:text-lg md:text-xl leading-tight font-medium">{s.title}</h3>
                   <p className="mt-2 text-sm text-ink-muted leading-relaxed">{s.text}</p>
                 </div>
               );
@@ -165,35 +171,24 @@ export default function PartnerPage() {
         </div>
       </section>
 
-      <section className="relative px-6 py-12 md:py-16 border-t border-line">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-10 reveal">
-            <Eyebrow>Сколько можно заработать</Eyebrow>
-            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium">
-              Доход, который повторяется каждый месяц
+      <section id="calc" className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-8 md:mb-10 reveal">
+            <Eyebrow center>Калькулятор дохода</Eyebrow>
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
+              Подвигайте ползунки
             </h2>
-            <p className="mt-3 text-ink-muted max-w-2xl mx-auto text-sm md:text-base">
-              Пример для клиентов с чеком {ruN(EXAMPLE_ARPU)} ₽/мес. Это recurring — сумма приходит каждый месяц, пока клиенты платят.
+            <p className="mt-4 text-ink-muted max-w-2xl mx-auto text-sm md:text-base">
+              Доход recurring — приходит каждый месяц, пока клиенты платят, и растёт при их апгрейде.
             </p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 md:gap-5">
-            {SCENARIOS.map((n, i) => (
-              <div key={n} className="reveal rounded-2xl border border-line bg-gradient-to-br from-paper to-lime-soft p-6 text-center transition hover:-translate-y-1 hover:shadow-xl hover:border-lime-deep/40" style={{ animationDelay: i * 100 + "ms" }}>
-                <div className="font-mono text-xs uppercase tracking-wider text-ink-hush">{n} клиентов</div>
-                <div className="mt-3 font-display text-4xl md:text-5xl tracking-tight font-medium tabular bg-gradient-to-r from-lime-deep to-azure bg-clip-text text-transparent">
-                  {ruN(Math.round(EXAMPLE_ARPU * (SHARE_PCT / 100) * n))} ₽
-                </div>
-                <div className="mt-1 text-sm text-ink-muted">в месяц, пожизненно</div>
-              </div>
-            ))}
+          <div className="reveal">
+            <PartnerCalculator />
           </div>
-          <p className="mt-5 text-center font-mono text-xs text-ink-hush">
-            Реальный доход зависит от тарифов клиентов и растёт при их апгрейде.
-          </p>
         </div>
       </section>
 
-      <section className="relative px-6 py-12 md:py-16 border-t border-line bg-bg-soft">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line bg-bg-soft">
         <div className="max-w-3xl mx-auto">
           <div className="mb-8 reveal">
             <Eyebrow>Условия</Eyebrow>
@@ -212,21 +207,21 @@ export default function PartnerPage() {
         </div>
       </section>
 
-      <section className="relative px-6 py-12 md:py-16 border-t border-line">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-10 reveal">
-            <Eyebrow>Почему это выгодно</Eyebrow>
-            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line">
+        <div className="max-w-[1600px] mx-auto">
+          <div className="text-center mb-10 md:mb-14 reveal">
+            <Eyebrow center>Почему это выгодно</Eyebrow>
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
               Партнёрка, которая работает на вас
             </h2>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 md:gap-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
             {WHY.map((w, i) => {
               const a = ACCENTS[i % 4];
               return (
-                <div key={w.title} className={"group reveal rounded-2xl border border-line bg-paper p-6 transition hover:-translate-y-1 hover:shadow-xl " + HOVER[a]} style={{ animationDelay: i * 80 + "ms" }}>
+                <div key={w.title} className={"group reveal rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 transition hover:-translate-y-1 hover:shadow-xl " + HOVER[a]} style={{ animationDelay: i * 80 + "ms" }}>
                   <div className={"flex size-11 items-center justify-center rounded-xl font-mono text-sm font-semibold transition group-hover:scale-110 " + CHIP[a]}>{String(i + 1).padStart(2, "0")}</div>
-                  <h3 className="mt-5 font-display text-lg leading-tight font-medium">{w.title}</h3>
+                  <h3 className="mt-5 font-display text-base sm:text-lg md:text-xl leading-tight font-medium">{w.title}</h3>
                   <p className="mt-2 text-sm text-ink-muted leading-relaxed">{w.text}</p>
                 </div>
               );
@@ -235,7 +230,7 @@ export default function PartnerPage() {
         </div>
       </section>
 
-      <section className="relative px-6 py-12 md:py-16 border-t border-line bg-bg-soft">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line bg-bg-soft">
         <div className="max-w-3xl mx-auto">
           <div className="mb-8 reveal">
             <Eyebrow>Вопросы</Eyebrow>
@@ -257,7 +252,7 @@ export default function PartnerPage() {
         </div>
       </section>
 
-      <section id="apply" className="relative px-6 py-16 md:py-24 border-t border-line">
+      <section id="apply" className="relative w-full px-4 md:px-8 lg:px-12 py-16 md:py-24 border-t border-line">
         <div className="max-w-3xl mx-auto text-center reveal">
           <h2 className="font-display text-3xl md:text-5xl tracking-tight font-medium leading-tight">
             Готовы зарабатывать{" "}
@@ -267,11 +262,11 @@ export default function PartnerPage() {
             Оставьте заявку — расскажем про условия, выдадим кабинет и реф-ссылку. Отвечаем в течение рабочего дня.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <a href={MAILTO} className="rounded-lg bg-ink text-paper px-6 py-3 text-sm font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
+            <a href={MAILTO} className="rounded-lg bg-ink text-paper px-6 py-3.5 text-sm font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
               Оставить заявку
             </a>
             {PARTNER_TG ? (
-              <a href={"https://t.me/" + PARTNER_TG} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-paper text-ink border border-line px-6 py-3 text-sm font-semibold hover:border-lime-deep/40 transition hover:-translate-y-0.5">
+              <a href={"https://t.me/" + PARTNER_TG} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-paper text-ink border border-line px-6 py-3.5 text-sm font-semibold hover:border-lime-deep/40 transition hover:-translate-y-0.5">
                 Написать в Telegram
               </a>
             ) : null}
@@ -280,7 +275,8 @@ export default function PartnerPage() {
         </div>
       </section>
 
-      <MarketingFooter />
-    </div>
+      <LandingFooter isAuthed={isAuthed} />
+      <ScrollToTopButton />
+    </main>
   );
 }
