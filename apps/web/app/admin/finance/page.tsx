@@ -111,6 +111,8 @@ export default async function FinancePage() {
             <div className="col-span-8 font-mono text-[10px] uppercase tracking-widest text-ink font-semibold">Итого MRR</div>
             <div className="col-span-4 font-display text-xl text-ink text-right tabular font-medium">{rubFmt(mrr)}</div>
           </div>
+            </div>
+          </div>
         </div>
       </section>
 
