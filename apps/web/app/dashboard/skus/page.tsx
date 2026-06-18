@@ -239,7 +239,15 @@ export default async function SkusPage({ searchParams }: {
       .gt("tvelo_metrics.stockout_days", 0)
       .gt("tvelo_metrics.adjusted_velocity", 0);
   } else if (dashFilter === "dead_inventory") {
-    productsQuery = productsQuery.gt("tvelo_metrics.coverage_days", effectiveThreshold!);
+    // Неликвид = coverage > порог ИЛИ «мёртвый по скорости» (adjusted_velocity=0
+    // при наличии остатка и наблюдении ≥30 дней). Без второй ветки мёртвый
+    // неликвид с coverage=NULL выпадал из списка, хотя в «замороженных деньгах» и
+    // счётчике «Неликвид» на дашборде он есть (там сегмент dead_inventory_risk) —
+    // дашборд и витрина расходились (правка по матаудиту #3).
+    productsQuery = productsQuery.or(
+      `coverage_days.gt.${effectiveThreshold},and(adjusted_velocity.eq.0,current_stock.gt.0,in_stock_days.gte.30)`,
+      { foreignTable: "tvelo_metrics" },
+    );
   } else if (dashFilter === "oos") {
     productsQuery = productsQuery
       .eq("tvelo_metrics.current_stock", 0)
