@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Icons } from "./Icons";
+import { t } from "@/lib/i18n";
 
 export default function SiteFooter() {
   return (
@@ -14,27 +15,26 @@ export default function SiteFooter() {
               <span className="font-display text-xl tracking-tight font-medium">Veloseller</span>
             </Link>
             <p className="mt-5 text-sm text-ink-muted max-w-xs leading-relaxed">
-              Управление складом для маркетплейс-селлеров. TVelo, дни покрытия, достоверность
-              данных — расчёты, которым можно доверять.
+              {t("site.footer.tagline")}
             </p>
           </div>
 
           <div className="col-span-1 md:col-span-2">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Продукт</div>
+            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("site.footer.product")}</div>
             <ul className="mt-4 space-y-2.5 text-sm">
               <li>
                 <Link href={"/#features" as never} className="text-ink-soft hover:text-lime-deep transition">
-                  Возможности
+                  {t("site.nav.features")}
                 </Link>
               </li>
               <li>
                 <Link href={"/#how" as never} className="text-ink-soft hover:text-lime-deep transition">
-                  Как работает
+                  {t("site.nav.how")}
                 </Link>
               </li>
               <li>
                 <Link href={"/#pricing" as never} className="text-ink-soft hover:text-lime-deep transition">
-                  Тарифы
+                  {t("site.nav.pricing")}
                 </Link>
               </li>
               <li>
@@ -46,28 +46,28 @@ export default function SiteFooter() {
           </div>
 
           <div className="col-span-1 md:col-span-2">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Ресурсы</div>
+            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("site.footer.resources")}</div>
             <ul className="mt-4 space-y-2.5 text-sm">
               <li>
                 <Link href={"/news" as never} className="text-ink-soft hover:text-lime-deep transition">
-                  Новости и гайды
+                  {t("site.footer.newsGuides")}
                 </Link>
               </li>
               <li>
                 <Link href={"/login" as never} className="text-ink-soft hover:text-lime-deep transition">
-                  Войти
+                  {t("site.cta.login")}
                 </Link>
               </li>
               <li>
                 <Link href={"/register" as never} className="text-ink-soft hover:text-lime-deep transition">
-                  Регистрация
+                  {t("site.footer.register")}
                 </Link>
               </li>
             </ul>
           </div>
 
           <div className="col-span-1 md:col-span-2">
-            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">Контакты</div>
+            <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("site.footer.contacts")}</div>
             <ul className="mt-4 space-y-2.5 text-sm">
               <li>
                 <a href="mailto:info@proaim.ru" className="text-ink-soft hover:text-lime-deep transition">
@@ -90,11 +90,11 @@ export default function SiteFooter() {
 
         <div className="mt-10 md:mt-12 pt-6 md:pt-8 border-t border-line flex flex-wrap items-center justify-between gap-4">
           <div className="font-mono text-xs text-ink-hush">
-            © {new Date().getFullYear()} Veloseller — управление складом для ecommerce
+            {t("site.footer.copyright", { year: new Date().getFullYear() })}
           </div>
           <div className="flex items-center gap-2">
             <span className="size-1.5 rounded-full bg-lime-deep animate-pulse" />
-            <span className="font-mono text-xs text-ink-hush">все системы работают</span>
+            <span className="font-mono text-xs text-ink-hush">{t("site.footer.allSystems")}</span>
           </div>
         </div>
       </div>

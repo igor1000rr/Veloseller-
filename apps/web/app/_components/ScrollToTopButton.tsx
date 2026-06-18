@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { t } from "@/lib/i18n";
 
 /**
  * Кнопка "вверх" в правом нижнем углу.
@@ -21,7 +22,7 @@ export default function ScrollToTopButton() {
     <button
       type="button"
       onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-      aria-label="Наверх"
+      aria-label={t("common.scrollTop")}
       className="fixed bottom-6 right-6 z-40 size-11 md:size-12 rounded-full bg-ink text-paper shadow-[0_10px_30px_-10px_rgba(10,10,8,0.4)] hover:bg-ink-soft transition flex items-center justify-center"
     >
       <svg

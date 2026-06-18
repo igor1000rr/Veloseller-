@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Icons } from "./Icons";
 import MobileMenu from "./MobileMenu";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { t } from "@/lib/i18n";
 
 export default async function SiteHeader() {
   const supabase = await createSupabaseServerClient();
@@ -25,16 +26,16 @@ export default async function SiteHeader() {
 
         <nav className="hidden md:flex items-center gap-7">
           <Link href={"/#features" as never} className="text-sm text-ink-soft hover:text-lime-deep transition">
-            Возможности
+            {t("site.nav.features")}
           </Link>
           <Link href={"/#how" as never} className="text-sm text-ink-soft hover:text-lime-deep transition">
-            Как работает
+            {t("site.nav.how")}
           </Link>
           <Link href={"/#pricing" as never} className="text-sm text-ink-soft hover:text-lime-deep transition">
-            Тарифы
+            {t("site.nav.pricing")}
           </Link>
           <Link href={"/news" as never} className="text-sm text-lime-deep font-medium">
-            Новости
+            {t("site.nav.news")}
           </Link>
           <Link href={"/#faq" as never} className="text-sm text-ink-soft hover:text-lime-deep transition">
             FAQ
@@ -47,7 +48,7 @@ export default async function SiteHeader() {
               href={"/dashboard" as never}
               className="hidden md:inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition"
             >
-              В кабинет <Icons.ArrowRight size={12} />
+              {t("site.cta.dashboard")} <Icons.ArrowRight size={12} />
             </Link>
           ) : (
             <>
@@ -55,13 +56,13 @@ export default async function SiteHeader() {
                 href={"/login" as never}
                 className="hidden md:inline-block text-sm text-ink-soft hover:text-ink transition px-2 py-1"
               >
-                Войти
+                {t("site.cta.login")}
               </Link>
               <Link
                 href={"/register" as never}
                 className="hidden md:inline-flex rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition"
               >
-                Начать
+                {t("site.cta.start")}
               </Link>
             </>
           )}

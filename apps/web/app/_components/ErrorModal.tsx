@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import type { ParsedError } from "@/lib/error-parser";
+import { t } from "@/lib/i18n";
 
 /**
  * Popup-модал для отображения ошибок и важных уведомлений.
@@ -85,7 +86,7 @@ export function ErrorModal({
           {error.raw && error.raw !== error.message && (
             <details className="mt-4 group">
               <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-widest text-ink-hush hover:text-ink transition select-none">
-                Технические детали
+                {t("common.techDetails")}
               </summary>
               <pre className="mt-2 p-3 bg-bg-soft border border-line rounded text-[11px] text-ink-muted font-mono overflow-x-auto whitespace-pre-wrap break-all">
                 {error.raw}
@@ -99,7 +100,7 @@ export function ErrorModal({
               onClick={onClose}
               className="px-4 py-2 text-sm font-mono uppercase tracking-wider border border-line rounded-lg hover:bg-bg-soft transition"
             >
-              Закрыть
+              {t("common.close")}
             </button>
             {error.action && (
               <Link
