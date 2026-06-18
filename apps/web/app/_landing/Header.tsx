@@ -29,6 +29,8 @@ export default function LandingHeader({ isAuthed }: { isAuthed: boolean }) {
           <a href="#integrations" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.integrations")}</a>
           <a href="#pricing" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.pricing")}</a>
           <Link href={"/news" as any} className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.news")}</Link>
+          <Link href={"/apps" as any} className="text-sm text-ink-soft hover:text-lime-deep transition">{isEn ? "App" : "Приложение"}</Link>
+          <Link href={"/partner" as any} className="text-sm font-medium text-lime-deep hover:text-lime transition">{isEn ? "Partners" : "Партнёрам"}</Link>
           <a href="#faq" className="text-sm text-ink-soft hover:text-lime-deep transition">FAQ</a>
         </nav>
         <div className="flex items-center gap-2 md:gap-3">
