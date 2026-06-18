@@ -163,8 +163,8 @@ export default async function PartnerPage() {
       <div aria-hidden className="relative w-full border-y border-line bg-bg-soft py-5 overflow-hidden">
         <div className="flex w-max gap-3 marquee-track">
           {[...MARQUEE, ...MARQUEE].map((m, i) => (
-            <span key={i} className="flex shrink-0 items-center gap-2 rounded-full border border-line bg-paper px-4 py-2 text-sm text-ink-soft">
-              <MIcon name={m.icon} className="size-4 text-lime-deep" />
+            <span key={i} className={"flex shrink-0 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium " + MQTINT[i % 4]}>
+              <MIcon name={m.icon} className="size-4" />
               {m.label}
             </span>
           ))}
