@@ -17,7 +17,6 @@ export const metadata: Metadata = {
     "Приводите клиентов в Veloseller и получайте 20% с их платежей пожизненно. Программа для агентств, консультантов и сервисов для селлеров Wildberries и Ozon.",
 };
 
-// Предлагаемые условия — поправь под финальную оферту (всё в константах).
 const SHARE_PCT = 20;
 const COOKIE_DAYS = 60;
 const MIN_PAYOUT = "5 000 ₽";
@@ -28,11 +27,20 @@ const MAILTO =
   "mailto:" + PARTNER_EMAIL + "?subject=" +
   encodeURIComponent("Заявка в партнёрскую программу Veloseller");
 
-const CHIP: Record<string, string> = {
-  lime: "text-lime-deep bg-lime-soft",
-  azure: "text-azure bg-azure/10",
-  emerald: "text-emerald bg-emerald/10",
-  orange: "text-orange bg-orange/10",
+const ACCENTS = ["lime", "azure", "emerald", "orange"];
+// Градиентная плитка под иконку (белая иконка на цвете).
+const TILE: Record<string, string> = {
+  lime: "bg-gradient-to-br from-lime-deep to-emerald",
+  azure: "bg-gradient-to-br from-azure to-lime-deep",
+  emerald: "bg-gradient-to-br from-emerald to-azure",
+  orange: "bg-gradient-to-br from-orange to-rose",
+};
+// Лёгкая подложка карточки в тон акценту.
+const TINT: Record<string, string> = {
+  lime: "from-paper to-lime-soft",
+  azure: "from-paper to-azure/10",
+  emerald: "from-paper to-emerald/10",
+  orange: "from-paper to-orange/10",
 };
 const HOVER: Record<string, string> = {
   lime: "hover:border-lime-deep/40",
@@ -40,7 +48,6 @@ const HOVER: Record<string, string> = {
   emerald: "hover:border-emerald/40",
   orange: "hover:border-orange/40",
 };
-const ACCENTS = ["lime", "azure", "emerald", "orange"];
 
 const MARQUEE = [
   { icon: "box", label: "Ozon FBO/FBS" },
@@ -64,7 +71,7 @@ const STEPS = [
   { icon: "doc", n: "01", title: "Заявка и кабинет", text: "Оставляете заявку — открываем партнёрский кабинет с реф-ссылкой и промокодом." },
   { icon: "link", n: "02", title: "Рекомендуете", text: "Приводите клиентов по ссылке, промокоду или передаёте контакт менеджеру — фиксируем привязку." },
   { icon: "card", n: "03", title: "Клиент оплачивает", text: "Клиент регистрируется и подключает любой платный тариф Veloseller." },
-  { icon: "coins", n: "04", title: "Получаете " + SHARE_PCT + "%", text: "Вам идёт " + SHARE_PCT + "% с каждого его платежа — пожизненно, пока клиент с нами. Выплаты раз в месяц." },
+  { icon: "coins", n: "04", title: "Получаете " + SHARE_PCT + "%", text: "Вам идёт " + SHARE_PCT + "% с каждого его платежа — пожизненно, пока клиент с нами." },
 ];
 
 const TERMS = [
@@ -91,6 +98,13 @@ const FAQ = [
   { q: "Можно совмещать с моими услугами?", a: "Да. Агентства и консультанты включают Veloseller в свой пакет и зарабатывают и на услугах, и на партнёрке." },
   { q: "Как с налогами?", a: "Выплаты по договору — самозанятым, ИП или физлицу. Налоги вы декларируете самостоятельно." },
 ];
+
+const STEPLINE: Record<string, string> = {
+  lime: "from-lime-deep to-emerald",
+  azure: "from-azure to-lime-deep",
+  emerald: "from-emerald to-azure",
+  orange: "from-orange to-rose",
+};
 
 export default async function PartnerPage() {
   const supabase = await createSupabaseServerClient();
@@ -166,8 +180,8 @@ export default async function PartnerPage() {
             {SEGMENTS.map((s, i) => {
               const a = ACCENTS[i % 4];
               return (
-                <div key={s.title} className={"group reveal rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 transition hover:-translate-y-1 hover:shadow-xl " + HOVER[a]} style={{ animationDelay: i * 80 + "ms" }}>
-                  <div className={"flex size-12 items-center justify-center rounded-2xl transition group-hover:scale-110 group-hover:-rotate-3 " + CHIP[a]}>
+                <div key={s.title} className={"group reveal rounded-2xl border border-line bg-gradient-to-br p-5 sm:p-6 md:p-7 transition hover:-translate-y-1 hover:shadow-xl " + TINT[a] + " " + HOVER[a]} style={{ animationDelay: i * 80 + "ms" }}>
+                  <div className={"flex size-12 items-center justify-center rounded-2xl text-paper shadow-md transition group-hover:scale-110 group-hover:-rotate-3 " + TILE[a]}>
                     <MIcon name={s.icon} className="size-6" />
                   </div>
                   <h3 className="mt-5 font-display text-base sm:text-lg md:text-xl leading-tight font-medium">{s.title}</h3>
@@ -180,27 +194,41 @@ export default async function PartnerPage() {
       </section>
 
       <section id="how" className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line bg-bg-soft">
-        <div className="max-w-[1600px] mx-auto">
-          <div className="text-center mb-10 md:mb-14 reveal">
+        <div className="max-w-[1300px] mx-auto">
+          <div className="text-center mb-12 md:mb-16 reveal">
             <Eyebrow center>Как это работает</Eyebrow>
             <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
               Четыре шага до пассивного дохода
             </h2>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
-            {STEPS.map((s, i) => {
-              const a = ACCENTS[i % 4];
-              return (
-                <div key={s.n} className="group reveal relative rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 transition hover:-translate-y-1 hover:shadow-xl" style={{ animationDelay: i * 80 + "ms" }}>
-                  <span className="absolute right-5 top-5 font-display text-3xl font-medium text-line-2">{s.n}</span>
-                  <div className={"flex size-12 items-center justify-center rounded-2xl transition group-hover:scale-110 group-hover:-rotate-3 " + CHIP[a]}>
-                    <MIcon name={s.icon} className="size-6" />
+          <div className="relative">
+            <div aria-hidden className="hidden lg:block absolute left-[12%] right-[12%] top-7 h-0.5 bg-gradient-to-r from-lime-deep/40 via-azure/40 to-orange/40" />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-5">
+              {STEPS.map((s, i) => {
+                const a = ACCENTS[i % 4];
+                return (
+                  <div key={s.n} className="reveal relative text-center" style={{ animationDelay: i * 90 + "ms" }}>
+                    <span className={"relative z-10 mx-auto flex size-14 items-center justify-center rounded-full text-paper shadow-lg bg-gradient-to-br " + STEPLINE[a]}>
+                      <MIcon name={s.icon} className="size-7" />
+                    </span>
+                    <div className="mt-4 font-mono text-xs text-lime-deep">{s.n}</div>
+                    <h3 className="mt-1 font-display text-lg font-medium leading-tight">{s.title}</h3>
+                    <p className="mt-2 text-sm text-ink-muted leading-relaxed max-w-[230px] mx-auto">{s.text}</p>
                   </div>
-                  <h3 className="mt-5 font-display text-base sm:text-lg md:text-xl leading-tight font-medium">{s.title}</h3>
-                  <p className="mt-2 text-sm text-ink-muted leading-relaxed">{s.text}</p>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-12 reveal mx-auto max-w-xl rounded-2xl border border-line bg-paper p-4 shadow-sm">
+            <div className="mb-2 font-mono text-[10px] uppercase tracking-wider text-ink-hush">ваша реферальная ссылка</div>
+            <div className="flex items-center gap-2 rounded-xl bg-bg-soft p-2.5">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-lime-soft text-lime-deep">
+                <MIcon name="link" className="size-4" />
+              </span>
+              <code className="flex-1 truncate font-mono text-xs sm:text-sm text-ink">veloseller.ru/?ref=ВАШ-КОД</code>
+              <span className="shrink-0 rounded-lg bg-ink text-paper px-3 py-1.5 text-xs font-semibold">Копировать</span>
+            </div>
           </div>
         </div>
       </section>
@@ -223,23 +251,41 @@ export default async function PartnerPage() {
       </section>
 
       <section className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line bg-bg-soft">
-        <div className="max-w-3xl mx-auto">
-          <div className="mb-8 reveal">
-            <Eyebrow>Условия</Eyebrow>
-            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium">
+        <div className="max-w-[1300px] mx-auto">
+          <div className="text-center mb-10 md:mb-14 reveal">
+            <Eyebrow center>Условия</Eyebrow>
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
               Прозрачно и без мелкого шрифта
             </h2>
           </div>
-          <ul className="space-y-3">
-            {TERMS.map((item, i) => (
-              <li key={item} className="reveal flex items-start gap-3 rounded-xl border border-line bg-paper p-4 transition hover:border-lime-deep/40" style={{ animationDelay: i * 60 + "ms" }}>
-                <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-lime-soft text-lime-deep">
-                  <MIcon name="check" className="size-4" />
-                </span>
-                <span className="text-sm md:text-[15px] text-ink-soft leading-relaxed">{item}</span>
-              </li>
-            ))}
-          </ul>
+          <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 items-start">
+            <ul className="space-y-3">
+              {TERMS.map((item, i) => (
+                <li key={item} className="reveal flex items-start gap-3 rounded-xl border border-line bg-paper p-4 transition hover:border-lime-deep/40" style={{ animationDelay: i * 60 + "ms" }}>
+                  <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-lime-soft text-lime-deep">
+                    <MIcon name="check" className="size-4" />
+                  </span>
+                  <span className="text-sm md:text-[15px] text-ink-soft leading-relaxed">{item}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="reveal rounded-2xl border border-line bg-gradient-to-br from-paper to-lime-soft p-6 lg:sticky lg:top-24">
+              <div className="font-mono text-[10px] uppercase tracking-wider text-ink-hush">пример выплаты за месяц</div>
+              <div className="mt-1 font-display text-4xl md:text-5xl font-medium tabular bg-gradient-to-r from-lime-deep to-azure bg-clip-text text-transparent">48 000 ₽</div>
+              <div className="mt-6 rounded-xl bg-ink text-paper p-4">
+                <div className="flex items-start justify-between">
+                  <span className="font-mono text-[9px] uppercase tracking-wider opacity-60">партнёрская выплата</span>
+                  <span className="size-6 rounded-md bg-paper/15" />
+                </div>
+                <div className="mt-6 font-mono text-base tracking-[0.2em]">•••• •••• •••• 4242</div>
+                <div className="mt-2 flex justify-between font-mono text-[10px] opacity-70">
+                  <span>ИП · самозанятый · физлицо</span>
+                  <span>раз в месяц</span>
+                </div>
+              </div>
+              <p className="mt-4 text-xs text-ink-muted leading-relaxed">Деньги приходят регулярно, пока ваши клиенты пользуются Veloseller.</p>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -255,8 +301,8 @@ export default async function PartnerPage() {
             {WHY.map((w, i) => {
               const a = ACCENTS[i % 4];
               return (
-                <div key={w.title} className={"group reveal rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 transition hover:-translate-y-1 hover:shadow-xl " + HOVER[a]} style={{ animationDelay: i * 80 + "ms" }}>
-                  <div className={"flex size-12 items-center justify-center rounded-2xl transition group-hover:scale-110 group-hover:-rotate-3 " + CHIP[a]}>
+                <div key={w.title} className={"group reveal rounded-2xl border border-line bg-gradient-to-br p-5 sm:p-6 md:p-7 transition hover:-translate-y-1 hover:shadow-xl " + TINT[a] + " " + HOVER[a]} style={{ animationDelay: i * 80 + "ms" }}>
+                  <div className={"flex size-12 items-center justify-center rounded-2xl text-paper shadow-md transition group-hover:scale-110 group-hover:-rotate-3 " + TILE[a]}>
                     <MIcon name={w.icon} className="size-6" />
                   </div>
                   <h3 className="mt-5 font-display text-base sm:text-lg md:text-xl leading-tight font-medium">{w.title}</h3>
