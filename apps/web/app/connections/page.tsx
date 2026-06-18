@@ -6,9 +6,13 @@ import DeleteButton from "./DeleteButton";
 import { ConnectionErrorHint } from "./ConnectionErrorHint";
 import { parseApiError } from "@/lib/error-parser";
 import { Icons } from "../_components/Icons";
+import { t, plural } from "@/lib/i18n";
+import { LOCALE } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+const LOC = LOCALE === "ru" ? "ru-RU" : "en-US";
 
 const LIST_COLUMNS = "id,name,warehouse_kind,source,marketplace,status,last_sync_at,last_error,failure_count,created_at";
 
@@ -38,16 +42,16 @@ export default async function ConnectionsPage() {
             <span className="size-1 rounded-full bg-lime-deep" />
             <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Warehouses</span>
           </div>
-          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">Склады</h1>
+          <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">{t("connections.title")}</h1>
           <p className="mt-1 text-ink-muted text-sm">
-            Данные по каждому складу считаются отдельно и не пересекаются · {current}/{limit} складов
+            {t("connections.subtitle", { current, limit })}
           </p>
         </div>
         {atLimit ? (
           <div className="inline-flex items-center gap-2 rounded-lg border border-orange/30 bg-orange/10 px-4 py-3 text-sm">
-            <span className="text-orange font-semibold">Лимит складов достигнут.</span>
+            <span className="text-orange font-semibold">{t("connections.limitReached")}</span>
             <Link href={"/billing" as any} className="text-orange underline hover:no-underline">
-              Обновить тариф →
+              {t("connections.upgradePlan")} →
             </Link>
           </div>
         ) : (
@@ -55,7 +59,7 @@ export default async function ConnectionsPage() {
             href={"/connections/new" as any}
             className="inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-5 py-3 text-sm font-semibold hover:bg-ink-soft transition"
           >
-            <Icons.Plus /> Добавить склад
+            <Icons.Plus /> {t("connections.addWarehouse")}
           </Link>
         )}
       </div>
@@ -65,11 +69,10 @@ export default async function ConnectionsPage() {
           <span className="text-orange mt-0.5 text-lg shrink-0">⛔️</span>
           <div className="flex-1 text-sm">
             <div className="font-medium text-ink">
-              {pausedCount === 1 ? "Один склад" : `${pausedCount} склада(ов)`} на авто-паузе
+              {pausedCount} {plural(pausedCount, "connections.warehousePlural")} {t("connections.pausedSuffix")}
             </div>
             <p className="mt-1 text-ink-muted">
-              Sync отключён автоматически после 3 неудач подряд. Проверьте API ключи в деталях склада
-              и нажмите <b>Возобновить sync</b>.
+              {t("connections.pausedBodyPre")} <b>{t("connections.resumeSync")}</b>.
             </p>
           </div>
         </div>
@@ -96,7 +99,7 @@ export default async function ConnectionsPage() {
                       </span>
                       <StatusBadge status={c.status} failureCount={c.failure_count ?? 0} errorKind={parsed?.kind ?? null} />
                       <span className="font-mono text-[10px] text-ink-hush opacity-0 group-hover:opacity-100 transition">
-                        детали →
+                        {t("connections.details")} →
                       </span>
                     </Link>
                     <div className="mt-1.5 flex items-center gap-2 flex-wrap font-mono text-xs text-ink-hush">
@@ -104,12 +107,12 @@ export default async function ConnectionsPage() {
                       {c.last_sync_at ? (
                         <>
                           <span className="size-1 rounded-full bg-line-2" />
-                          <span>синк: {new Date(c.last_sync_at).toLocaleString("ru-RU")}</span>
+                          <span>{t("connections.syncedAt", { date: new Date(c.last_sync_at).toLocaleString(LOC) })}</span>
                         </>
                       ) : (
                         <>
                           <span className="size-1 rounded-full bg-line-2" />
-                          <span>ещё не синхронизировался</span>
+                          <span>{t("connections.neverSynced")}</span>
                         </>
                       )}
                     </div>
@@ -139,15 +142,15 @@ export default async function ConnectionsPage() {
             <div className="size-12 mx-auto rounded-full bg-lime-soft flex items-center justify-center text-lime-deep mb-4">
               <Icons.Plug />
             </div>
-            <p className="font-display text-xl md:text-2xl text-ink font-medium">Ещё нет подключённых складов</p>
+            <p className="font-display text-xl md:text-2xl text-ink font-medium">{t("connections.emptyTitle")}</p>
             <p className="mt-2 text-ink-muted text-sm max-w-md mx-auto">
-              Подключите Ozon FBO/FBS, Wildberries или Google Sheet — каждый источник станет отдельным складом с собственной аналитикой.
+              {t("connections.emptyDesc")}
             </p>
             <Link
               href={"/connections/new" as any}
               className="mt-6 inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-6 py-3 text-sm font-semibold hover:bg-ink-soft transition"
             >
-              Добавить первый склад <Icons.ArrowRight />
+              {t("connections.addFirstWarehouse")} <Icons.ArrowRight />
             </Link>
           </div>
         )}
@@ -159,13 +162,17 @@ export default async function ConnectionsPage() {
 function StatusBadge({ status, failureCount, errorKind }: { status: string | null; failureCount: number; errorKind?: string | null }) {
   // Временные сбои (лимит API / МП лежит / нет сети) показываем мягким янтарным
   // тоном — это «подожди», а не «поломка». Жёсткий красный остаётся для реальных ошибок.
-  const TRANSIENT: Record<string, string> = { rate_limit: "лимит API", marketplace_down: "МП недоступен", network: "нет связи" };
+  const TRANSIENT: Record<string, string> = {
+    rate_limit: t("connections.transient.rateLimit"),
+    marketplace_down: t("connections.transient.marketplaceDown"),
+    network: t("connections.transient.network"),
+  };
   const map: Record<string, { label: string; cls: string }> = {
-    active:   { label: "активен",     cls: "text-lime-deep border-lime-deep/30 bg-lime-soft" },
-    syncing:  { label: "синхронизация", cls: "text-azure border-azure/30 bg-azure/10" },
-    pending:  { label: "ожидание",    cls: "text-ink-hush border-line-2 bg-bg-soft" },
-    paused:   { label: "авто-пауза",  cls: "text-orange border-orange/40 bg-orange/10 font-bold" },
-    error:    { label: "ошибка",      cls: "text-rose border-rose/30 bg-rose/10" },
+    active:   { label: t("connections.status.active"),   cls: "text-lime-deep border-lime-deep/30 bg-lime-soft" },
+    syncing:  { label: t("connections.status.syncing"),  cls: "text-azure border-azure/30 bg-azure/10" },
+    pending:  { label: t("connections.status.pending"),  cls: "text-ink-hush border-line-2 bg-bg-soft" },
+    paused:   { label: t("connections.status.paused"),   cls: "text-orange border-orange/40 bg-orange/10 font-bold" },
+    error:    { label: t("connections.status.error"),    cls: "text-rose border-rose/30 bg-rose/10" },
   };
   let s = map[status || ""] || map.pending;
   if (status === "error" && errorKind && TRANSIENT[errorKind]) {

@@ -7,9 +7,13 @@ import RenameConnection from "../RenameConnection";
 import { ConnectionErrorHint } from "../ConnectionErrorHint";
 import { parseApiError } from "@/lib/error-parser";
 import { Icons } from "../../_components/Icons";
+import { t } from "@/lib/i18n";
+import { LOCALE } from "@/lib/features";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+
+const LOC = LOCALE === "ru" ? "ru-RU" : "en-US";
 
 // БАГ 73: фильтруем sensitive поля из config перед отдачей в HTML
 const SENSITIVE_CONFIG_KEYS = new Set(["api_key", "token", "client_id", "password", "secret"]);
@@ -23,7 +27,7 @@ function safeConfig(config: Record<string, any> | null): Record<string, string> 
     if (SENSITIVE_CONFIG_KEYS.has(k)) {
       // Не отдаём даже зашифрованный текст — показываем флаг
       const hasValue = typeof v === "string" && v.length > 0;
-      out[k] = hasValue ? "•••••••• (задано)" : "(не задано)";
+      out[k] = hasValue ? t("connections.configMasked") : t("connections.configNotSet");
     } else {
       out[k] = String(v);
     }
@@ -82,7 +86,7 @@ export default async function ConnectionDetailPage({
   return (
     <>
       <Link href={"/connections" as any} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition mb-4">
-        <span className="rotate-180"><Icons.ArrowRight size={12} /></span> К источникам
+        <span className="rotate-180"><Icons.ArrowRight size={12} /></span> {t("connections.backToSources")}
       </Link>
 
       {/* Header */}
@@ -97,7 +101,7 @@ export default async function ConnectionDetailPage({
             <StatusBadgeFull status={conn.status} errorKind={parsed?.kind ?? null} />
           </h1>
           <p className="mt-1.5 font-mono text-xs text-ink-hush uppercase tracking-wider">
-            {sourceLabel(conn.source, conn.marketplace)} · подключён {new Date(conn.created_at).toLocaleString("ru-RU")}
+            {sourceLabel(conn.source, conn.marketplace)} · {t("connections.connectedAt", { date: new Date(conn.created_at).toLocaleString(LOC) })}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
@@ -116,9 +120,9 @@ export default async function ConnectionDetailPage({
       {/* KPI */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
         <KpiCard label="Snapshots"        value={snapshotsCount ?? 0} />
-        <KpiCard label="Уникальных SKU"   value={productIds.size} />
-        <KpiCard label="Последний синк"   value={conn.last_sync_at ? new Date(conn.last_sync_at).toLocaleString("ru-RU") : "никогда"} small />
-        <KpiCard label="Создан"           value={new Date(conn.created_at).toLocaleString("ru-RU")} small />
+        <KpiCard label={t("connections.kpi.uniqueSku")}   value={productIds.size} />
+        <KpiCard label={t("connections.kpi.lastSync")}   value={conn.last_sync_at ? new Date(conn.last_sync_at).toLocaleString(LOC) : t("connections.never")} small />
+        <KpiCard label={t("connections.kpi.created")}           value={new Date(conn.created_at).toLocaleString(LOC)} small />
       </div>
 
       {/* Подсказка по последней ошибке синка */}
@@ -126,7 +130,7 @@ export default async function ConnectionDetailPage({
 
       {/* Config (с замаскированными sensitive значениями) */}
       <div className="mb-6 rounded-2xl border border-line bg-paper p-5 md:p-6">
-        <h2 className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-3">Параметры подключения</h2>
+        <h2 className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-3">{t("connections.configTitle")}</h2>
         <dl className="grid sm:grid-cols-2 gap-3">
           {Object.entries(displayConfig).map(([k, v]) => (
             <div key={k}>
@@ -135,7 +139,7 @@ export default async function ConnectionDetailPage({
             </div>
           ))}
           {Object.keys(displayConfig).length === 0 && (
-            <div className="text-sm text-ink-hush col-span-full">Параметры не заданы.</div>
+            <div className="text-sm text-ink-hush col-span-full">{t("connections.configEmpty")}</div>
           )}
         </dl>
       </div>
@@ -143,8 +147,8 @@ export default async function ConnectionDetailPage({
       {/* Recent snapshots */}
       <div className="rounded-2xl border border-line bg-paper p-5 md:p-6">
         <div className="flex items-baseline justify-between mb-4">
-          <h2 className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Последние 20 snapshots</h2>
-          <span className="font-mono text-[10px] text-ink-hush">из {snapshotsCount ?? 0} всего</span>
+          <h2 className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">{t("connections.recentSnapshots")}</h2>
+          <span className="font-mono text-[10px] text-ink-hush">{t("connections.ofTotal", { n: snapshotsCount ?? 0 })}</span>
         </div>
 
         {recentSnapshots && recentSnapshots.length > 0 ? (
@@ -152,11 +156,11 @@ export default async function ConnectionDetailPage({
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left font-mono text-[10px] uppercase tracking-widest text-ink-hush border-b border-line">
-                  <th className="py-2 pr-4">Время</th>
+                  <th className="py-2 pr-4">{t("connections.col.time")}</th>
                   <th className="py-2 pr-4">SKU</th>
-                  <th className="py-2 pr-4">Товар</th>
-                  <th className="py-2 pr-4 text-right">Остаток</th>
-                  <th className="py-2 text-right">Цена</th>
+                  <th className="py-2 pr-4">{t("connections.col.product")}</th>
+                  <th className="py-2 pr-4 text-right">{t("connections.col.stock")}</th>
+                  <th className="py-2 text-right">{t("connections.col.price")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -165,7 +169,7 @@ export default async function ConnectionDetailPage({
                   return (
                     <tr key={s.snapshot_id} className="border-b border-line/50 hover:bg-bg-soft transition">
                       <td className="py-2 pr-4 font-mono text-xs text-ink-muted whitespace-nowrap">
-                        {new Date(s.snapshot_time).toLocaleString("ru-RU")}
+                        {new Date(s.snapshot_time).toLocaleString(LOC)}
                       </td>
                       <td className="py-2 pr-4 font-mono text-xs text-ink">{p?.sku ?? "—"}</td>
                       <td className="py-2 pr-4 text-ink-soft truncate max-w-xs">{p?.product_name ?? "—"}</td>
@@ -178,7 +182,7 @@ export default async function ConnectionDetailPage({
             </table>
           </div>
         ) : (
-          <p className="text-sm text-ink-hush text-center py-6">Ещё нет ни одного снапшота. Нажми «Синхронизировать», чтобы запустить первый.</p>
+          <p className="text-sm text-ink-hush text-center py-6">{t("connections.snapshotsEmpty")}</p>
         )}
       </div>
     </>
@@ -197,13 +201,17 @@ function KpiCard({ label, value, small }: { label: string; value: React.ReactNod
 }
 
 function StatusBadgeFull({ status, errorKind }: { status: string | null; errorKind?: string | null }) {
-  const TRANSIENT: Record<string, string> = { rate_limit: "лимит API", marketplace_down: "МП недоступен", network: "нет связи" };
+  const TRANSIENT: Record<string, string> = {
+    rate_limit: t("connections.transient.rateLimit"),
+    marketplace_down: t("connections.transient.marketplaceDown"),
+    network: t("connections.transient.network"),
+  };
   const map: Record<string, { label: string; cls: string }> = {
-    active:  { label: "активен",       cls: "text-lime-deep border-lime-deep/30 bg-lime-soft" },
-    syncing: { label: "синхронизация", cls: "text-azure border-azure/30 bg-azure/10" },
-    pending: { label: "ожидание",      cls: "text-ink-hush border-line-2 bg-bg-soft" },
-    paused:  { label: "пауза",         cls: "text-ink-hush border-line-2 bg-bg-soft" },
-    error:   { label: "ошибка",        cls: "text-rose border-rose/30 bg-rose/10" },
+    active:  { label: t("connections.status.active"),       cls: "text-lime-deep border-lime-deep/30 bg-lime-soft" },
+    syncing: { label: t("connections.status.syncing"), cls: "text-azure border-azure/30 bg-azure/10" },
+    pending: { label: t("connections.status.pending"),      cls: "text-ink-hush border-line-2 bg-bg-soft" },
+    paused:  { label: t("connections.status.pausedShort"),         cls: "text-ink-hush border-line-2 bg-bg-soft" },
+    error:   { label: t("connections.status.error"),        cls: "text-rose border-rose/30 bg-rose/10" },
   };
   let s = map[status || ""] || map.paused;
   if (status === "error" && errorKind && TRANSIENT[errorKind]) {

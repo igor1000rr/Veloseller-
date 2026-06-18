@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ParsedError } from "@/lib/error-parser";
+import { t } from "@/lib/i18n";
 
 // Прозрачные (временные) проблемы — мягкая янтарная подсказка, не красная тревога.
 // Это «подожди / повтори позже», а не «у тебя всё сломалось».
@@ -47,7 +48,7 @@ export function ConnectionErrorHint({
           {autoRetry && (
             <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-ink-muted">
               <span aria-hidden>↻</span>
-              <span>Запрос на обновление уже в очереди — повтор произойдёт автоматически в течение нескольких минут, можно ничего не нажимать.</span>
+              <span>{t("connections.errHint.autoRetry")}</span>
             </p>
           )}
           {parsed.action && (
@@ -61,7 +62,7 @@ export function ConnectionErrorHint({
           {parsed.raw && (
             <details className="mt-2 group">
               <summary className="cursor-pointer font-mono text-[10px] uppercase tracking-widest text-ink-hush hover:text-ink-muted transition select-none">
-                Технические детали
+                {t("connections.errHint.techDetails")}
               </summary>
               <pre className="mt-2 p-2.5 bg-bg-soft border border-line rounded text-[11px] text-ink-muted font-mono overflow-x-auto whitespace-pre-wrap break-all">
                 {parsed.raw}
