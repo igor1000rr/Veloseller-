@@ -167,6 +167,7 @@ export default function AppHeader({
         )}
       </nav>
       <div className="px-4 md:px-8 py-5 border-t border-line space-y-2 bg-paper" style={{ backgroundColor: "#ffffff" }}>
+        <ContactLinks className="flex mb-1" />
         <div className="font-mono text-xs text-ink-hush break-all">{email}</div>
         {variant === "dashboard" && <LogoutButton />}
       </div>
