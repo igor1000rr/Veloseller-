@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { Icons } from "../_components/Icons";
+import { t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
@@ -25,54 +26,52 @@ export default async function OnboardingPage() {
     <div className="mx-auto max-w-2xl">
       <div className="inline-flex items-center gap-2 mb-2">
         <span className="size-1 rounded-full bg-lime-deep" />
-        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Подключение</span>
+        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">{t("onboarding.kicker")}</span>
       </div>
       <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">
-        Добро пожаловать в <span className="text-lime-deep italic">Veloseller</span>
+        {t("onboarding.welcome")} <span className="text-lime-deep italic">Veloseller</span>
       </h1>
-      <p className="mt-2 text-ink-muted text-sm">3 шага до подключения</p>
+      <p className="mt-2 text-ink-muted text-sm">{t("onboarding.stepsCount")}</p>
 
-      {/* Правка Александра: текст обращения на «вы», уточнение про email отчёты */}
+      {/* Правка Александра: текст обращения на «вы», уточнение про email отчёты (текст в onboarding.warmup) */}
       <div className="mt-5 p-4 rounded-2xl border border-line bg-bg-soft text-sm text-ink-soft leading-relaxed">
-        Чтобы Veloseller начал считать TVelo, нужны ежедневные записи по вашим SKU.
-        Актуальные расчёты через 7 дней. Наиболее точные показатели через 30 дней.
-        Мы отправим вам на email сводные отчёты за эти даты.
+        {t("onboarding.warmup")}
       </div>
 
       <ol className="mt-8 space-y-3">
         <Step
           n={1}
-          title="Подключите источник данных"
+          title={t("onboarding.step1.title")}
           done={step1Done}
-          description="Google Sheet, Ozon или Wildberries API"
-          cta={!step1Done ? { href: "/connections/new", label: "Подключить" } : null}
+          description={t("onboarding.step1.desc")}
+          cta={!step1Done ? { href: "/connections/new", label: t("onboarding.step1.cta") } : null}
         />
         <Step
           n={2}
-          title="Первые записи данных"
+          title={t("onboarding.step2.title")}
           done={step2Done}
-          description="Синхронизация произойдёт автоматически после подключения"
-          cta={step1Done && !step2Done ? { href: "/connections", label: "Запустить синхронизацию" } : null}
+          description={t("onboarding.step2.desc")}
+          cta={step1Done && !step2Done ? { href: "/connections", label: t("onboarding.step2.cta") } : null}
         />
         <Step
           n={3}
-          title="Дождитесь пересчёта"
+          title={t("onboarding.step3.title")}
           done={step3Done}
-          description="Синхронизация запускается каждые 6 часов или нажмите «Пересчитать сейчас» на dashboard"
-          cta={step2Done && !step3Done ? { href: "/dashboard", label: "Открыть dashboard" } : null}
+          description={t("onboarding.step3.desc")}
+          cta={step2Done && !step3Done ? { href: "/dashboard", label: t("onboarding.step3.cta") } : null}
         />
       </ol>
 
       {step1Done && step2Done && step3Done && (
         <div className="mt-8 p-6 rounded-2xl border-2 border-lime-deep/40 bg-lime-soft text-center">
           <p className="font-display text-lg text-ink font-medium mb-3">
-            🎉 Готово! Veloseller считает вашу скорость продаж.
+            {t("onboarding.doneTitle")}
           </p>
           <Link
             href="/dashboard"
             className="inline-flex items-center gap-2 bg-ink text-paper px-6 py-3 rounded-lg font-semibold hover:bg-ink-soft transition"
           >
-            Открыть dashboard <Icons.ArrowRight />
+            {t("onboarding.step3.cta")} <Icons.ArrowRight />
           </Link>
         </div>
       )}

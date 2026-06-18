@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorModal } from "../_components/ErrorModal";
 import { parseApiError, type ParsedError } from "@/lib/error-parser";
+import { t } from "@/lib/i18n";
 
 // БАГ 87: интервалы polling'а статуса после fire-and-forget sync.
 // Sync 1879 SKU занимает 60-90с, 10K SKU — до 5-6 минут.
@@ -116,21 +117,21 @@ export default function SyncButton({ connectionId, source, warehouseKind, market
       const res = await fetch(`/api/connections/${connectionId}/sync`, { method: "POST" });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setModalError(parseApiError(data, "Ошибка синхронизации"));
+        setModalError(parseApiError(data, t("connections.sync.errFallback")));
         startCooldown();
         return;
       }
       router.refresh();
       startPolling();
     } catch (e: any) {
-      setModalError(parseApiError(e?.message || String(e), "Не удалось связаться с сервером"));
+      setModalError(parseApiError(e?.message || String(e), t("connections.sync.errNetwork")));
     } finally {
       setLoading(false);
     }
   }
 
   if (source === "csv_upload") {
-    return <span className="text-sm text-ink-hush font-mono">только через загрузку CSV</span>;
+    return <span className="text-sm text-ink-hush font-mono">{t("connections.sync.csvOnly")}</span>;
   }
 
   const remainingMs = Math.max(0, cooldownUntil - nowTs);
@@ -138,19 +139,18 @@ export default function SyncButton({ connectionId, source, warehouseKind, market
   const remainingSec = Math.ceil(remainingMs / 1000);
   const isWb = warehouseKind === "wb_fbo" || warehouseKind === "wb_fbs" || marketplace === "wildberries";
 
-  // Лейбл: loading → "Синхронизация…"; polling → "Идёт синхронизация…";
-  //        cooling → обратный отсчёт; idle → "Синхронизировать".
+  // Лейбл: idle / loading / polling / обратный отсчёт кулдауна.
   const label = polling
-    ? "Идёт синхронизация…"
+    ? t("connections.sync.polling")
     : loading
-    ? "Синхронизация…"
+    ? t("connections.sync.loading")
     : cooling
-    ? `Подождите ${remainingSec} с`
-    : "Синхронизировать";
+    ? t("connections.sync.cooldown", { sec: remainingSec })
+    : t("connections.sync.idle");
 
   const coolTitle = isWb
-    ? "Wildberries обновляет данные примерно раз в минуту — дождитесь окончания отсчёта"
-    : "Защита от слишком частых запросов — дождитесь окончания отсчёта";
+    ? t("connections.sync.cooldownWb")
+    : t("connections.sync.cooldownGeneric");
 
   return (
     <>

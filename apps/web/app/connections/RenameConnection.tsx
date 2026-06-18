@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { t } from "@/lib/i18n";
 
 /**
  * Инлайн-переименование склада. Карандаш рядом с названием → поле ввода.
@@ -42,13 +43,13 @@ export default function RenameConnection({
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
-        setErr(d?.error || "Не удалось сохранить");
+        setErr(d?.error || t("connections.rename.errSave"));
         return;
       }
       setEditing(false);
       router.refresh();
     } catch {
-      setErr("Не удалось связаться с сервером");
+      setErr(t("connections.rename.errNetwork"));
     } finally {
       setSaving(false);
     }
@@ -61,8 +62,8 @@ export default function RenameConnection({
         <button
           type="button"
           onClick={() => setEditing(true)}
-          title="Переименовать склад"
-          aria-label="Переименовать склад"
+          title={t("connections.rename.title")}
+          aria-label={t("connections.rename.title")}
           className="inline-flex items-center justify-center size-7 rounded-md border border-line bg-paper text-ink-muted hover:text-ink hover:border-lime-deep/40 transition text-sm align-middle"
         >
           ✎
@@ -91,7 +92,7 @@ export default function RenameConnection({
         disabled={saving}
         className="inline-flex items-center px-3 py-1.5 rounded-lg bg-ink text-paper text-sm font-semibold hover:bg-ink-soft disabled:opacity-50 transition"
       >
-        {saving ? "…" : "Сохранить"}
+        {saving ? "…" : t("connections.rename.save")}
       </button>
       <button
         type="button"
@@ -99,7 +100,7 @@ export default function RenameConnection({
         disabled={saving}
         className="inline-flex items-center px-3 py-1.5 rounded-lg border border-line bg-paper text-ink-muted text-sm hover:text-ink transition"
       >
-        Отмена
+        {t("connections.rename.cancel")}
       </button>
       {err && <span className="text-rose text-xs w-full">{err}</span>}
     </span>
