@@ -103,6 +103,7 @@ const ROADMAP = [
 ];
 
 export default async function AppsPage() {
+  if (!APP_PROMO_ENABLED) notFound();
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   const isAuthed = !!user;
