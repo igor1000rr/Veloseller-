@@ -217,10 +217,20 @@ def poll_brand(
                 "query_normalized": mq.phrase.lower().strip(),
                 "current_frequency": mq.frequency,
                 "trend_pct": trend_pct,
-                # present_in_wb/ozon оставлены NULL — не используем suggest в v2
                 "status": new_status,
                 "last_updated_at": now_iso,
             }
+
+            # Suggest-проверка для верхних фраз бренда (в пределах бюджета на опрос).
+            if suggest_enabled and suggest_checks_done < _MAX_SUGGEST_CHECKS_PER_BRAND:
+                try:
+                    present_wb, present_ozon = check_suggest_cached(mq.phrase)
+                    payload["present_in_wb"] = present_wb
+                    payload["present_in_ozon"] = present_ozon
+                    payload["suggest_checked_at"] = now_iso
+                except Exception:
+                    logger.warning("radar.poll: suggest проверка не удалась для %r", mq.phrase)
+                suggest_checks_done += 1
 
             if existing_row:
                 sb.table("radar_queries").update(payload).eq("id", existing_row["id"]).execute()
