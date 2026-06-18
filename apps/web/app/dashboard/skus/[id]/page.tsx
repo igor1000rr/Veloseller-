@@ -92,19 +92,24 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
   const byDay = new Map<string, ChartPoint>();
   for (const s of snapshots ?? []) {
     const day = new Date(s.snapshot_time).toISOString().slice(0, 10);
+    const inStock = s.availability ? 1 : 0;
     byDay.set(day, {
       date: day,
       stock: s.stock_quantity,
       price: Number(s.price),
-      availability: s.availability ? 1 : 0,
-      velocity: 0,
+      availability: inStock,
+      // В дни нулевого наличия скорость продаж не определена (продавать нечего) —
+      // оставляем null, чтобы линия TVelo прерывалась, а не тянулась сквозь сток-аут.
+      velocity: inStock ? 0 : null,
       sellerPrice: (s as any).seller_price != null ? Number((s as any).seller_price) : null,
       marketingPrice: (s as any).marketing_price != null ? Number((s as any).marketing_price) : null,
     });
   }
   for (const m of metrics ?? []) {
     const day = m.period_end as string;
-    if (byDay.has(day)) byDay.get(day)!.velocity = Number(m.adjusted_velocity);
+    const pt = byDay.get(day);
+    // adjusted_velocity накладываем только на дни с наличием — в OOS-дни (velocity=null) нет.
+    if (pt && pt.availability === 1) pt.velocity = Number(m.adjusted_velocity);
   }
   const chartData = Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date));
 
