@@ -171,14 +171,11 @@ export default async function AppsPage() {
               Примерные экраны — так аналитика остатков будет выглядеть в телефоне.
             </p>
           </div>
-          <div className="flex gap-6 md:gap-8 overflow-x-auto pb-4 lg:justify-center snap-x">
+          <div className="flex gap-6 md:gap-8 overflow-x-auto px-1 pt-10 pb-6 lg:justify-center snap-x">
             {GALLERY.map((g, i) => (
               <div key={g.screen} className="reveal shrink-0 snap-center w-[210px]" style={{ animationDelay: i * 90 + "ms" }}>
-                <div className="relative">
-                  <div aria-hidden className="pointer-events-none absolute inset-0 blur-3xl opacity-50" style={{ background: GLOW[i % 4] }} />
-                  <div className={"relative " + (i % 2 === 1 ? "float" : "float-slow")}>
-                    <PhoneFrame widthClass="w-[210px]">{SCREEN[g.screen]}</PhoneFrame>
-                  </div>
+                <div className={i % 2 === 1 ? "float" : "float-slow"}>
+                  <PhoneFrame widthClass="w-[210px]">{SCREEN[g.screen]}</PhoneFrame>
                 </div>
                 <p className="mt-4 text-center text-xs text-ink-muted leading-relaxed px-2">{g.cap}</p>
               </div>
