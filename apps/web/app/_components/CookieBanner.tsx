@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { t } from "@/lib/i18n";
 
 const STORAGE_KEY = "veloseller-cookie-consent";
 const CONSENT_VERSION = "v1";
@@ -16,6 +17,8 @@ type ConsentValue = "accepted" | "rejected" | null;
  *
  * Версия консента (`CONSENT_VERSION`) позволяет переспросить пользователя при
  * существенном изменении политики (просто увеличить версию).
+ *
+ * Тексты — через i18n (t), чтобы на .com баннер был на английском, на .ru — на русском.
  */
 export function CookieBanner() {
   const [consent, setConsent] = useState<ConsentValue>(null);
@@ -64,9 +67,8 @@ export function CookieBanner() {
       <div className="max-w-4xl mx-auto px-6 py-4 flex flex-col md:flex-row md:items-center gap-4">
         <div className="flex-1 text-sm text-ink-muted">
           <p>
-            Мы используем cookies для работы сайта и (с вашего согласия) для обезличенной аналитики.
-            Подробнее в{" "}
-            <Link href="/privacy" className="underline hover:text-ink">Политике конфиденциальности</Link>.
+            {t("cookie.text")}{" "}
+            <Link href="/privacy" className="underline hover:text-ink">{t("cookie.privacyLink")}</Link>.
           </p>
         </div>
         <div className="flex gap-2 shrink-0">
@@ -74,13 +76,13 @@ export function CookieBanner() {
             onClick={() => setChoice("rejected")}
             className="px-4 py-2 text-sm font-mono uppercase tracking-wider border border-line rounded hover:bg-bg-soft"
           >
-            Только необходимые
+            {t("cookie.reject")}
           </button>
           <button
             onClick={() => setChoice("accepted")}
             className="px-4 py-2 text-sm font-mono uppercase tracking-wider border border-ink bg-ink text-paper rounded hover:opacity-90"
           >
-            Принять все
+            {t("cookie.accept")}
           </button>
         </div>
       </div>

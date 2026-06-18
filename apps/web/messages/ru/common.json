@@ -4,5 +4,9 @@
   "common.menu": "Меню",
   "common.close": "Закрыть",
   "common.loading": "Загрузка…",
-  "common.toHome": "На главную"
+  "common.toHome": "На главную",
+  "cookie.text": "Мы используем cookies для работы сайта и (с вашего согласия) для обезличенной аналитики. Подробнее в",
+  "cookie.privacyLink": "Политике конфиденциальности",
+  "cookie.reject": "Только необходимые",
+  "cookie.accept": "Принять все"
 }

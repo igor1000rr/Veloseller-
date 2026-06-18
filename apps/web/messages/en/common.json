@@ -4,5 +4,9 @@
   "common.menu": "Menu",
   "common.close": "Close",
   "common.loading": "Loading…",
-  "common.toHome": "Home"
+  "common.toHome": "Home",
+  "cookie.text": "We use cookies to run the site and, with your consent, for anonymized analytics. Read more in our",
+  "cookie.privacyLink": "Privacy Policy",
+  "cookie.reject": "Essential only",
+  "cookie.accept": "Accept all"
 }
