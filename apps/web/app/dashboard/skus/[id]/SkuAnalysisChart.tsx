@@ -156,7 +156,7 @@ export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]
       <div className="bg-paper border border-line rounded-lg p-3 shadow-md text-sm max-w-sm">
         <div className="font-display font-medium text-ink mb-2">{p.dateLabel}</div>
         <div className="space-y-1 font-mono text-xs">
-          <Row label="TVelo" value={Number(p.velocity).toFixed(2)} color="#3f6212" />
+          <Row label="TVelo" value={p.velocity != null ? Number(p.velocity).toFixed(2) : "—"} color="#3f6212" />
           {p.sellerPrice != null && p.marketingPrice != null && Math.abs(Number(p.sellerPrice) - Number(p.marketingPrice)) >= 0.01 ? (
             <>
               <Row label={L.sellerPrice} value={Number(p.sellerPrice).toFixed(2)} color="#d97706" />
