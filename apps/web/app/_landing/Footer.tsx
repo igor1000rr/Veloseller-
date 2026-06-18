@@ -23,6 +23,8 @@ export default function LandingFooter({ isAuthed }: { isAuthed: boolean }) {
             ["#how", t("landing.nav.how")],
             ["#pricing", t("landing.nav.pricing")],
             ["/news", t("landing.nav.news")],
+            ["/apps", isEn ? "Mobile app" : "Приложения"],
+            ["/partner", isEn ? "Partners" : "Партнёрам"],
             ["#faq", "FAQ"],
           ]} />
           <div className="col-span-1 md:col-span-2">
