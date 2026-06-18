@@ -86,7 +86,7 @@ export type ChartPoint = {
   stock: number;
   price: number;
   availability: number;     // 0 или 1
-  velocity: number;
+  velocity: number | null;  // null = нулевое наличие: в OOS-дни скорость не считаем
   sellerPrice?: number | null;     // цена продавца (#3)
   marketingPrice?: number | null;  // факт. цена со скидками МП (#3)
 };
