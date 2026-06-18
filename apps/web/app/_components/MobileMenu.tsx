@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Icons } from "./Icons";
 import { t } from "@/lib/i18n";
+import { isEn } from "../_landing/data";
 
 const nav = [
   { href: "#features", label: t("landing.nav.features") },
