@@ -125,6 +125,8 @@ export default async function FinancePage() {
         </div>
         {recentInvoices && recentInvoices.length > 0 ? (
           <div className="rounded-2xl border border-line bg-paper overflow-hidden">
+            <div className="overflow-x-auto">
+            <div className="min-w-[560px]">
             <div className="grid grid-cols-12 px-4 md:px-5 py-2.5 bg-bg-soft border-b border-line">
               <div className="col-span-2 font-mono text-[10px] uppercase tracking-widest text-ink-hush">InvId</div>
               <div className="col-span-4 font-mono text-[10px] uppercase tracking-widest text-ink-hush">Селлер</div>
