@@ -28,6 +28,12 @@ const MAILTO =
   encodeURIComponent("Заявка в партнёрскую программу Veloseller");
 
 const ACCENTS = ["lime", "azure", "emerald", "orange"];
+const MQTINT = [
+  "border-lime-deep/20 bg-lime-soft text-lime-deep",
+  "border-azure/30 bg-azure/10 text-azure",
+  "border-emerald/30 bg-emerald/10 text-emerald",
+  "border-orange/30 bg-orange/10 text-orange",
+];
 // Градиентная плитка под иконку (белая иконка на цвете).
 const TILE: Record<string, string> = {
   lime: "bg-gradient-to-br from-lime-deep to-emerald",
