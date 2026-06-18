@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 import type { RadarTab } from "./page";
 import { actionToggleFavorite, actionArchiveQuery, actionUnarchiveQuery } from "./actions";
+import { InfoTooltip } from "../../_components/InfoTooltip";
 
 type QueryRow = {
   id: string;
@@ -16,6 +17,8 @@ type QueryRow = {
   first_seen_at: string;
   last_updated_at: string;
   days_since_first_seen: number | null;
+  present_in_wb: boolean | null;
+  present_in_ozon: boolean | null;
 };
 
 export default function RadarTable({
