@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { APP_PROMO_ENABLED } from "@/lib/features";
 import LandingHeader from "../_landing/Header";
 import LandingFooter from "../_landing/Footer";
 import ScrollToTopButton from "../_components/ScrollToTopButton";
