@@ -150,6 +150,16 @@ function Row({ q, tab }: { q: QueryRow; tab: RadarTab }) {
       <td className="px-3 py-2.5 text-right tabular font-mono text-xs text-ink-muted">
         {q.days_since_first_seen ?? "—"}
       </td>
+      <td className="px-3 py-2.5 text-center">
+        {q.present_in_ozon
+          ? <span className="text-lime-deep font-semibold" title="Подтверждено в OZON Suggest">✓</span>
+          : <span className="text-ink-hush">—</span>}
+      </td>
+      <td className="px-3 py-2.5 text-center">
+        {q.present_in_wb
+          ? <span className="text-lime-deep font-semibold" title="Подтверждено в WB Suggest">✓</span>
+          : <span className="text-ink-hush">—</span>}
+      </td>
       <td className="px-3 py-2.5">
         <button
           onClick={onArchive}
