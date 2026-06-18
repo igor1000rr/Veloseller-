@@ -149,6 +149,8 @@ export default async function FinancePage() {
                 </div>
               );
             })}
+              </div>
+            </div>
           </div>
         ) : (
           <div className="rounded-2xl border border-dashed border-line bg-paper p-8 text-center text-sm text-ink-muted">
