@@ -22,63 +22,61 @@ export default async function OnboardingPage() {
   const step3Done = (metricsCount ?? 0) > 0;
 
   return (
-    <main className="min-h-screen bg-bg py-12 px-4">
-      <div className="mx-auto max-w-2xl">
-        <div className="inline-flex items-center gap-2 mb-2">
-          <span className="size-1 rounded-full bg-lime-deep" />
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Подключение</span>
-        </div>
-        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">
-          Добро пожаловать в <span className="text-lime-deep italic">Veloseller</span>
-        </h1>
-        <p className="mt-2 text-ink-muted text-sm">3 шага до подключения</p>
-
-        {/* Правка Александра: текст обращения на «вы», уточнение про email отчёты */}
-        <div className="mt-5 p-4 rounded-2xl border border-line bg-bg-soft text-sm text-ink-soft leading-relaxed">
-          Чтобы Veloseller начал считать TVelo, нужны ежедневные записи по вашим SKU.
-          Актуальные расчёты через 7 дней. Наиболее точные показатели через 30 дней.
-          Мы отправим вам на email сводные отчёты за эти даты.
-        </div>
-
-        <ol className="mt-8 space-y-3">
-          <Step
-            n={1}
-            title="Подключите источник данных"
-            done={step1Done}
-            description="Google Sheet, Ozon или Wildberries API"
-            cta={!step1Done ? { href: "/connections/new", label: "Подключить" } : null}
-          />
-          <Step
-            n={2}
-            title="Первые записи данных"
-            done={step2Done}
-            description="Синхронизация произойдёт автоматически после подключения"
-            cta={step1Done && !step2Done ? { href: "/connections", label: "Запустить синхронизацию" } : null}
-          />
-          <Step
-            n={3}
-            title="Дождитесь пересчёта"
-            done={step3Done}
-            description="Синхронизация запускается каждые 6 часов или нажмите «Пересчитать сейчас» на dashboard"
-            cta={step2Done && !step3Done ? { href: "/dashboard", label: "Открыть dashboard" } : null}
-          />
-        </ol>
-
-        {step1Done && step2Done && step3Done && (
-          <div className="mt-8 p-6 rounded-2xl border-2 border-lime-deep/40 bg-lime-soft text-center">
-            <p className="font-display text-lg text-ink font-medium mb-3">
-              🎉 Готово! Veloseller считает вашу скорость продаж.
-            </p>
-            <Link
-              href="/dashboard"
-              className="inline-flex items-center gap-2 bg-ink text-paper px-6 py-3 rounded-lg font-semibold hover:bg-ink-soft transition"
-            >
-              Открыть dashboard <Icons.ArrowRight />
-            </Link>
-          </div>
-        )}
+    <div className="mx-auto max-w-2xl">
+      <div className="inline-flex items-center gap-2 mb-2">
+        <span className="size-1 rounded-full bg-lime-deep" />
+        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Подключение</span>
       </div>
-    </main>
+      <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">
+        Добро пожаловать в <span className="text-lime-deep italic">Veloseller</span>
+      </h1>
+      <p className="mt-2 text-ink-muted text-sm">3 шага до подключения</p>
+
+      {/* Правка Александра: текст обращения на «вы», уточнение про email отчёты */}
+      <div className="mt-5 p-4 rounded-2xl border border-line bg-bg-soft text-sm text-ink-soft leading-relaxed">
+        Чтобы Veloseller начал считать TVelo, нужны ежедневные записи по вашим SKU.
+        Актуальные расчёты через 7 дней. Наиболее точные показатели через 30 дней.
+        Мы отправим вам на email сводные отчёты за эти даты.
+      </div>
+
+      <ol className="mt-8 space-y-3">
+        <Step
+          n={1}
+          title="Подключите источник данных"
+          done={step1Done}
+          description="Google Sheet, Ozon или Wildberries API"
+          cta={!step1Done ? { href: "/connections/new", label: "Подключить" } : null}
+        />
+        <Step
+          n={2}
+          title="Первые записи данных"
+          done={step2Done}
+          description="Синхронизация произойдёт автоматически после подключения"
+          cta={step1Done && !step2Done ? { href: "/connections", label: "Запустить синхронизацию" } : null}
+        />
+        <Step
+          n={3}
+          title="Дождитесь пересчёта"
+          done={step3Done}
+          description="Синхронизация запускается каждые 6 часов или нажмите «Пересчитать сейчас» на dashboard"
+          cta={step2Done && !step3Done ? { href: "/dashboard", label: "Открыть dashboard" } : null}
+        />
+      </ol>
+
+      {step1Done && step2Done && step3Done && (
+        <div className="mt-8 p-6 rounded-2xl border-2 border-lime-deep/40 bg-lime-soft text-center">
+          <p className="font-display text-lg text-ink font-medium mb-3">
+            🎉 Готово! Veloseller считает вашу скорость продаж.
+          </p>
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-2 bg-ink text-paper px-6 py-3 rounded-lg font-semibold hover:bg-ink-soft transition"
+          >
+            Открыть dashboard <Icons.ArrowRight />
+          </Link>
+        </div>
+      )}
+    </div>
   );
 }
 
