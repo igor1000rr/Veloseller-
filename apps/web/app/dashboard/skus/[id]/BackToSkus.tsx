@@ -14,8 +14,12 @@ import { Icons } from "../../../_components/Icons";
 export default function BackToSkus({ label }: { label: string }) {
   const onClick = (e: React.MouseEvent) => {
     if (typeof window === "undefined") return;
-    const embedded = new URLSearchParams(window.location.search).get("embed") === "1";
-    if (embedded && window.parent !== window) {
+    // Карточку в iframe открывает ТОЛЬКО SkuDrawer, поэтому «мы внутри iframe»
+    // (window.parent !== window) — достаточный и надёжный признак панели. Раньше
+    // дополнительно требовали ?embed=1 в URL; если бы параметр потерялся (редирект,
+    // клиентская навигация и т.п.) — перехват отваливался и список грузился внутрь
+    // панели. Теперь решаем по факту iframe → не навигируем, а просим родителя закрыть.
+    if (window.parent !== window) {
       e.preventDefault();
       window.parent.postMessage({ type: "velo:close-sku" }, window.location.origin);
     }
