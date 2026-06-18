@@ -1,0 +1,12 @@
+[Unit]
+Description=Veloseller auto-deploy (pull origin/main + finalize)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=veloseller
+WorkingDirectory=/opt/veloseller
+ExecStart=/usr/bin/bash /opt/veloseller/deploy/autopull.sh
+# чтобы не накладываться, если сборка идёт дольше интервала таймера
+TimeoutStartSec=1800

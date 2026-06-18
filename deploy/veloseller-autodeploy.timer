@@ -1,0 +1,10 @@
+[Unit]
+Description=Veloseller auto-deploy timer (проверяет origin/main)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=veloseller-autodeploy.service
+
+[Install]
+WantedBy=timers.target
