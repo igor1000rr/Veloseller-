@@ -39,89 +39,97 @@ export default async function AdminSellersPage({ searchParams }: {
   }
 
   const totalPages = Math.max(1, Math.ceil((count ?? 0) / PAGE_SIZE));
+  const pageQuery = (p: number) =>
+    `?page=${p}${planFilter ? `&plan=${planFilter}` : ""}${search ? `&q=${encodeURIComponent(search)}` : ""}`;
 
   return (
     <div className="space-y-6">
       <header className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Селлеры</h1>
-          <p className="text-sm text-slate-500 mt-1">{count ?? 0} аккаунтов</p>
+          <div className="inline-flex items-center gap-2">
+            <span className="size-1 rounded-full bg-orange" />
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-orange font-semibold">Admin / Sellers</span>
+          </div>
+          <h1 className="mt-2 font-display text-3xl md:text-4xl tracking-tight font-medium">Селлеры</h1>
+          <p className="mt-1.5 text-ink-muted text-sm">{count ?? 0} аккаунтов</p>
         </div>
-        <form className="flex gap-2 text-sm" method="GET">
+        <form className="flex flex-wrap items-center gap-2 text-sm" method="GET">
           <input name="q" defaultValue={search} placeholder="Поиск по email"
-                 className="bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500 w-56" />
+                 className="w-full sm:w-56 rounded-lg border border-line bg-bg-soft px-3 py-2 text-ink placeholder:text-ink-hush focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
           <select name="plan" defaultValue={planFilter}
-                  className="bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500">
+                  className="rounded-lg border border-line bg-bg-soft px-3 py-2 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition">
             <option value="">Все планы</option>
             <option value="trial">Trial</option>
             <option value="starter">Starter</option>
             <option value="growth">Growth</option>
             <option value="pro">Pro</option>
           </select>
-          <button type="submit" className="bg-violet-600 hover:bg-violet-700 text-white px-4 py-1.5 rounded-lg font-medium">
+          <button type="submit" className="rounded-lg bg-ink text-paper px-4 py-2 font-semibold hover:bg-ink-soft transition">
             Найти
           </button>
         </form>
       </header>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="bg-slate-50 border-b border-slate-200">
-            <tr>
-              <Th>Email</Th>
-              <Th>Имя</Th>
-              <Th>План</Th>
-              <Th>Trial до</Th>
-              <Th align="right">SKU</Th>
-              <Th align="right">Alerts</Th>
-              <Th>Регистрация</Th>
-              <Th>&nbsp;</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {(sellers ?? []).map((s: any) => {
-              const c = counts[s.id] || { products: 0, alerts: 0, snapshots: 0 };
-              return (
-                <tr key={s.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 text-slate-900 font-mono text-xs">{s.email}</td>
-                  <td className="px-4 py-3 text-slate-700">{s.display_name ?? "—"}</td>
-                  <td className="px-4 py-3"><PlanBadge plan={s.plan} /></td>
-                  <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
-                    {s.trial_ends_at ? new Date(s.trial_ends_at).toLocaleDateString("ru-RU") : "—"}
-                  </td>
-                  <td className="px-4 py-3 text-right text-slate-700 font-medium">{c.products}</td>
-                  <td className="px-4 py-3 text-right">
-                    {c.alerts > 0 ? <span className="text-amber-700 font-medium">{c.alerts}</span> : <span className="text-slate-400">0</span>}
-                  </td>
-                  <td className="px-4 py-3 text-slate-500 text-xs whitespace-nowrap">
-                    {new Date(s.created_at).toLocaleString("ru-RU")}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <Link href={`/admin/sellers/${s.id}` as any} className="text-violet-600 hover:text-violet-700 text-xs font-medium">
-                      Открыть →
-                    </Link>
-                  </td>
-                </tr>
-              );
-            })}
-            {!sellers?.length && (
-              <tr><td colSpan={8} className="px-4 py-12 text-center text-slate-400">Никого не найдено</td></tr>
-            )}
-          </tbody>
-        </table>
+      <div className="rounded-2xl border border-line bg-paper overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[720px]">
+            <thead className="bg-bg-soft border-b border-line">
+              <tr>
+                <Th>Email</Th>
+                <Th>Имя</Th>
+                <Th>План</Th>
+                <Th>Trial до</Th>
+                <Th align="right">SKU</Th>
+                <Th align="right">Alerts</Th>
+                <Th>Регистрация</Th>
+                <Th>&nbsp;</Th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {(sellers ?? []).map((s: any) => {
+                const c = counts[s.id] || { products: 0, alerts: 0, snapshots: 0 };
+                return (
+                  <tr key={s.id} className="hover:bg-bg-soft transition">
+                    <td className="px-4 py-3 text-ink font-mono text-xs whitespace-nowrap">{s.email}</td>
+                    <td className="px-4 py-3 text-ink-soft">{s.display_name ?? "—"}</td>
+                    <td className="px-4 py-3"><PlanBadge plan={s.plan} /></td>
+                    <td className="px-4 py-3 text-ink-muted text-xs whitespace-nowrap">
+                      {s.trial_ends_at ? new Date(s.trial_ends_at).toLocaleDateString("ru-RU") : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-right text-ink-soft font-medium tabular">{c.products}</td>
+                    <td className="px-4 py-3 text-right tabular">
+                      {c.alerts > 0 ? <span className="text-orange font-medium">{c.alerts}</span> : <span className="text-ink-hush">0</span>}
+                    </td>
+                    <td className="px-4 py-3 text-ink-muted text-xs whitespace-nowrap">
+                      {new Date(s.created_at).toLocaleString("ru-RU")}
+                    </td>
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <Link href={`/admin/sellers/${s.id}` as any} className="text-lime-deep hover:text-ink text-xs font-medium transition">
+                        Открыть →
+                      </Link>
+                    </td>
+                  </tr>
+                );
+              })}
+              {!sellers?.length && (
+                <tr><td colSpan={8} className="px-4 py-12 text-center text-ink-hush">Никого не найдено</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {totalPages > 1 && (
         <div className="flex items-center justify-between text-sm">
-          <span className="text-slate-500">Страница {page} из {totalPages}</span>
+          <span className="text-ink-muted">Страница {page} из {totalPages}</span>
           <div className="flex gap-2">
             {page > 1 && (
-              <a href={`?page=${page - 1}${planFilter ? `&plan=${planFilter}` : ""}${search ? `&q=${search}` : ""}`}
-                 className="px-3 py-1.5 border border-slate-200 rounded-lg hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 transition">← Назад</a>
+              <a href={pageQuery(page - 1)}
+                 className="px-3 py-1.5 border border-line rounded-lg hover:border-lime-deep/40 hover:bg-bg-soft transition">← Назад</a>
             )}
             {page < totalPages && (
-              <a href={`?page=${page + 1}${planFilter ? `&plan=${planFilter}` : ""}${search ? `&q=${search}` : ""}`}
-                 className="px-3 py-1.5 border border-slate-200 rounded-lg hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 transition">Вперёд →</a>
+              <a href={pageQuery(page + 1)}
+                 className="px-3 py-1.5 border border-line rounded-lg hover:border-lime-deep/40 hover:bg-bg-soft transition">Вперёд →</a>
             )}
           </div>
         </div>
@@ -131,15 +139,13 @@ export default async function AdminSellersPage({ searchParams }: {
 }
 
 function Th({ children, align }: { children?: React.ReactNode; align?: "right" }) {
-  return <th className={`px-4 py-2.5 font-medium text-slate-600 text-xs uppercase tracking-wider ${align === "right" ? "text-right" : "text-left"}`}>{children}</th>;
+  return <th className={`px-4 py-2.5 font-mono text-ink-hush text-[10px] uppercase tracking-widest font-semibold whitespace-nowrap ${align === "right" ? "text-right" : "text-left"}`}>{children}</th>;
 }
 
 function PlanBadge({ plan }: { plan: string }) {
-  const styles: Record<string, string> = {
-    trial: "bg-slate-100 text-slate-700",
-    starter: "bg-sky-100 text-sky-700",
-    growth: "bg-blue-100 text-blue-700",
-    pro: "bg-violet-100 text-violet-700",
-  };
-  return <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${styles[plan] ?? styles.trial}`}>{plan}</span>;
+  const cls = plan === "pro"     ? "bg-lime-deep text-paper"
+            : plan === "growth"  ? "bg-lime text-ink"
+            : plan === "starter" ? "bg-azure/15 text-azure border border-azure/30"
+            :                       "bg-bg-soft text-ink-muted border border-line";
+  return <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium font-mono uppercase tracking-widest whitespace-nowrap ${cls}`}>{plan}</span>;
 }
