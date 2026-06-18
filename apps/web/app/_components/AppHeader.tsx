@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { Icons } from "./Icons";
+import { ContactLinks } from "./ContactLinks";
 import LogoutButton from "../dashboard/LogoutButton";
 import WarehouseSelector from "./WarehouseSelector";
 import type { WarehouseListItem } from "@/lib/warehouse-types";
