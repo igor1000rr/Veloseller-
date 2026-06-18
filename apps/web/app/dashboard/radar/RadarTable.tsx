@@ -77,6 +77,12 @@ export default function RadarTable({
                   <Th align="right">Частота</Th>
                   <Th align="center">Тренд</Th>
                   <Th align="right">Дней</Th>
+                  <Th align="center">
+                    <span className="inline-flex items-center gap-1">OZON Suggest <InfoTooltip text="Пользователи уже искали этот товар в маркетплейсе" /></span>
+                  </Th>
+                  <Th align="center">
+                    <span className="inline-flex items-center gap-1">WB Suggest <InfoTooltip text="Пользователи уже искали этот товар в маркетплейсе" /></span>
+                  </Th>
                   <Th className="w-24"></Th>
                 </tr>
               </thead>
