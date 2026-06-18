@@ -220,6 +220,7 @@ export default function AppHeader({
         </div>
 
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <ContactLinks className="hidden sm:inline-flex" />
           {variant === "dashboard" && warehouses && (
             <div className="hidden sm:block">
               <WarehouseSelector warehouses={warehouses} selectedId={selectedWarehouseId ?? null} />
