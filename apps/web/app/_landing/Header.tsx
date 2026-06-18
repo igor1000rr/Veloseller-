@@ -38,6 +38,7 @@ export default function LandingHeader({ isAuthed }: { isAuthed: boolean }) {
           <a href="#faq" className="text-sm text-ink-soft hover:text-lime-deep transition">FAQ</a>
         </nav>
         <div className="flex items-center gap-2 md:gap-3">
+          <ContactLinks className="hidden md:inline-flex" />
           {isAuthed ? (
             <Link
               href={"/dashboard" as any}
