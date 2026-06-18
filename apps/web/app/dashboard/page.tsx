@@ -14,6 +14,43 @@ import { getMetricsStamp, getDashboardComputed } from "@/lib/dashboard-cache";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
+// warehouse_metrics/store_metrics пишутся per-window: на каждый день (period_end)
+// по строке для окон 7/30/90 дней (одинаковый period_end, разный period_start).
+// Для графиков динамики оставляем только строки выбранного периода и схлопываем
+// до одной точки на календарный день (свежайшую) — иначе на оси X дублируются
+// даты, а короткие окна дают меньшие суммы и выглядят как провалы.
+function buildChartHistory<T extends { period_start: string; period_end: string }>(
+  rows: T[],
+  periodDays: number,
+  maxDays = 14,
+): T[] {
+  if (!rows || rows.length === 0) return [];
+  const targetWin = periodDays - 1; // 7→6, 30→29, 90→89
+  const withWin = rows.map((r) => ({
+    r,
+    win: Math.round(
+      (new Date(r.period_end).getTime() - new Date(r.period_start).getTime()) / 86_400_000,
+    ),
+  }));
+  let matched = withWin.filter((x) => Math.abs(x.win - targetWin) <= 1);
+  if (matched.length === 0) {
+    const wins = Array.from(new Set(withWin.map((x) => x.win)));
+    const best = wins.sort((a, b) => Math.abs(a - targetWin) - Math.abs(b - targetWin))[0];
+    matched = withWin.filter((x) => x.win === best);
+  }
+  // rows уже DESC по period_end — оставляем первую (свежайшую) строку на каждый день.
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const x of matched) {
+    const day = String(x.r.period_end).slice(0, 10);
+    if (seen.has(day)) continue;
+    seen.add(day);
+    out.push(x.r);
+    if (out.length >= maxDays) break;
+  }
+  return out;
+}
+
 export default async function DashboardOverview({ searchParams }: {
   searchParams: Promise<{ period?: string }>;
 }) {
