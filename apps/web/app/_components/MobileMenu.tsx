@@ -69,6 +69,22 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
                 <Icons.ArrowRight size={16} />
               </a>
             ))}
+            <Link
+              href={"/apps" as any}
+              onClick={() => setOpen(false)}
+              className="flex items-center justify-between py-4 border-b border-line text-2xl font-display text-ink hover:text-lime-deep transition"
+            >
+              <span>{isEn ? "App" : "Приложение"}</span>
+              <Icons.ArrowRight size={16} />
+            </Link>
+            <Link
+              href={"/partner" as any}
+              onClick={() => setOpen(false)}
+              className="flex items-center justify-between py-4 border-b border-line text-2xl font-display text-lime-deep hover:text-lime transition"
+            >
+              <span>{isEn ? "Partners" : "Партнёрам"}</span>
+              <Icons.ArrowRight size={16} />
+            </Link>
           </nav>
 
           <div className="px-6 py-6 border-t border-line space-y-3 bg-paper" style={{ backgroundColor: "#ffffff" }}>
