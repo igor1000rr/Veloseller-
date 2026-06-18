@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Icons } from "./Icons";
+import { ContactLinks } from "./ContactLinks";
 import { t } from "@/lib/i18n";
 import { isEn } from "../_landing/data";
 import { APP_PROMO_ENABLED } from "@/lib/features";
