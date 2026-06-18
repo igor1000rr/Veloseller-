@@ -53,6 +53,11 @@ _WORDSTAT_POLL_INTERVAL_HOURS = 72  # 3 дня
 # Сколько уточнений с одного бренда сохраняем после фильтра brand+model
 _MAX_QUERIES_PER_BRAND = 30
 
+# Сколько фраз бренда проверяем в suggest WB/OZON за один опрос (#5).
+# Ограничение бережёт от rate-limit публичных suggest-эндпоинтов; кэш 24ч
+# в radar_cache делает повторные опросы дешёвыми. Выкл: RADAR_SUGGEST_ENABLED=0.
+_MAX_SUGGEST_CHECKS_PER_BRAND = 15
+
 # Автоархивация: если запрос не обновлялся N дней — переводим в archived
 _AUTO_ARCHIVE_DAYS = 30
 
