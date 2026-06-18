@@ -122,7 +122,7 @@ export default async function AppsPage() {
             </span>
             <h1 className="mt-6 font-display text-4xl sm:text-5xl md:text-6xl xl:text-7xl tracking-tight font-medium leading-[0.98]">
               Veloseller в кармане.{" "}
-              <span className="bg-gradient-to-r from-lime-deep to-azure bg-clip-text text-transparent italic">Скоро</span>{" "}
+              <span className="inline-block bg-gradient-to-r from-lime-deep to-azure bg-clip-text text-transparent italic pr-[0.16em] leading-[1.1]">Скоро</span>{" "}
               на iOS и Android.
             </h1>
             <p className="mt-6 text-ink-muted text-base md:text-lg max-w-xl leading-relaxed">
