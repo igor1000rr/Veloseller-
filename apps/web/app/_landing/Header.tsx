@@ -7,6 +7,7 @@
 import Link from "next/link";
 import { Icons } from "../_components/Icons";
 import MobileMenu from "../_components/MobileMenu";
+import { ContactLinks } from "../_components/ContactLinks";
 import { t } from "@/lib/i18n";
 import { isEn } from "./data";
 import { APP_PROMO_ENABLED } from "@/lib/features";
