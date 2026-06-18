@@ -20,9 +20,9 @@ export function ContactLinks({ className = "" }: { className?: string }) {
         rel="noopener noreferrer"
         title="MAX"
         aria-label="MAX"
-        className="inline-flex items-center justify-center h-9 px-2 rounded-lg text-ink-soft hover:text-lime-deep hover:bg-bg-soft transition"
+        className="inline-flex items-center justify-center size-9 rounded-lg hover:bg-bg-soft transition"
       >
-        <span className="font-display text-[12px] font-bold tracking-tight leading-none">MAX</span>
+        <Icons.Max size={20} />
       </a>
       <a
         href={TELEGRAM_URL}
