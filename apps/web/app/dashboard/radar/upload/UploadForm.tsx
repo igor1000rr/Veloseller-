@@ -59,10 +59,16 @@ export default function UploadForm() {
         список для финальной редакции пользователя.
       </p>
       {done && (
-        <div className="mt-4 rounded-lg border border-lime-deep/40 bg-lime-soft px-4 py-3 text-sm">
-          <span className="text-ink">Прайс обработан — статус, число строк и брендов смотрите в истории ниже.</span>{" "}
-          <Link href={"/dashboard/radar/brands" as any} className="font-semibold text-lime-deep hover:underline whitespace-nowrap">
-            Перейти к брендам →
+        <div className="mt-4 rounded-lg border border-lime-deep/40 bg-lime-soft px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+          <span className="text-sm text-ink">
+            Прайс обработан — статус, число строк и брендов смотрите в истории ниже.
+            Дальше отберите бренды для отслеживания.
+          </span>
+          <Link
+            href={"/dashboard/radar/brands" as any}
+            className="shrink-0 inline-flex items-center rounded-lg bg-lime-deep text-paper px-4 py-2 text-sm font-mono uppercase tracking-wider font-semibold hover:bg-lime-deep/90 transition whitespace-nowrap"
+          >
+            В бренды →
           </Link>
         </div>
       )}
