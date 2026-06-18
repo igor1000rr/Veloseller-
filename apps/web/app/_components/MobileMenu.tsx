@@ -92,6 +92,7 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
           </nav>
 
           <div className="px-6 py-6 border-t border-line space-y-3 bg-paper" style={{ backgroundColor: "#ffffff" }}>
+            <ContactLinks className="flex justify-center pb-1" />
             {isAuthed ? (
               <Link
                 href={"/dashboard" as any}
