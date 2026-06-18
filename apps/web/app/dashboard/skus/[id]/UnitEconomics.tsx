@@ -107,6 +107,7 @@ export function UnitEconomics({ priceRub, commissionPct, costRub, productId }: {
         <Field label={L.commission} suffix="%" value={commission} onChange={setCommission} hint={commissionPct != null ? L.fromApi : undefined} />
         <Field label={L.logistics} suffix="%" value={logistics} onChange={setLogistics} />
         <Field label={L.acquiring} suffix="%" value={acquiring} onChange={setAcquiring} />
+        <Field label={L.tax} suffix="%" value={tax} onChange={setTax} />
         <Field label={L.ads} suffix="%" value={ads} onChange={setAds} />
       </div>
 
