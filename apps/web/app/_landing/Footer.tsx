@@ -2,7 +2,7 @@
 import { Icons } from "../_components/Icons";
 import { t } from "@/lib/i18n";
 import { FooterCol } from "./ui";
-import { footerWarehouseTypes } from "./data";
+import { footerWarehouseTypes, isEn } from "./data";
 
 export default function LandingFooter({ isAuthed }: { isAuthed: boolean }) {
   return (
