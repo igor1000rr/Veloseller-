@@ -350,7 +350,9 @@ async def lifespan(app: FastAPI):
         start_scheduler()
         logger.info("scheduler started", extra={"event": "lifecycle"})
     _start_recalc_workers()
+    _start_sync_workers()
     yield
+    _stop_sync_workers()
     _stop_recalc_workers()
     if settings.enable_scheduler:
         stop_scheduler()
