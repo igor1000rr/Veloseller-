@@ -267,7 +267,7 @@ export default async function AppsPage() {
       </section>
 
       <section id="pwa" className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line bg-bg-soft">
-        <div className="max-w-3xl mx-auto">
+        <div className="max-w-[1100px] mx-auto">
           <div className="text-center mb-8 md:mb-10 reveal">
             <Eyebrow center>Уже сейчас</Eyebrow>
             <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
