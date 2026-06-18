@@ -25,10 +25,10 @@
   - Запускается scheduler'ом раз в сутки в 06:00 UTC (= 09:00 МСК)
 
 Что изменилось vs v1:
-  - Убрали suggest WB/Ozon — Wordstat freq≥60 + matcher достаточно
+  - Статус считает Wordstat freq≥60 + matcher (suggest на статус не влияет)
   - Убрали статус 'early' — теперь только new/archived/watching
-  - Убрали present_in_wb/present_in_ozon из payload (поля остаются в БД
-    nullable для backward compat и возможной англоязычной версии)
+  - present_in_wb/present_in_ozon наполняются suggest-провайдером как доп.
+    признак доверия (#5, возвращено 19.06; кэш 24ч, лимит проверок на бренд)
 """
 from __future__ import annotations
 
