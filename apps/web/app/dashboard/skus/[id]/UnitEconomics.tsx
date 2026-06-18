@@ -54,7 +54,7 @@ export function UnitEconomics({ priceRub, commissionPct, costRub, productId }: {
     return isFinite(v) ? v : 0;
   };
   const p = n(price);
-  const totalPct = n(commission) + n(logistics) + n(acquiring) + n(ads);
+  const totalPct = n(commission) + n(logistics) + n(acquiring) + n(tax) + n(ads);
   const fees = (p * totalPct) / 100;
   const spend = fees + n(cost);
   const profit = p - spend;
