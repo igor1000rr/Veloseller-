@@ -10,6 +10,7 @@ import LandingFeatures from "./_landing/Features";
 import LandingSegments from "./_landing/Segments";
 import LandingApps from "./_landing/Apps";
 import LandingStory from "./_landing/Story";
+import LandingPartner from "./_landing/Partner";
 import LandingBottom from "./_landing/Bottom";
 import LandingFooter from "./_landing/Footer";
 
