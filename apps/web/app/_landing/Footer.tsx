@@ -24,7 +24,7 @@ export default function LandingFooter({ isAuthed }: { isAuthed: boolean }) {
             ["#how", t("landing.nav.how")],
             ["#pricing", t("landing.nav.pricing")],
             ["/news", t("landing.nav.news")],
-            ...(APP_PROMO_ENABLED ? [["/apps", isEn ? "Mobile app" : "Приложение"]] : []),
+            ...(APP_PROMO_ENABLED ? [["/apps", isEn ? "Mobile app" : "Приложение"] as [string, string]] : []),
             ["/partner", isEn ? "Partners" : "Партнёрам"],
             ["#faq", "FAQ"],
           ]} />
