@@ -46,6 +46,7 @@ export function UnitEconomics({ priceRub, commissionPct, costRub, productId }: {
   const [commission, setCommission] = useState<string>(commissionPct != null ? String(commissionPct) : "");
   const [logistics, setLogistics] = useState<string>("1");
   const [acquiring, setAcquiring] = useState<string>("2");
+  const [tax, setTax] = useState<string>("0");
   const [ads, setAds] = useState<string>("0");
 
   const n = (s: string) => {
