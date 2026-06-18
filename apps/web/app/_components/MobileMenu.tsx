@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Icons } from "./Icons";
 import { t } from "@/lib/i18n";
 import { isEn } from "../_landing/data";
+import { APP_PROMO_ENABLED } from "@/lib/features";
 
 const nav = [
   { href: "#features", label: t("landing.nav.features") },
@@ -69,14 +70,16 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
                 <Icons.ArrowRight size={16} />
               </a>
             ))}
-            <Link
-              href={"/apps" as any}
-              onClick={() => setOpen(false)}
-              className="flex items-center justify-between py-4 border-b border-line text-2xl font-display text-ink hover:text-lime-deep transition"
-            >
-              <span>{isEn ? "App" : "Приложение"}</span>
-              <Icons.ArrowRight size={16} />
-            </Link>
+            {APP_PROMO_ENABLED && (
+              <Link
+                href={"/apps" as any}
+                onClick={() => setOpen(false)}
+                className="flex items-center justify-between py-4 border-b border-line text-2xl font-display text-ink hover:text-lime-deep transition"
+              >
+                <span>{isEn ? "App" : "Приложение"}</span>
+                <Icons.ArrowRight size={16} />
+              </Link>
+            )}
             <Link
               href={"/partner" as any}
               onClick={() => setOpen(false)}

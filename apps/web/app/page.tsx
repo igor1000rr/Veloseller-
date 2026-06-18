@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import ScrollToTopButton from "./_components/ScrollToTopButton";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { APP_PROMO_ENABLED } from "@/lib/features";
 import { landingMetadata, landingJsonLd } from "./_landing/seo";
 import LandingHeader from "./_landing/Header";
 import LandingHero from "./_landing/Hero";
@@ -56,7 +57,7 @@ export default async function LandingPage() {
       <LandingStats />
       <LandingFeatures />
       <LandingSegments />
-      <LandingApps />
+      {APP_PROMO_ENABLED && <LandingApps />}
       <LandingStory />
       <LandingPartner />
       <LandingBottom isAuthed={isAuthed} />

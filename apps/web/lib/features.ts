@@ -58,6 +58,15 @@ export const PAYMENT_PROVIDER: "robokassa" | "stub" =
   process.env.NEXT_PUBLIC_PAYMENT_PROVIDER === "stub" ? "stub" : "robokassa";
 
 /**
+ * Промо мобильного приложения: страница /apps, ссылки в шапке/футере/мобменю
+ * и секция на главной. Пока приложения нет в сторах — скрыто на ВСЕХ сборках
+ * (и РФ, и .com), чтобы не путать маркетплейсы и не обещать того, чего ещё нет.
+ * Когда появится листинг — включается явно: NEXT_PUBLIC_APP_PROMO_ENABLED="true".
+ */
+export const APP_PROMO_ENABLED: boolean =
+  process.env.NEXT_PUBLIC_APP_PROMO_ENABLED === "true";
+
+/**
  * К какому маркетплейсу относится тип склада.
  * null = не-маркетплейс (ручной источник: Google Sheet / CSV / фид) — доступен всегда.
  */

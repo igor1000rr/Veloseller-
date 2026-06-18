@@ -9,6 +9,7 @@ import { Icons } from "../_components/Icons";
 import MobileMenu from "../_components/MobileMenu";
 import { t } from "@/lib/i18n";
 import { isEn } from "./data";
+import { APP_PROMO_ENABLED } from "@/lib/features";
 
 export default function LandingHeader({ isAuthed }: { isAuthed: boolean }) {
   return (
@@ -29,7 +30,9 @@ export default function LandingHeader({ isAuthed }: { isAuthed: boolean }) {
           <a href="#integrations" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.integrations")}</a>
           <a href="#pricing" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.pricing")}</a>
           <Link href={"/news" as any} className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.news")}</Link>
-          <Link href={"/apps" as any} className="text-sm text-ink-soft hover:text-lime-deep transition">{isEn ? "App" : "Приложение"}</Link>
+          {APP_PROMO_ENABLED && (
+            <Link href={"/apps" as any} className="text-sm text-ink-soft hover:text-lime-deep transition">{isEn ? "App" : "Приложение"}</Link>
+          )}
           <Link href={"/partner" as any} className="text-sm font-medium text-lime-deep hover:text-lime transition">{isEn ? "Partners" : "Партнёрам"}</Link>
           <a href="#faq" className="text-sm text-ink-soft hover:text-lime-deep transition">FAQ</a>
         </nav>

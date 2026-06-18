@@ -3,6 +3,7 @@ import { Icons } from "../_components/Icons";
 import { t } from "@/lib/i18n";
 import { FooterCol } from "./ui";
 import { footerWarehouseTypes, isEn } from "./data";
+import { APP_PROMO_ENABLED } from "@/lib/features";
 
 export default function LandingFooter({ isAuthed }: { isAuthed: boolean }) {
   return (
@@ -23,7 +24,7 @@ export default function LandingFooter({ isAuthed }: { isAuthed: boolean }) {
             ["#how", t("landing.nav.how")],
             ["#pricing", t("landing.nav.pricing")],
             ["/news", t("landing.nav.news")],
-            ["/apps", isEn ? "Mobile app" : "Приложение"],
+            ...(APP_PROMO_ENABLED ? [["/apps", isEn ? "Mobile app" : "Приложение"]] : []),
             ["/partner", isEn ? "Partners" : "Партнёрам"],
             ["#faq", "FAQ"],
           ]} />
