@@ -22,6 +22,11 @@ DEPLOY_USER=veloseller
 WEB_ENV="$DEPLOY_DIR/apps/web/.env.production"
 WORKER_ENV="$DEPLOY_DIR/apps/worker/.env"
 
+# Кластер Next за nginx upstream (см. deploy/nginx-veloseller-upstream.conf).
+# Порты ДОЛЖНЫ совпадать со списком server в upstream veloseller_web.
+# 4-ядерная коробка → 3 инстанса (одно ядро оставляем Postgres/воркеру).
+WEB_PORTS=(3001 3002 3003)
+
 [ -f "$WEB_ENV" ] || err "Нет $WEB_ENV — создай (см. deploy/README.md)"
 [ -f "$WORKER_ENV" ] || err "Нет $WORKER_ENV — создай (см. deploy/README.md)"
 
@@ -68,14 +73,16 @@ sudo -u "$DEPLOY_USER" -H bash -c "
 "
 
 # ===== systemd-units (sync changes from repo to /etc) =====
-# Раньше юниты копировались только в setup-server.sh при первичном бутстрапе.
-# Из-за этого изменения в deploy/*.service не подхватывались на проде —
-# например, 25.05.2026 правка --workers 2 → --workers 1 потребовала ручного
-# вмешательства, иначе scheduler продолжал работать в двух копиях.
-# Теперь сравниваем содержимое и копируем если разное.
+# Сравниваем содержимое и копируем если разное.
+#
+# Веб работает КЛАСТЕРОМ инстансов из шаблона veloseller-web@.service
+# (по одному на порт из WEB_PORTS), за nginx upstream. Старый одиночный
+# veloseller-web.service больше НЕ синкается и НЕ рестартится этим скриптом —
+# после перехода на кластер его нужно один раз остановить и отключить вручную:
+#   sudo systemctl disable --now veloseller-web
 SYSTEMD_DIR=/etc/systemd/system
 UNIT_CHANGED=0
-for unit in veloseller-web.service veloseller-worker.service; do
+for unit in veloseller-worker.service veloseller-web@.service; do
   src="$DEPLOY_DIR/deploy/$unit"
   dst="$SYSTEMD_DIR/$unit"
   if [ ! -f "$dst" ] || ! cmp -s "$src" "$dst"; then
@@ -92,35 +99,47 @@ if [ "$UNIT_CHANGED" = "1" ]; then
 fi
 
 # ===== Service start =====
-log "Рестарт systemd сервисов…"
+log "Рестарт worker…"
 systemctl restart veloseller-worker
 sleep 3
-systemctl restart veloseller-web
-sleep 3
+
+log "Рестарт web-кластера (порты: ${WEB_PORTS[*]})…"
+for port in "${WEB_PORTS[@]}"; do
+  systemctl enable "veloseller-web@${port}" >/dev/null 2>&1 || true
+  systemctl restart "veloseller-web@${port}"
+  sleep 2
+done
 
 log "Статус worker:"
-systemctl is-active veloseller-worker && echo "  ✅ работает" || {
+systemctl is-active veloseller-worker >/dev/null && echo "  ✅ работает" || {
   err "worker не запустился. Логи: journalctl -u veloseller-worker -n 50 --no-pager"
 }
 
-log "Статус web:"
-systemctl is-active veloseller-web && echo "  ✅ работает" || {
-  err "web не запустился. Логи: journalctl -u veloseller-web -n 50 --no-pager"
-}
+log "Статус web-инстансов:"
+for port in "${WEB_PORTS[@]}"; do
+  systemctl is-active "veloseller-web@${port}" >/dev/null && echo "  ✅ web:${port}" || {
+    err "web@${port} не запустился. Логи: journalctl -u veloseller-web@${port} -n 50 --no-pager"
+  }
+done
 
-log "Проверяем HTTP…"
-for i in 1 2 3 4 5; do
-  if curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:3000 | grep -qE "^(200|307|308)"; then
-    log "✅ Next.js отвечает на 127.0.0.1:3000"
-    break
-  fi
-  echo "  ...ждём warmup ($i/5)"
-  sleep 5
+log "Проверяем HTTP по инстансам…"
+for port in "${WEB_PORTS[@]}"; do
+  ok=0
+  for i in 1 2 3 4 5; do
+    if curl -fsS -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:${port}" | grep -qE "^(200|307|308)"; then
+      log "✅ Next.js отвечает на 127.0.0.1:${port}"
+      ok=1
+      break
+    fi
+    echo "  ...ждём warmup ${port} ($i/5)"
+    sleep 5
+  done
+  [ "$ok" = "1" ] || err "web@${port} не отвечает на HTTP. Логи: journalctl -u veloseller-web@${port} -n 50 --no-pager"
 done
 
 echo
 log "✅ Deploy завершён. Сайт: http://$(hostname -I | awk '{print $1}')/"
 echo
 echo "Логи:"
-echo "  journalctl -u veloseller-web -f"
+echo "  journalctl -u 'veloseller-web@*' -f"
 echo "  journalctl -u veloseller-worker -f"

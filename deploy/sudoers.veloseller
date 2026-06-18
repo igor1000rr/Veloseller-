@@ -18,13 +18,19 @@
 #
 # Список команд:
 #  - finalize.sh — основной скрипт деплоя
-#  - systemctl daemon-reload + restart/is-active обоих сервисов
+#  - systemctl daemon-reload + restart/is-active сервисов и web-инстансов кластера
 #  - chown /opt/veloseller (нужен для смены владельца после git pull)
 
 veloseller ALL=(ALL) NOPASSWD: /usr/bin/bash /opt/veloseller/deploy/finalize.sh
 veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
-veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart veloseller-web
 veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart veloseller-worker
-veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active veloseller-web
 veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active veloseller-worker
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart veloseller-web
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active veloseller-web
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart veloseller-web@3001
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart veloseller-web@3002
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart veloseller-web@3003
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active veloseller-web@3001
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active veloseller-web@3002
+veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active veloseller-web@3003
 veloseller ALL=(ALL) NOPASSWD: /bin/chown -R veloseller\:veloseller /opt/veloseller

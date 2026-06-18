@@ -1,0 +1,22 @@
+[Unit]
+Description=Veloseller Web (Next.js) :%i
+After=network.target veloseller-worker.service
+
+[Service]
+Type=simple
+User=veloseller
+Group=veloseller
+WorkingDirectory=/opt/veloseller/apps/web
+EnvironmentFile=/opt/veloseller/apps/web/.env.production
+Environment=NODE_ENV=production
+Environment=PORT=%i
+# next-бинарь в hoisted node_modules корня монорепо (npm workspaces).
+# Имя инстанса = порт: veloseller-web@3001 → слушает :3001.
+ExecStart=/usr/bin/node /opt/veloseller/node_modules/next/dist/bin/next start -p %i
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
