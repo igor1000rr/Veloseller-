@@ -1,0 +1,16 @@
+{
+  "onboarding.eyebrow": "Onboarding",
+  "onboarding.welcomePre": "Welcome to",
+  "onboarding.subtitle": "3 steps to get connected",
+  "onboarding.warmup": "For Veloseller to start computing TVelo, it needs daily records of your SKUs. Meaningful numbers after 7 days. The most accurate metrics after 30 days. We'll email you summary reports for those dates.",
+  "onboarding.step1.title": "Connect a data source",
+  "onboarding.step1.desc": "Google Sheet, Ozon or Wildberries API",
+  "onboarding.step1.cta": "Connect",
+  "onboarding.step2.title": "First data records",
+  "onboarding.step2.desc": "Syncing happens automatically after you connect",
+  "onboarding.step2.cta": "Start sync",
+  "onboarding.step3.title": "Wait for the recalculation",
+  "onboarding.step3.desc": "Syncing runs every 6 hours, or click «Recalculate now» on the dashboard",
+  "onboarding.openDashboard": "Open dashboard",
+  "onboarding.done": "🎉 Done! Veloseller is computing your sales velocity."
+}
