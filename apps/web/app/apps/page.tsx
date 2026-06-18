@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import LandingHeader from "../_landing/Header";
 import LandingFooter from "../_landing/Footer";
 import ScrollToTopButton from "../_components/ScrollToTopButton";
-import AppsPhoneDemo from "../_components/AppsPhoneDemo";
 import AppsInstallTabs from "../_components/AppsInstallTabs";
 import { MIcon } from "../_components/MarketingIcons";
+import { PhoneFrame, ScreenDashboard, ScreenPush, ScreenWarehouses, ScreenForecast } from "../_components/DeviceMockups";
 import { Eyebrow } from "../_landing/ui";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +16,7 @@ export const revalidate = 0;
 export const metadata: Metadata = {
   title: "Мобильное приложение",
   description:
-    "Мобильное приложение Veloseller для iOS и Android — скоро. Остатки, скорость продаж и риск out-of-stock на телефоне, push о дозаказе. А пока — установите веб-версию.",
+    "Мобильное приложение Veloseller для iOS и Android — скоро. Дашборд остатков, push о дозаказе, склады WB и Ozon, прогноз нехватки на телефоне. А пока — установите веб-версию.",
 };
 
 const CHIP: Record<string, string> = {
@@ -32,11 +33,59 @@ const HOVER: Record<string, string> = {
 };
 const ACCENTS = ["lime", "azure", "emerald", "orange"];
 
+const SCREEN: Record<string, ReactNode> = {
+  dashboard: <ScreenDashboard />,
+  push: <ScreenPush />,
+  warehouses: <ScreenWarehouses />,
+  forecast: <ScreenForecast />,
+};
+
+const GALLERY = [
+  { screen: "dashboard", cap: "Дашборд: health score, TVelo, дни покрытия" },
+  { screen: "push", cap: "Push о дозаказе прямо на экран блокировки" },
+  { screen: "warehouses", cap: "Остатки по складам WB и Ozon FBO/FBS" },
+  { screen: "forecast", cap: "Прогноз нехватки и рекомендация поставки" },
+];
+
+const ROWS = [
+  {
+    eyebrow: "Уведомления",
+    title: "Push, когда товар пора дозаказать",
+    text: "Не нужно заходить и проверять — приложение само напишет, когда остатка осталось на считанные дни.",
+    points: ["Сигнал за N дней до нуля", "Падение остатка ниже минимума", "Ошибка синхронизации склада"],
+    screen: "push",
+    reverse: false,
+  },
+  {
+    eyebrow: "Склады",
+    title: "Все склады WB и Ozon в одном окне",
+    text: "Wildberries, Ozon FBO и FBS — переключаетесь между маркетплейсами одним тапом, видите критичные остатки по цвету.",
+    points: ["Wildberries, Ozon FBO/FBS", "Цветные статусы остатка", "Поиск по SKU и складу"],
+    screen: "warehouses",
+    reverse: true,
+  },
+  {
+    eyebrow: "Прогноз",
+    title: "Сколько дней до нуля и сколько везти",
+    text: "TVelo учитывает дни без продаж из-за out-of-stock, поэтому прогноз честный, а не заниженный.",
+    points: ["Дата выхода в ноль", "Рекомендованный объём поставки", "Создание поставки в один тап"],
+    screen: "forecast",
+    reverse: false,
+  },
+];
+
 const FEATURES = [
   { icon: "dashboard", title: "Дашборд на ходу", text: "Остатки, TVelo, дни покрытия и health score — всё под рукой, без ноутбука." },
   { icon: "bell", title: "Push о дозаказе", text: "Уведомления: товар пора заказать, остаток упал, синхронизация сломалась." },
   { icon: "box", title: "Склады WB и Ozon", text: "Быстрый просмотр по складам Wildberries и Ozon FBO/FBS в одном окне." },
   { icon: "chart", title: "Прогноз нехватки", text: "Сколько дней до нуля и сколько везти — расчёт в кармане." },
+];
+
+const ROADMAP = [
+  { q: "Сейчас", t: "Веб-версия и установка как PWA", done: true },
+  { q: "Скоро", t: "Бета для iOS и Android", done: false },
+  { q: "Дальше", t: "Push, виджеты, быстрые поставки", done: false },
+  { q: "Потом", t: "Apple Watch и офлайн-режим", done: false },
 ];
 
 export default async function AppsPage() {
@@ -52,7 +101,7 @@ export default async function AppsPage() {
 
       <LandingHeader isAuthed={isAuthed} />
 
-      <section className="relative w-full px-4 md:px-8 lg:px-12 pt-12 pb-10 md:pt-20 md:pb-16">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 pt-12 pb-12 md:pt-20 md:pb-16">
         <div className="grid lg:grid-cols-12 gap-10 lg:gap-12 items-center max-w-[1600px] mx-auto">
           <div className="lg:col-span-7 reveal">
             <span className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-lime-deep/30 bg-lime-soft">
@@ -88,8 +137,8 @@ export default async function AppsPage() {
               </span>
             </div>
           </div>
-          <div className="lg:col-span-5 reveal" style={{ animationDelay: "140ms" }}>
-            <AppsPhoneDemo />
+          <div className="lg:col-span-5 reveal float-slow" style={{ animationDelay: "140ms" }}>
+            <PhoneFrame widthClass="w-[260px]"><ScreenDashboard /></PhoneFrame>
           </div>
         </div>
       </section>
@@ -97,9 +146,58 @@ export default async function AppsPage() {
       <section className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line bg-bg-soft">
         <div className="max-w-[1600px] mx-auto">
           <div className="text-center mb-10 md:mb-14 reveal">
-            <Eyebrow center>Что будет в приложении</Eyebrow>
+            <Eyebrow center>Как выглядит приложение</Eyebrow>
             <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
-              Аналитика остатков всегда с собой
+              Загляните внутрь
+            </h2>
+            <p className="mt-4 text-ink-muted max-w-2xl mx-auto text-sm md:text-base">
+              Примерные экраны — так аналитика остатков будет выглядеть в телефоне.
+            </p>
+          </div>
+          <div className="flex gap-6 md:gap-8 overflow-x-auto pb-4 lg:justify-center snap-x">
+            {GALLERY.map((g, i) => (
+              <div key={g.screen} className="reveal shrink-0 snap-center w-[210px]" style={{ animationDelay: i * 90 + "ms" }}>
+                <div className={i % 2 === 1 ? "float" : "float-slow"}>
+                  <PhoneFrame widthClass="w-[210px]">{SCREEN[g.screen]}</PhoneFrame>
+                </div>
+                <p className="mt-4 text-center text-xs text-ink-muted leading-relaxed px-2">{g.cap}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {ROWS.map((row, i) => (
+        <section key={row.title} className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-20 border-t border-line">
+          <div className="grid lg:grid-cols-2 gap-10 lg:gap-16 items-center max-w-[1300px] mx-auto">
+            <div className={"reveal " + (row.reverse ? "lg:order-2" : "")}>
+              <Eyebrow>{row.eyebrow}</Eyebrow>
+              <h2 className="mt-3 font-display text-2xl sm:text-3xl md:text-4xl tracking-tight font-medium leading-tight">{row.title}</h2>
+              <p className="mt-4 text-ink-muted text-sm md:text-base leading-relaxed max-w-md">{row.text}</p>
+              <ul className="mt-6 space-y-2.5">
+                {row.points.map((p) => (
+                  <li key={p} className="flex items-center gap-2.5 text-sm md:text-[15px] text-ink-soft">
+                    <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-lime-soft text-lime-deep">
+                      <MIcon name="check" className="size-3.5" />
+                    </span>
+                    {p}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className={"reveal " + (row.reverse ? "lg:order-1" : "")}>
+              <PhoneFrame widthClass="w-[250px]">{SCREEN[row.screen]}</PhoneFrame>
+            </div>
+          </div>
+        </section>
+      ))}
+
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line bg-bg-soft">
+        <div className="max-w-[1600px] mx-auto">
+          <div className="text-center mb-10 md:mb-14 reveal">
+            <Eyebrow center>Коротко</Eyebrow>
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
+              Что будет в приложении
             </h2>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
@@ -119,7 +217,31 @@ export default async function AppsPage() {
         </div>
       </section>
 
-      <section id="pwa" className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line">
+      <section className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line">
+        <div className="max-w-[1300px] mx-auto">
+          <div className="text-center mb-10 md:mb-14 reveal">
+            <Eyebrow center>Роадмап</Eyebrow>
+            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
+              Что дальше
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
+            {ROADMAP.map((r, i) => (
+              <div key={r.q} className="reveal relative rounded-2xl border border-line bg-paper p-5 sm:p-6" style={{ animationDelay: i * 80 + "ms" }}>
+                <div className="flex items-center gap-2">
+                  <span className={"flex size-6 items-center justify-center rounded-full " + (r.done ? "bg-lime-deep text-paper" : "bg-bg-soft text-ink-hush")}>
+                    {r.done ? <MIcon name="check" className="size-3.5" /> : <span className="font-mono text-[10px]">{i + 1}</span>}
+                  </span>
+                  <span className="font-mono text-[10px] uppercase tracking-wider text-ink-hush">{r.q}</span>
+                </div>
+                <p className="mt-3 font-display text-base leading-tight font-medium">{r.t}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section id="pwa" className="relative w-full px-4 md:px-8 lg:px-12 py-12 md:py-16 border-t border-line bg-bg-soft">
         <div className="max-w-3xl mx-auto">
           <div className="text-center mb-8 md:mb-10 reveal">
             <Eyebrow center>Уже сейчас</Eyebrow>
