@@ -1,7 +1,7 @@
 {
-  "onboarding.eyebrow": "Подключение",
-  "onboarding.welcomePre": "Добро пожаловать в",
-  "onboarding.subtitle": "3 шага до подключения",
+  "onboarding.kicker": "Подключение",
+  "onboarding.welcome": "Добро пожаловать в",
+  "onboarding.stepsCount": "3 шага до подключения",
   "onboarding.warmup": "Чтобы Veloseller начал считать TVelo, нужны ежедневные записи по вашим SKU. Актуальные расчёты через 7 дней. Наиболее точные показатели через 30 дней. Мы отправим вам на email сводные отчёты за эти даты.",
   "onboarding.step1.title": "Подключите источник данных",
   "onboarding.step1.desc": "Google Sheet, Ozon или Wildberries API",
@@ -11,6 +11,6 @@
   "onboarding.step2.cta": "Запустить синхронизацию",
   "onboarding.step3.title": "Дождитесь пересчёта",
   "onboarding.step3.desc": "Синхронизация запускается каждые 6 часов или нажмите «Пересчитать сейчас» на dashboard",
-  "onboarding.openDashboard": "Открыть dashboard",
-  "onboarding.done": "🎉 Готово! Veloseller считает вашу скорость продаж."
+  "onboarding.step3.cta": "Открыть dashboard",
+  "onboarding.doneTitle": "🎉 Готово! Veloseller считает вашу скорость продаж."
 }
