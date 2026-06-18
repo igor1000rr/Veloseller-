@@ -19,12 +19,6 @@ export const metadata: Metadata = {
     "Мобильное приложение Veloseller для iOS и Android — скоро. Дашборд остатков, push о дозаказе, склады WB и Ozon, прогноз нехватки на телефоне. А пока — установите веб-версию.",
 };
 
-const CHIP: Record<string, string> = {
-  lime: "text-lime-deep bg-lime-soft",
-  azure: "text-azure bg-azure/10",
-  emerald: "text-emerald bg-emerald/10",
-  orange: "text-orange bg-orange/10",
-};
 const HOVER: Record<string, string> = {
   lime: "hover:border-lime-deep/40",
   azure: "hover:border-azure/40",
@@ -32,6 +26,24 @@ const HOVER: Record<string, string> = {
   orange: "hover:border-orange/40",
 };
 const ACCENTS = ["lime", "azure", "emerald", "orange"];
+const TILE: Record<string, string> = {
+  lime: "bg-gradient-to-br from-lime-deep to-emerald",
+  azure: "bg-gradient-to-br from-azure to-lime-deep",
+  emerald: "bg-gradient-to-br from-emerald to-azure",
+  orange: "bg-gradient-to-br from-orange to-rose",
+};
+const TINT: Record<string, string> = {
+  lime: "from-paper to-lime-soft",
+  azure: "from-paper to-azure/10",
+  emerald: "from-paper to-emerald/10",
+  orange: "from-paper to-orange/10",
+};
+const GLOW = [
+  "radial-gradient(closest-side, rgba(132,204,22,0.35), transparent 70%)",
+  "radial-gradient(closest-side, rgba(2,132,199,0.30), transparent 70%)",
+  "radial-gradient(closest-side, rgba(6,95,70,0.26), transparent 70%)",
+  "radial-gradient(closest-side, rgba(234,88,12,0.26), transparent 70%)",
+];
 
 const SCREEN: Record<string, ReactNode> = {
   dashboard: <ScreenDashboard />,
@@ -137,8 +149,13 @@ export default async function AppsPage() {
               </span>
             </div>
           </div>
-          <div className="lg:col-span-5 reveal float-slow" style={{ animationDelay: "140ms" }}>
-            <PhoneFrame widthClass="w-[260px]"><ScreenDashboard /></PhoneFrame>
+          <div className="lg:col-span-5 reveal" style={{ animationDelay: "140ms" }}>
+            <div className="relative">
+              <div aria-hidden className="pointer-events-none absolute inset-0 blur-3xl opacity-60" style={{ background: GLOW[0] }} />
+              <div className="relative float-slow">
+                <PhoneFrame widthClass="w-[260px]"><ScreenDashboard /></PhoneFrame>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -157,8 +174,11 @@ export default async function AppsPage() {
           <div className="flex gap-6 md:gap-8 overflow-x-auto pb-4 lg:justify-center snap-x">
             {GALLERY.map((g, i) => (
               <div key={g.screen} className="reveal shrink-0 snap-center w-[210px]" style={{ animationDelay: i * 90 + "ms" }}>
-                <div className={i % 2 === 1 ? "float" : "float-slow"}>
-                  <PhoneFrame widthClass="w-[210px]">{SCREEN[g.screen]}</PhoneFrame>
+                <div className="relative">
+                  <div aria-hidden className="pointer-events-none absolute inset-0 blur-3xl opacity-50" style={{ background: GLOW[i % 4] }} />
+                  <div className={"relative " + (i % 2 === 1 ? "float" : "float-slow")}>
+                    <PhoneFrame widthClass="w-[210px]">{SCREEN[g.screen]}</PhoneFrame>
+                  </div>
                 </div>
                 <p className="mt-4 text-center text-xs text-ink-muted leading-relaxed px-2">{g.cap}</p>
               </div>
@@ -186,7 +206,12 @@ export default async function AppsPage() {
               </ul>
             </div>
             <div className={"reveal " + (row.reverse ? "lg:order-1" : "")}>
-              <PhoneFrame widthClass="w-[250px]">{SCREEN[row.screen]}</PhoneFrame>
+              <div className="relative">
+                <div aria-hidden className="pointer-events-none absolute inset-0 blur-3xl opacity-40" style={{ background: GLOW[(i + 1) % 4] }} />
+                <div className="relative">
+                  <PhoneFrame widthClass="w-[250px]">{SCREEN[row.screen]}</PhoneFrame>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -204,8 +229,8 @@ export default async function AppsPage() {
             {FEATURES.map((f, i) => {
               const a = ACCENTS[i % 4];
               return (
-                <div key={f.title} className={"group reveal rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 transition hover:-translate-y-1 hover:shadow-xl " + HOVER[a]} style={{ animationDelay: i * 80 + "ms" }}>
-                  <div className={"flex size-12 items-center justify-center rounded-2xl transition group-hover:scale-110 group-hover:-rotate-3 " + CHIP[a]}>
+                <div key={f.title} className={"group reveal rounded-2xl border border-line bg-gradient-to-br p-5 sm:p-6 md:p-7 transition hover:-translate-y-1 hover:shadow-xl " + TINT[a] + " " + HOVER[a]} style={{ animationDelay: i * 80 + "ms" }}>
+                  <div className={"flex size-12 items-center justify-center rounded-2xl text-paper shadow-md transition group-hover:scale-110 group-hover:-rotate-3 " + TILE[a]}>
                     <MIcon name={f.icon} className="size-6" />
                   </div>
                   <h3 className="mt-5 font-display text-base sm:text-lg md:text-xl leading-tight font-medium">{f.title}</h3>
@@ -227,10 +252,10 @@ export default async function AppsPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
             {ROADMAP.map((r, i) => (
-              <div key={r.q} className="reveal relative rounded-2xl border border-line bg-paper p-5 sm:p-6" style={{ animationDelay: i * 80 + "ms" }}>
-                <div className="flex items-center gap-2">
-                  <span className={"flex size-6 items-center justify-center rounded-full " + (r.done ? "bg-lime-deep text-paper" : "bg-bg-soft text-ink-hush")}>
-                    {r.done ? <MIcon name="check" className="size-3.5" /> : <span className="font-mono text-[10px]">{i + 1}</span>}
+              <div key={r.q} className="reveal relative rounded-2xl border border-line bg-paper p-5 sm:p-6 transition hover:-translate-y-1 hover:shadow-xl" style={{ animationDelay: i * 80 + "ms" }}>
+                <div className="flex items-center gap-2.5">
+                  <span className={"flex size-9 items-center justify-center rounded-full text-paper shadow-md " + TILE[ACCENTS[i % 4]]}>
+                    {r.done ? <MIcon name="check" className="size-4" /> : <span className="font-mono text-sm font-semibold">{i + 1}</span>}
                   </span>
                   <span className="font-mono text-[10px] uppercase tracking-wider text-ink-hush">{r.q}</span>
                 </div>
