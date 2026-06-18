@@ -7,7 +7,8 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { Icons } from "../../_components/Icons";
 import { ErrorModal } from "../../_components/ErrorModal";
 import { parseApiError, type ParsedError } from "@/lib/error-parser";
-import { isWarehouseKindEnabled } from "@/lib/features";
+import { isWarehouseKindEnabled, LOCALE } from "@/lib/features";
+import { t } from "@/lib/i18n";
 
 /**
  * Multi-warehouse архитектура (май 2026):
@@ -25,6 +26,11 @@ import { isWarehouseKindEnabled } from "@/lib/features";
  * .com скроет Ozon/WB. Google Sheet — ручной источник, доступен везде.
  * .com добавляет Shopify (один склад на магазин, остатки+цены через Admin GraphQL);
  * на РФ-сборке карточка Shopify скрыта тем же фильтром.
+ *
+ * i18n: на EN рендерятся только карточки Google Sheet + Shopify (Ozon/WB скрыты
+ * фильтром), поэтому переведена лишь общая обвязка + Sheet/Shopify. Инструкции
+ * Ozon/WB, их карточки, PairSuggestModal и WipPanel остаются на русском —
+ * на EN-сборке этот код не выполняется.
  */
 type WarehouseKind = "ozon_fbo" | "ozon_fbs" | "wb_fbo" | "wb_fbs" | "google_sheet" | "shopify";
 
@@ -70,13 +76,13 @@ const WAREHOUSES: WarehouseMeta[] = [
   {
     kind: "google_sheet",
     title: "Google Sheet",
-    text: "Анализ вашего склада через Google Sheet с остатками и ценами.",
+    text: t("connections.new.cardText.googleSheet"),
     dot: "#0F9D58", status: "ready",
   },
   {
     kind: "shopify",
     title: "Shopify",
-    text: "Анализ остатков и цен магазина Shopify через Admin API (товары и их варианты).",
+    text: t("connections.new.cardText.shopify"),
     dot: "#95BF47", status: "ready",
   },
 ];
@@ -90,16 +96,16 @@ export default function NewConnectionPage() {
   return (
     <>
       <Link href={"/connections" as any} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition mb-4">
-        <span className="rotate-180"><Icons.ArrowRight size={12} /></span> К складам
+        <span className="rotate-180"><Icons.ArrowRight size={12} /></span> {t("connections.new.back")}
       </Link>
 
       <div className="mb-8">
         <div className="inline-flex items-center gap-2 mb-2">
           <span className="size-1 rounded-full bg-lime-deep" />
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">Новый склад</span>
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-lime-deep font-semibold">{t("connections.new.title")}</span>
         </div>
-        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">Новый склад</h1>
-        <p className="mt-1 text-ink-muted text-sm">Выбери источник данных. Каждый склад анализируется отдельно — данные не пересекаются.</p>
+        <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium">{t("connections.new.title")}</h1>
+        <p className="mt-1 text-ink-muted text-sm">{t("connections.new.subtitle")}</p>
       </div>
 
       {!kind ? (
@@ -159,7 +165,7 @@ function WarehouseCard({ warehouse, onClick }: { warehouse: WarehouseMeta; onCli
         <span className="size-3 rounded-full" style={{ background: warehouse.dot }} />
         {wip ? (
           <span className="font-mono text-[9.5px] text-orange uppercase tracking-[0.18em] font-semibold border border-orange/30 bg-orange/10 px-2 py-0.5 rounded">
-            скоро
+            {t("connections.new.card.soon")}
           </span>
         ) : (
           <span className="font-mono text-[9.5px] text-lime-deep uppercase tracking-[0.18em] font-semibold">ready</span>
@@ -168,7 +174,7 @@ function WarehouseCard({ warehouse, onClick }: { warehouse: WarehouseMeta; onCli
       <div className="mt-4 font-display text-xl font-medium text-ink">{warehouse.title}</div>
       <p className="mt-2 text-sm text-ink-muted leading-relaxed">{warehouse.text}</p>
       <div className="mt-4 flex items-center gap-1.5 text-xs font-mono text-ink-hush transition">
-        <span>{wip ? "узнать больше" : "подключить"}</span>
+        <span>{wip ? t("connections.new.card.learnMore") : t("connections.new.card.connect")}</span>
         <Icons.ArrowRight size={11} />
       </div>
     </button>
@@ -237,7 +243,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
     setModalError(null);
 
     if (!name.trim()) {
-      setModalError({ kind: "validation", title: "Название склада обязательно", message: "Укажите название, чтобы потом найти склад в списке." });
+      setModalError({ kind: "validation", title: t("connections.new.err.nameRequired.title"), message: t("connections.new.err.nameRequired.message") });
       return;
     }
 
@@ -246,7 +252,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
       const supabase = createSupabaseBrowserClient();
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
-        setModalError({ kind: "permission", title: "Сессия истекла", message: "Войдите заново чтобы продолжить." });
+        setModalError({ kind: "permission", title: t("connections.new.err.sessionExpired.title"), message: t("connections.new.err.sessionExpired.message") });
         return;
       }
 
@@ -271,12 +277,12 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
         if (createRes.status === 402 || data?.code === "warehouse_limit_reached") {
           setModalError({
             kind: "permission",
-            title: "Лимит складов достигнут",
-            message: `Ваш тариф позволяет ${data?.limit ?? "?"} складов. Обновите тариф в разделе "Тарифы и оплата".`,
+            title: t("connections.new.err.limit.title"),
+            message: t("connections.new.err.limit.message", { limit: data?.limit ?? "?" }),
           });
           return;
         }
-        setModalError(parseApiError(data, "Не удалось создать склад"));
+        setModalError(parseApiError(data, t("connections.new.err.createFailed")));
         return;
       }
       const conn = await createRes.json() as { id: string };
@@ -284,12 +290,12 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
       const res = await fetch(`/api/connections/${conn.id}/sync`, { method: "POST" });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setModalError(parseApiError(data, "Первая синхронизация не прошла"));
+        setModalError(parseApiError(data, t("connections.new.err.firstSyncFailed")));
         return;
       }
       onDone();
     } catch (err: any) {
-      setModalError(parseApiError(err?.message || String(err), "Не удалось связаться с сервером"));
+      setModalError(parseApiError(err?.message || String(err), t("connections.sync.errNetwork")));
     } finally {
       setLoading(false);
     }
@@ -299,7 +305,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
     <>
       <form onSubmit={handleSubmit} className="rounded-2xl border border-line bg-paper p-6 md:p-8 space-y-5">
         <button type="button" onClick={onCancel} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition">
-          <span className="rotate-180"><Icons.ArrowRight size={12} /></span> К выбору
+          <span className="rotate-180"><Icons.ArrowRight size={12} /></span> {t("connections.new.toChoice")}
         </button>
 
         <h2 className="font-display text-2xl md:text-3xl tracking-tight font-medium">{warehouseTitle(kind)}</h2>
@@ -311,13 +317,13 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
 
         <div>
           <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">
-            Название склада <span className="text-rose">*</span>
+            {t("connections.new.nameLabel")} <span className="text-rose">*</span>
           </label>
           <input
             required
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder='Название вашего склада, например: "Склад магазина (через FBS)"'
+            placeholder={t("connections.new.namePlaceholder")}
             className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition"
             maxLength={200}
           />
@@ -327,14 +333,14 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
           <>
             <div>
               <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Sheet ID</label>
-              <input required value={sheetId} onChange={(e) => setSheetId(e.target.value)} placeholder="из ссылки на таблицу"
+              <input required value={sheetId} onChange={(e) => setSheetId(e.target.value)} placeholder={t("connections.new.sheet.idPlaceholder")}
                 className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono text-sm focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
             </div>
             <div>
               <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Range</label>
               <input required value={sheetRange} onChange={(e) => setSheetRange(e.target.value)}
                 className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono text-sm focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
-              <p className="mt-1.5 font-mono text-[11px] text-ink-hush">Колонки: артикул, наименование, цена, сток, snapshot_time (опц.).</p>
+              <p className="mt-1.5 font-mono text-[11px] text-ink-hush">{t("connections.new.sheet.rangeHint")}</p>
             </div>
           </>
         )}
@@ -377,7 +383,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
         {isShopify && (
           <>
             <div>
-              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Домен магазина</label>
+              <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">{t("connections.new.shopify.domainLabel")}</label>
               <input required value={shop} onChange={(e) => setShop(e.target.value)} placeholder="mystore.myshopify.com"
                 className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono text-sm focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
             </div>
@@ -385,14 +391,14 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
               <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">Admin API access token</label>
               <input required type="password" value={accessToken} onChange={(e) => setAccessToken(e.target.value)} placeholder="shpat_..."
                 className="w-full rounded-lg border border-line bg-bg-soft px-4 py-2.5 text-ink font-mono focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
-              <p className="mt-1.5 font-mono text-[11px] text-ink-hush">Токен из custom app магазина, начинается с shpat_. Достаточно прав read_products.</p>
+              <p className="mt-1.5 font-mono text-[11px] text-ink-hush">{t("connections.new.shopify.tokenHint")}</p>
             </div>
           </>
         )}
 
         <button type="submit" disabled={loading}
           className="w-full inline-flex items-center justify-center gap-2 rounded-lg bg-ink text-paper px-4 py-3 font-semibold hover:bg-ink-soft disabled:opacity-50 transition">
-          {loading ? "Подключаем…" : (<>Подключить и синхронизировать <Icons.ArrowRight /></>)}
+          {loading ? t("connections.new.submitting") : (<>{t("connections.new.submit")} <Icons.ArrowRight /></>)}
         </button>
       </form>
 
@@ -505,6 +511,47 @@ function WbInstructions({ isFbs }: { isFbs: boolean }) {
 }
 
 function SheetInstructions() {
+  if (LOCALE === "en") {
+    return (
+      <div className="rounded-xl border border-line bg-bg-soft p-4 md:p-5 text-sm">
+        <h3 className="font-display text-base font-medium text-ink mb-3">How to share access and fill in the fields</h3>
+        <p className="text-ink-soft mb-2">
+          Google Sheet → <b>File → Share → Share with others</b> → <b>General access → Anyone with the link</b> → <b>Copy link</b>.
+        </p>
+        <div className="space-y-3">
+          <div>
+            <div className="font-medium text-ink mb-1">1. Sheet ID — inside the link</div>
+            <p className="text-ink-muted">Example link:</p>
+            <code className="block bg-paper border border-line rounded px-2 py-1 mt-1 font-mono text-[11px] text-ink-soft break-all">
+              https://docs.google.com/spreadsheets/d/<span className="text-lime-deep font-semibold">1XDhI5m7F0adlN8petoJhkX5CGHRQxLRaBezPcTzOaY</span>/edit?usp=sharing
+            </code>
+            <p className="mt-2 text-ink-muted">
+              Sheet&nbsp;ID:{" "}
+              <code className="bg-paper border border-line rounded px-1.5 py-0.5 font-mono text-[11px]">
+                1XDhI5m7F0adlN8petoJhkX5CGHRQxLRaBezPcTzOaY
+              </code>
+            </p>
+          </div>
+          <div>
+            <div className="font-medium text-ink mb-1">2. Range — the cell range with columns</div>
+            <p className="text-ink-muted">
+              Column names with data: <b>SKU, Name, Price, Stock</b>.
+            </p>
+            <p className="mt-1 text-ink-muted">
+              Columns do not have to be adjacent (e.g. A, B, F, H) — you choose which column holds which field, and we only read the specified range.
+            </p>
+            <p className="mt-1 text-ink-muted">
+              Example:{" "}
+              <code className="bg-paper border border-line rounded px-1.5 py-0.5 font-mono text-[11px]">
+                Sheet1!A:E
+              </code>
+              , where <b>Sheet1</b> is the sheet name, <b>!</b> is the separator, and <b>A:E</b> is the cell range with data.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="rounded-xl border border-line bg-bg-soft p-4 md:p-5 text-sm">
       <h3 className="font-display text-base font-medium text-ink mb-3">Как открыть доступ и заполнить поля</h3>
@@ -548,6 +595,26 @@ function SheetInstructions() {
 }
 
 function ShopifyInstructions() {
+  if (LOCALE === "en") {
+    return (
+      <div className="rounded-xl border border-line bg-bg-soft p-4 md:p-5 text-sm">
+        <h3 className="font-display text-base font-medium text-ink mb-3">How to get an access token</h3>
+        <p className="text-ink-soft mb-2">
+          Shopify admin → <b>Settings → Apps and sales channels → Develop apps</b> → <b>Create an app</b>.
+        </p>
+        <ol className="list-decimal list-inside space-y-1 text-ink-muted">
+          <li>App name — anything you like</li>
+          <li><b>Configuration → Admin API integration</b> → grant the <b>read_products</b> scope</li>
+          <li>Click <b>Install app</b></li>
+          <li><b>API credentials</b> → copy the <b>Admin API access token</b> (starts with <code className="bg-paper border border-line rounded px-1 py-0.5 font-mono text-[11px]">shpat_</code>)</li>
+          <li>Store domain — like <b>mystore.myshopify.com</b></li>
+        </ol>
+        <p className="mt-3 text-[11px] text-ink-hush">
+          The token is shown only once. Read-only catalog access — the service cannot change products or prices.
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="rounded-xl border border-line bg-bg-soft p-4 md:p-5 text-sm">
       <h3 className="font-display text-base font-medium text-ink mb-3">Как получить access token</h3>
