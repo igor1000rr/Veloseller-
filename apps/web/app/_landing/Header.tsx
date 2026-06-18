@@ -8,6 +8,7 @@ import Link from "next/link";
 import { Icons } from "../_components/Icons";
 import MobileMenu from "../_components/MobileMenu";
 import { t } from "@/lib/i18n";
+import { isEn } from "./data";
 
 export default function LandingHeader({ isAuthed }: { isAuthed: boolean }) {
   return (
