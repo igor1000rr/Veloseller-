@@ -162,6 +162,76 @@ def _stop_recalc_workers() -> None:
     _recalc_queue = None
 
 
+# --- Глобальный лимит параллельных синков (выставка / залп ручных синков) -----
+# В отличие от ночного крона (_job_sync_active_connections крутит синки
+# ПОСЛЕДОВАТЕЛЬНО в одном потоке), ручные синки через /ingest/* уходят в
+# background_tasks.add_task → Starlette гонит их в anyio-threadpool (до 40
+# одновременно). Под залпом (синк всех складов разом / демо) это сетевые fetch
+# + пачки insert в БД → спайк RAM/CPU и пула соединений Postgres. Тот же приём,
+# что и с пересчётом: пул из SYNC_CONCURRENCY потоков + очередь. Лишние синки
+# ждут в очереди; статус склада 'syncing' держит per-connection лок, а
+# _job_reset_stuck_syncing подчистит, если процесс упал с непустой очередью.
+#
+# Активируется в lifespan (прод под uvicorn). В тестах TestClient без `with`
+# lifespan не стартует → _sync_queue=None → старый путь add_task (CI без изменений).
+_SYNC_CONCURRENCY = int(_os.environ.get("SYNC_CONCURRENCY", "4"))
+_sync_queue: "Optional[_queue.Queue]" = None
+_sync_threads: list[threading.Thread] = []
+
+
+def _sync_worker_loop() -> None:
+    q = _sync_queue
+    if q is None:
+        return
+    while True:
+        item = q.get()
+        try:
+            if item is None:  # sentinel остановки
+                return
+            fn, args = item
+            fn(*args)
+        except Exception:
+            logger.exception("sync queue worker crashed")
+        finally:
+            q.task_done()
+
+
+def _start_sync_workers() -> None:
+    global _sync_queue
+    if _sync_queue is not None or _SYNC_CONCURRENCY < 1:
+        return
+    _sync_queue = _queue.Queue()
+    for _ in range(_SYNC_CONCURRENCY):
+        t = threading.Thread(target=_sync_worker_loop, name="sync-worker", daemon=True)
+        t.start()
+        _sync_threads.append(t)
+    logger.info("sync worker pool started", extra={"concurrency": _SYNC_CONCURRENCY})
+
+
+def _stop_sync_workers() -> None:
+    global _sync_queue
+    q = _sync_queue
+    if q is None:
+        return
+    for _ in list(_sync_threads):
+        q.put(None)
+    _sync_threads.clear()
+    _sync_queue = None
+
+
+def _dispatch_sync(background_tasks: BackgroundTasks, fn: Callable[..., None], *args) -> None:
+    """Синк → в пул (если поднят в lifespan), иначе fallback в FastAPI background tasks.
+
+    Пул держит глобальный потолок одновременных синков (SYNC_CONCURRENCY); очередь
+    создаёт backpressure под залпом. Fallback (None-очередь) сохраняет прежнее
+    поведение в юнит-тестах, где lifespan не запускается.
+    """
+    if _sync_queue is not None:
+        _sync_queue.put_nowait((fn, args))
+    else:
+        background_tasks.add_task(fn, *args)
+
+
 def _is_production() -> bool:
     """Сервер в проде? Проверяет ENV и SENTRY_ENV (fallback)."""
     env = _os.environ.get("ENV", _os.environ.get("SENTRY_ENV", "development")).lower()
