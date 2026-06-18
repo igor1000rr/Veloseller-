@@ -104,6 +104,64 @@ SYNC_FAILURE_AUTO_PAUSE_THRESHOLD = 3
 SYNC_ERROR_NOTIFY_COOLDOWN_HOURS = 24
 
 
+# --- Глобальный лимит параллельных пересчётов (выставка / залп синков) --------
+# Пересчёт грузит в память всю историю продавца и считает на Python (GIL). Без
+# ограничения N одновременных пересчётов разъедают RAM (риск OOM) и душат event-
+# loop, из-за чего ingest-ручки начинают ловить таймаут. Решение: пул из
+# RECALC_CONCURRENCY выделенных потоков + thread-safe очередь. Лишние пересчёты
+# ждут в очереди и считаются чуть позже — RAM/CPU ограничены, воркер живой,
+# ingest остаётся отзывчивым (recalc уходит с anyio-threadpool в свой пул).
+#
+# Активируется в lifespan (т.е. под uvicorn в проде). В юнит-тестах TestClient
+# поднят без `with`, lifespan не стартует → _recalc_queue=None → старый путь
+# background_tasks.add_task (поведение 1:1, CI не меняется).
+import queue as _queue
+import threading
+
+_RECALC_CONCURRENCY = int(_os.environ.get("RECALC_CONCURRENCY", "3"))
+_recalc_queue: "Optional[_queue.Queue]" = None
+_recalc_threads: list[threading.Thread] = []
+
+
+def _recalc_worker_loop() -> None:
+    q = _recalc_queue
+    if q is None:
+        return
+    while True:
+        seller_id = q.get()
+        try:
+            if seller_id is None:  # sentinel остановки
+                return
+            _run_recalc_bg(seller_id)
+        except Exception:
+            logger.exception("recalc queue worker crashed", extra={"seller_id": seller_id})
+        finally:
+            q.task_done()
+
+
+def _start_recalc_workers() -> None:
+    global _recalc_queue
+    if _recalc_queue is not None or _RECALC_CONCURRENCY < 1:
+        return
+    _recalc_queue = _queue.Queue()
+    for _ in range(_RECALC_CONCURRENCY):
+        t = threading.Thread(target=_recalc_worker_loop, name="recalc-worker", daemon=True)
+        t.start()
+        _recalc_threads.append(t)
+    logger.info("recalc worker pool started", extra={"concurrency": _RECALC_CONCURRENCY})
+
+
+def _stop_recalc_workers() -> None:
+    global _recalc_queue
+    q = _recalc_queue
+    if q is None:
+        return
+    for _ in list(_recalc_threads):
+        q.put(None)
+    _recalc_threads.clear()
+    _recalc_queue = None
+
+
 def _is_production() -> bool:
     """Сервер в проде? Проверяет ENV и SENTRY_ENV (fallback)."""
     env = _os.environ.get("ENV", _os.environ.get("SENTRY_ENV", "development")).lower()
