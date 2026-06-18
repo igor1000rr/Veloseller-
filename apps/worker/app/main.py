@@ -882,7 +882,17 @@ def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: b
             _mark_recalc_error(seller_id, str(e)[:500])
             raise
 
-    background_tasks.add_task(_run_recalc_bg, seller_id)
+    if _recalc_queue is not None:
+        # Ставим running-плейсхолдер сразу (до того как воркер-поток заберёт
+        # задачу из очереди), чтобы /status и дедуп видели расчёт без гонки.
+        _running_recalcs[seller_id] = {
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "status": "running", "result": None, "error": None,
+            "progress": {"phase": "queued"},
+        }
+        _recalc_queue.put_nowait(seller_id)
+    else:
+        background_tasks.add_task(_run_recalc_bg, seller_id)
     return {
         "started": True, "status": "running",
         "started_at": datetime.now(timezone.utc).isoformat(),
