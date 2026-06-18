@@ -95,13 +95,13 @@ export default async function DashboardOverview({ searchParams }: {
       .eq("seller_id", user.id)
       .eq("connection_id", currentWarehouseId)
       .order("period_end", { ascending: false })
-      .limit(14),
+      .limit(60),
     supabase
       .from("store_metrics")
       .select("period_start,period_end,warehouse_health_score,lost_revenue,total_inventory_value,store_frozen_inventory_value,dead_inventory_sku_count,potential_revenue")
       .eq("seller_id", user.id)
       .order("period_end", { ascending: false })
-      .limit(14),
+      .limit(60),
   ]);
   const warehouseHistory = warehouseHistoryRes.data ?? [];
   const storeHistory = storeHistoryRes.data ?? [];
