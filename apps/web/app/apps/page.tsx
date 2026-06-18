@@ -6,6 +6,7 @@ import LandingFooter from "../_landing/Footer";
 import ScrollToTopButton from "../_components/ScrollToTopButton";
 import AppsPhoneDemo from "../_components/AppsPhoneDemo";
 import AppsInstallTabs from "../_components/AppsInstallTabs";
+import { MIcon } from "../_components/MarketingIcons";
 import { Eyebrow } from "../_landing/ui";
 
 export const dynamic = "force-dynamic";
@@ -32,10 +33,10 @@ const HOVER: Record<string, string> = {
 const ACCENTS = ["lime", "azure", "emerald", "orange"];
 
 const FEATURES = [
-  { title: "Дашборд на ходу", text: "Остатки, TVelo, дни покрытия и health score — всё под рукой, без ноутбука." },
-  { title: "Push о дозаказе", text: "Уведомления: товар пора заказать, остаток упал, синхронизация сломалась." },
-  { title: "Склады WB и Ozon", text: "Быстрый просмотр по складам Wildberries и Ozon FBO/FBS в одном окне." },
-  { title: "Прогноз нехватки", text: "Сколько дней до нуля и сколько везти — расчёт в кармане." },
+  { icon: "dashboard", title: "Дашборд на ходу", text: "Остатки, TVelo, дни покрытия и health score — всё под рукой, без ноутбука." },
+  { icon: "bell", title: "Push о дозаказе", text: "Уведомления: товар пора заказать, остаток упал, синхронизация сломалась." },
+  { icon: "box", title: "Склады WB и Ozon", text: "Быстрый просмотр по складам Wildberries и Ozon FBO/FBS в одном окне." },
+  { icon: "chart", title: "Прогноз нехватки", text: "Сколько дней до нуля и сколько везти — расчёт в кармане." },
 ];
 
 export default async function AppsPage() {
@@ -46,8 +47,8 @@ export default async function AppsPage() {
   return (
     <main className="relative bg-paper-warm text-ink overflow-x-hidden">
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-noise opacity-100 mix-blend-multiply" />
-      <div aria-hidden className="pointer-events-none fixed -top-40 -left-40 size-[700px] rounded-full blur-3xl opacity-50" style={{ background: "radial-gradient(closest-side, rgba(132,204,22,0.25), transparent 70%)" }} />
-      <div aria-hidden className="pointer-events-none fixed -bottom-40 -right-40 size-[600px] rounded-full blur-3xl opacity-40" style={{ background: "radial-gradient(closest-side, rgba(2,132,199,0.15), transparent 70%)" }} />
+      <div aria-hidden className="pointer-events-none fixed -top-40 -left-40 size-[700px] rounded-full blur-3xl opacity-50 float" style={{ background: "radial-gradient(closest-side, rgba(132,204,22,0.28), transparent 70%)" }} />
+      <div aria-hidden className="pointer-events-none fixed -bottom-40 -right-40 size-[600px] rounded-full blur-3xl opacity-40 float-slow" style={{ background: "radial-gradient(closest-side, rgba(2,132,199,0.18), transparent 70%)" }} />
 
       <LandingHeader isAuthed={isAuthed} />
 
@@ -87,7 +88,7 @@ export default async function AppsPage() {
               </span>
             </div>
           </div>
-          <div className="lg:col-span-5 reveal" style={{ animationDelay: "120ms" }}>
+          <div className="lg:col-span-5 reveal" style={{ animationDelay: "140ms" }}>
             <AppsPhoneDemo />
           </div>
         </div>
@@ -106,7 +107,9 @@ export default async function AppsPage() {
               const a = ACCENTS[i % 4];
               return (
                 <div key={f.title} className={"group reveal rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 transition hover:-translate-y-1 hover:shadow-xl " + HOVER[a]} style={{ animationDelay: i * 80 + "ms" }}>
-                  <div className={"flex size-11 items-center justify-center rounded-xl font-mono text-sm font-semibold transition group-hover:scale-110 " + CHIP[a]}>{String(i + 1).padStart(2, "0")}</div>
+                  <div className={"flex size-12 items-center justify-center rounded-2xl transition group-hover:scale-110 group-hover:-rotate-3 " + CHIP[a]}>
+                    <MIcon name={f.icon} className="size-6" />
+                  </div>
                   <h3 className="mt-5 font-display text-base sm:text-lg md:text-xl leading-tight font-medium">{f.title}</h3>
                   <p className="mt-2 text-sm text-ink-muted leading-relaxed">{f.text}</p>
                 </div>
