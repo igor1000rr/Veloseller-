@@ -150,3 +150,43 @@ export function ScreenForecast() {
     </div>
   );
 }
+
+const HOME_ICONS = ["bg-rose/70", "bg-azure/70", "bg-orange/70", "bg-emerald/70", "bg-ink/50", "bg-lime-deep/70", "bg-azure/50"];
+
+export function ScreenHome() {
+  return (
+    <div className="-mx-3 -mt-2 -mb-5">
+      <div className="flex min-h-[470px] flex-col bg-gradient-to-b from-azure/25 via-lime-soft to-emerald/20 px-5 pt-6 pb-8">
+        <div className="text-center text-ink/80">
+          <div className="font-display text-4xl font-medium leading-none">9:41</div>
+          <div className="mt-1 font-mono text-[11px]">четверг, 18 июня</div>
+        </div>
+        <div className="mt-9 grid grid-cols-4 gap-x-4 gap-y-5">
+          {HOME_ICONS.map((c, i) => (
+            <div key={i} className="flex flex-col items-center gap-1.5">
+              <span className={"size-11 rounded-[14px] shadow-sm " + c} />
+              <span className="h-1.5 w-7 rounded-full bg-paper/50" />
+            </div>
+          ))}
+          <div className="flex flex-col items-center gap-1.5">
+            <span className="flex size-11 items-center justify-center rounded-[14px] bg-gradient-to-br from-lime-deep to-emerald shadow-lg ring-2 ring-paper">
+              <span className="font-display text-base font-semibold text-paper">V</span>
+            </span>
+            <span className="font-mono text-[8px] text-ink/70">Veloseller</span>
+          </div>
+        </div>
+        <div className="mx-auto mt-7 flex w-fit items-center gap-1.5 rounded-full bg-paper/85 px-3 py-1.5 shadow-sm">
+          <span className="size-1.5 rounded-full bg-lime-deep" />
+          <span className="font-mono text-[9px] text-ink-soft">добавлено на экран «Домой»</span>
+        </div>
+        <div className="mt-auto rounded-[26px] bg-paper/35 p-2.5">
+          <div className="flex justify-around">
+            {["bg-azure/70", "bg-emerald/70", "bg-orange/70", "bg-rose/70"].map((c, i) => (
+              <span key={i} className={"size-10 rounded-[13px] shadow-sm " + c} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
