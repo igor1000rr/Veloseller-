@@ -1,10 +1,31 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 // Каталоги переводов: apps/web/messages/{ru,en}/<namespace>.json.
-// Путь резолвим от файла теста, не от cwd.
-const MESSAGES_DIR = fileURLToPath(new URL("../../messages", import.meta.url));
+// Под vitest (vite-node) import.meta.url бывает не со схемой file:// →
+// fileURLToPath кидает. Поэтому пробуем варианты и берём существующий каталог.
+function resolveMessagesDir(): string {
+  const candidates: string[] = [];
+  try {
+    candidates.push(fileURLToPath(new URL("../../messages", import.meta.url)));
+  } catch {
+    /* import.meta.url не file:// — идём по фолбэкам ниже */
+  }
+  candidates.push(path.resolve(process.cwd(), "messages"));
+  candidates.push(path.resolve(process.cwd(), "apps/web/messages"));
+  for (const dir of candidates) {
+    try {
+      if (readdirSync(dir).length > 0) return dir;
+    } catch {
+      /* нет такой директории — пробуем следующую */
+    }
+  }
+  return candidates[candidates.length - 1];
+}
+
+const MESSAGES_DIR = resolveMessagesDir();
 
 // CLDR plural-категории. В en реально используются one/other, в ru — one/few/many
 // (см. plural() в lib/i18n.ts), поэтому набор форм заведомо разный по языкам —
