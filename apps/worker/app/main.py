@@ -874,8 +874,8 @@ def ingest_shopify(connection_id: str, background_tasks: BackgroundTasks) -> dic
         raise HTTPException(400, "config.shop и config.access_token обязательны")
     if not _try_acquire_sync_lock(sb, connection_id):
         return {"started": False, "status": "running", "message": "Sync уже идёт или склад на паузе"}
-    background_tasks.add_task(
-        _run_shopify_sync_bg,
+    _dispatch_sync(
+        background_tasks, _run_shopify_sync_bg,
         connection_id, conn.data["seller_id"], shop, access_token,
     )
     return {"started": True, "status": "running", "message": "Sync запущен в фоне"}
