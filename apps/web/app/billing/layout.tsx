@@ -10,7 +10,7 @@ export const revalidate = 0;
 export default async function BillingLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  if (!user) redirect("/login");
 
   const [{ count: unreadAlerts }, { data: seller }, warehouses, selected] = await Promise.all([
     supabase.from("alerts").select("id", { count: "exact", head: true }).is("acknowledged_at", null),
