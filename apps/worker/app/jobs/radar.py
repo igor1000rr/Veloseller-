@@ -33,10 +33,12 @@
 from __future__ import annotations
 
 import logging
+import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app.db import fetch_all, get_supabase
+from app.radar.suggest_provider import check_suggest_cached
 from app.radar.wordstat_matcher import (
     DEFAULT_MIN_FREQUENCY,
     match_against_model_set,
