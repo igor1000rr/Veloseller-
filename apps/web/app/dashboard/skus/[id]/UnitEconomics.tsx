@@ -22,6 +22,7 @@ const L = {
   commission: isEn ? "Commission" : "Комиссия",
   logistics: isEn ? "Logistics" : "Логистика",
   acquiring: isEn ? "Acquiring" : "Эквайринг",
+  tax: isEn ? "Tax" : "Налог",
   ads: isEn ? "Ads" : "Реклама",
   profit: isEn ? "Profit / unit" : "Прибыль / шт",
   margin: isEn ? "Margin" : "Маржа",
