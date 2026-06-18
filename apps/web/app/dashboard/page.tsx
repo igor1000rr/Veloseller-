@@ -107,7 +107,10 @@ export default async function DashboardOverview({ searchParams }: {
   const storeHistory = storeHistoryRes.data ?? [];
 
   const usingFallback = warehouseHistory.length === 0;
-  const chartHistory = usingFallback ? storeHistory : warehouseHistory;
+  // Графики динамики: warehouse_metrics/store_metrics пишутся по строке на каждое
+  // окно (7/30/90 дн) с общим period_end — берём только строки выбранного периода
+  // и схлопываем до одной точки на день (иначе дубли дат + провалы на графике).
+  const chartHistory = buildChartHistory(usingFallback ? storeHistory : warehouseHistory, periodDays);
 
   const velRows = dashboardComputed.velRows;
   const latestByProduct = new Map<string, { velocity: number; confidence: number | null }>();
