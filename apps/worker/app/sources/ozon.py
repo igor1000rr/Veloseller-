@@ -143,6 +143,15 @@ def _fetch_ozon_category_tree(cli: httpx.Client, client_id: str, api_key: str) -
 
         _walk(data.get("result"))
         logger.info("ozon category tree: %d categories, %d types", len(cat_by_id), len(type_by_id))
+    except httpx.HTTPStatusError as e:
+        if e.response is not None and e.response.status_code == 403:
+            logger.warning(
+                "ozon category tree: 403 Forbidden — у API-ключа нет прав на методы "
+                "категорий (Seller API: нужна роль с доступом к description-category). "
+                "Категории по этому складу останутся пустыми; бренд и остатки не затронуты."
+            )
+        else:
+            logger.warning("ozon category tree fetch failed: %s", e)
     except Exception as e:
         logger.warning("ozon category tree fetch failed: %s", e)
     return cat_by_id, type_by_id
