@@ -11,6 +11,7 @@ export const revalidate = 0;
 
 type TveloRow = {
   product_id: string;
+  period_start: string;
   period_end: string;
   adjusted_velocity: number;
   products: { sku: string; product_name: string } | { sku: string; product_name: string }[] | null;
