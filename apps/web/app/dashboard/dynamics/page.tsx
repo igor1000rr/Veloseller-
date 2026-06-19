@@ -101,7 +101,7 @@ export default async function DynamicsPage({ searchParams }: {
   // Один запрос с фильтром по складу + по дате. БЕЗ пагинации — после фильтра данных немного.
   const { data: rowsData, error: rowsErr } = await supabase
     .from("tvelo_metrics")
-    .select("product_id,period_end,adjusted_velocity,products!inner(sku,product_name,seller_id,connection_id)")
+    .select("product_id,period_start,period_end,adjusted_velocity,products!inner(sku,product_name,seller_id,connection_id)")
     .eq("products.seller_id", user.id)
     .eq("products.connection_id", currentWarehouseId)
     .gte("period_end", lookbackIso)
