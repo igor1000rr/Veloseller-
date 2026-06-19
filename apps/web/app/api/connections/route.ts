@@ -15,7 +15,7 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  *   - shopify: access_token
  *
  * Лимит складов берётся из sellers.plan_warehouses_limit (зависит от тарифа):
- *   trial=15, starter=2, growth=6, pro=15
+ *   trial=3, starter=2, growth=6, pro=15
  *
  * Backward compat: если warehouse_kind не пришёл, парсим из source+marketplace.
  */
