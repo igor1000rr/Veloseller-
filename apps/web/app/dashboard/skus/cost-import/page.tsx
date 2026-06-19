@@ -48,6 +48,7 @@ export default async function CostImportPage() {
             kindLabel: warehouseKindLabel(w.warehouse_kind),
           }))}
           defaultWarehouseId={selected?.id ?? warehouses[0].id}
+          defaultTaxRate={seller?.tax_rate != null ? Number(seller.tax_rate) : null}
         />
       )}
     </div>
