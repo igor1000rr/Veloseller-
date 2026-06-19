@@ -184,6 +184,7 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
     const p = payload[0].payload;
     const isoDate = p.date as string;
     const events = cl?.[isoDate] ?? [];
+    const activeCalForTip = calEvents.filter((e) => e.startDate <= isoDate && (e.endDate ?? e.startDate) >= isoDate);
     const pc = priceChanges.find((x) => x.date === isoDate);
 
     return (
