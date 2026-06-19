@@ -57,6 +57,10 @@ export default async function HealthPage() {
   const total = connectionsTotal ?? 0;
   const healthScore = total > 0 ? Math.round(((connectionsActive ?? 0) / total) * 100) : 100;
 
+  // Здоровье онбординга: триггер sellers на месте + нет осиротевших юзеров (auth.users без sellers).
+  const onboarding = (Array.isArray(onboardingHealth) ? onboardingHealth[0] : onboardingHealth) as { trigger_present?: boolean; orphan_count?: number } | null | undefined;
+  const onboardingOk = !!onboarding?.trigger_present && Number(onboarding?.orphan_count ?? 0) === 0;
+
   // Stale connections: 24h+ без sync (или sync вообще не было)
   const connAge = (connectionsAge ?? []) as any[];
   const staleConnections = connAge.filter(c =>
