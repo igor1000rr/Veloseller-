@@ -36,3 +36,23 @@ select u.id, u.email, coalesce(u.raw_user_meta_data->>'display_name', u.email)
 from auth.users u
 left join public.sellers s on s.id = u.id
 where s.id is null;
+
+-- ----------------------------------------------------------------------------
+-- Наблюдаемость: RPC для /admin/health — триггер на месте? сколько сирот без sellers?
+-- SECURITY DEFINER + залочена от anon/authenticated (как admin_connection_data_age).
+-- ----------------------------------------------------------------------------
+create or replace function public.admin_auth_onboarding_health()
+returns table(trigger_present boolean, orphan_count bigint)
+language sql
+security definer
+set search_path to 'public'
+as $
+  select
+    exists(select 1 from pg_trigger
+           where tgrelid='auth.users'::regclass and tgname='on_auth_user_created'
+             and not tgisinternal and tgenabled='O') as trigger_present,
+    (select count(*) from auth.users u left join public.sellers s on s.id=u.id where s.id is null) as orphan_count;
+$;
+
+revoke execute on function public.admin_auth_onboarding_health() from anon, authenticated, public;
+grant execute on function public.admin_auth_onboarding_health() to service_role;
