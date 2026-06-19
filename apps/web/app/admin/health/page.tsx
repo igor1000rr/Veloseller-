@@ -33,6 +33,7 @@ export default async function HealthPage() {
     supabase.from("data_connections").select("id,source,marketplace,name,status,last_error,last_sync_at,seller_id,sellers(email)")
       .eq("status", "error").order("last_sync_at", { ascending: false }).limit(20),
     supabase.rpc("admin_connection_data_age"),
+    supabase.rpc("admin_auth_onboarding_health"),
   ]);
 
   // Hourly distribution за 24ч
