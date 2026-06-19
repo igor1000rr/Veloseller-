@@ -172,3 +172,39 @@ export async function saveCostPrice(
     return { ok: false, error: e?.message ?? "unknown error" };
   }
 }
+
+/**
+ * Сохранить ставку налога на уровне кабинета (sellers.tax_rate). Один процент на
+ * весь кабинет (налоговый режим продавца: УСН/ОСН и т.п.). Применяется ко всем
+ * товарам кабинета — становится дефолтом в блоке Юнит-экономика. Пустое значение
+ * очищает ставку. Пишем только свою строку (id = user.id); RLS sellers_self_update
+ * — defense in depth. Диапазон 0..100.
+ */
+export async function saveSellerTaxRate(rate: number | null): Promise<{ ok: boolean; error?: string }> {
+  let finalRate: number | null = null;
+  if (rate != null) {
+    if (typeof rate !== "number" || !isFinite(rate) || rate < 0 || rate > 100) {
+      return { ok: false, error: "invalid tax rate" };
+    }
+    finalRate = rate;
+  }
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { ok: false, error: "unauthorized" };
+    }
+    const { error } = await supabase
+      .from("sellers")
+      .update({ tax_rate: finalRate })
+      .eq("id", user.id);
+    if (error) {
+      return { ok: false, error: error.message };
+    }
+    // Дефолт налога читает карточка SKU (юнит-экономика).
+    revalidatePath("/dashboard/skus");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "unknown error" };
+  }
+}
