@@ -1,15 +1,18 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { saveSellerTaxRate } from "../actions";
 
 type WarehouseOpt = { id: string; name: string; kindLabel: string };
 
 export function CostImportForm({
   warehouses,
   defaultWarehouseId,
+  defaultTaxRate,
 }: {
   warehouses: WarehouseOpt[];
   defaultWarehouseId: string;
+  defaultTaxRate: number | null;
 }) {
   const router = useRouter();
   const [warehouseId, setWarehouseId] = useState(defaultWarehouseId);
@@ -19,6 +22,12 @@ export function CostImportForm({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<{ matched: number; totalRows: number; unmatched: number } | null>(null);
+
+  // Ставка налога — уровень кабинета (sellers.tax_rate), не привязана к складу.
+  const [taxRate, setTaxRate] = useState(defaultTaxRate != null ? String(defaultTaxRate) : "");
+  const [taxPending, setTaxPending] = useState(false);
+  const [taxError, setTaxError] = useState<string | null>(null);
+  const [taxSaved, setTaxSaved] = useState(false);
 
   const canSubmit = !!file && !!articleCol.trim() && !!costCol.trim() && !pending;
 
@@ -51,6 +60,26 @@ export function CostImportForm({
     } finally {
       setPending(false);
     }
+  };
+
+  // Применить ставку налога ко всему кабинету (sellers.tax_rate) — с подтверждением.
+  const applyTax = async () => {
+    const trimmed = taxRate.trim();
+    let parsed: number | null = null;
+    if (trimmed !== "") {
+      const v = parseFloat(trimmed.replace(",", "."));
+      if (!isFinite(v) || v < 0 || v > 100) { setTaxError("Ставка должна быть числом от 0 до 100"); return; }
+      parsed = v;
+    }
+    const label = parsed != null ? `${parsed}%` : "пустое значение (сбросить ставку)";
+    if (!window.confirm(`Применить ставку налога ${label} ко всем товарам кабинета? Она станет дефолтной в юнит-экономике.`)) return;
+    setTaxPending(true);
+    setTaxError(null);
+    setTaxSaved(false);
+    const res = await saveSellerTaxRate(parsed);
+    setTaxPending(false);
+    if (res.ok) { setTaxSaved(true); router.refresh(); }
+    else { setTaxError(res.error ?? "Не удалось сохранить"); }
   };
 
   return (
@@ -123,6 +152,46 @@ export function CostImportForm({
           </button>
           {error && <span className="text-xs text-rose">{error}</span>}
         </div>
+      </div>
+
+      {/* Ставка налога — отдельный блок: налоговый режим один на кабинет (УСН/ОСН),
+          не зависит от выбранного склада. С подтверждением применяется ко всем
+          товарам кабинета и становится дефолтом в блоке Юнит-экономика. */}
+      <div className="rounded-2xl border border-line bg-paper p-5 sm:p-6 space-y-4">
+        <div>
+          <h2 className="font-display text-lg font-medium text-ink">Ставка налога</h2>
+          <p className="mt-1 text-sm text-ink-muted">
+            Один процент на весь кабинет (например, УСН 6%). Станет дефолтом в
+            юнит-экономике по всем товарам. Себестоимость и комиссию не меняет.
+          </p>
+        </div>
+        <div className="flex items-end gap-3 flex-wrap">
+          <label className="block">
+            <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold">Ставка, %</span>
+            <div className="mt-1.5 flex items-center rounded-lg border border-line bg-paper overflow-hidden focus-within:border-lime-deep">
+              <input
+                type="number"
+                inputMode="decimal"
+                min={0}
+                max={100}
+                value={taxRate}
+                onChange={(e) => { setTaxRate(e.target.value); setTaxSaved(false); setTaxError(null); }}
+                placeholder="Например 6"
+                className="w-28 bg-transparent px-3 py-2 font-mono text-sm text-ink outline-none"
+              />
+              <span className="px-2 text-ink-hush font-mono text-sm select-none">%</span>
+            </div>
+          </label>
+          <button
+            onClick={applyTax}
+            disabled={taxPending}
+            className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-2.5 text-sm font-mono uppercase tracking-wider font-semibold hover:bg-ink-soft disabled:opacity-40 transition"
+          >
+            {taxPending ? "Сохранение…" : "Применить ко всем товарам кабинета"}
+          </button>
+        </div>
+        {taxError && <span className="block text-xs text-rose">{taxError}</span>}
+        {taxSaved && <span className="block text-xs font-mono text-lime-deep">✓ Ставка налога применена ко всему кабинету</span>}
       </div>
 
       {result && (
