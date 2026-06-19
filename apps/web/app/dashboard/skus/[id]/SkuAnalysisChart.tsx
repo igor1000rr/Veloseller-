@@ -101,6 +101,16 @@ export type ChangelogByDate = Record<string, Array<{
   confidence_impact: number | null;
 }>>;
 
+/** Событие календаря для оверлея на графике (оранжевый отрезок по верхней границе). */
+export type SkuChartEvent = {
+  id: string;
+  title: string;
+  startDate: string;
+  endDate: string | null;
+  comment: string | null;
+  source?: string;
+};
+
 const TYPE_LABELS: Record<string, string> = {
   first_snapshot: t("sku.eventType.first"),
   sales_like: t("sku.eventType.sale"),
