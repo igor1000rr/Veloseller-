@@ -79,6 +79,10 @@ export const metadata: Metadata = {
   creator: "Veloseller",
   publisher: "Veloseller",
   category: "business",
+  // Подтверждение домена veloseller.ru для Яндекс.Почты (Yandex 360 для бизнеса).
+  // Next рендерит <meta name="yandex-verification" content="..."> в <head> всех
+  // страниц, включая главную — Яндекс проверяет корень домена.
+  verification: { yandex: "2933574323453523" },
   alternates: { canonical: "/" },
   // Иконки: favicon мульти-формат, apple-touch-icon, PWA-манифест
   icons: {
