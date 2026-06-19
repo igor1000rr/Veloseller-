@@ -334,6 +334,21 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
             strokeWidth={2}
           />
         ))}
+
+        {/* Календарь событий — оранжевый отрезок по верхней границе + точки на концах */}
+        {eventSegments.map((s) => (
+          <ReferenceLine
+            key={`ev-${s.id}`}
+            yAxisId="band"
+            segment={[{ x: s.startLabel, y: s.y }, { x: s.endLabel, y: s.y }]}
+            stroke="#ea580c"
+            strokeWidth={3}
+          />
+        ))}
+        {eventSegments.flatMap((s) => [
+          <ReferenceDot key={`evd1-${s.id}`} yAxisId="band" x={s.startLabel} y={s.y} r={4} fill="#ea580c" stroke="#fff" strokeWidth={1.5} />,
+          <ReferenceDot key={`evd2-${s.id}`} yAxisId="band" x={s.endLabel} y={s.y} r={4} fill="#ea580c" stroke="#fff" strokeWidth={1.5} />,
+        ])}
       </ComposedChart>
     </ResponsiveContainer>
     </div>
