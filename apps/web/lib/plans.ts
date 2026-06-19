@@ -26,7 +26,7 @@ export type BillingPlan = {
 
 const VELOSELLER_PLANS_RU: BillingPlan[] = [
   { id: "trial",   name: "Триал",  price: 0,     period: "30 дней бесплатно",
-    features: ["15 складов", "10 000 SKU на склад", "Весь функционал бесплатно"] },
+    features: ["3 склада", "10 000 SKU на склад", "Весь функционал бесплатно"] },
   { id: "starter", name: "Старт",  price: 2500,  period: "₽/мес",
     features: ["2 склада", "1 000 SKU на склад"] },
   { id: "growth",  name: "Рост",   price: 6900,  period: "₽/мес",
