@@ -37,14 +37,11 @@
   - **2. Числовой sku/nmId + ссылка «открыть на маркетплейсе»** (Igor 09.06 — подтверждено): готовой ссылки в API нет, но есть числовой Ozon `sku` (`/v3/product/info/list`) и WB `nmId`. Хранить под ОТДЕЛЬНОЙ колонкой (напр. `external_sku` + аналогично для WB), НЕ трогая `products.sku` (= offer_id, напр. SFRRNST2). Ссылки: Ozon `ozon.ru/product/<sku>`, WB `wildberries.ru/catalog/<nmId>/detail.aspx`. Кликабельно в карточке + списке. Это же — URL-основа для парсинга витрины (п. 1 и 3), пригодится для сравнения цен.
   - **3. (на будущее) Сравнение цен конкурентов** — по товарам тянуть цены конкурентов с витрины, показывать дельту. Тот же движок.
 - [ ] **Per-warehouse `store_metrics`** — большой рефакторинг `apps/worker/app/jobs/recalc.py` (~3 часа в свежей сессии). Сейчас агрегирует по `seller_id`, после нужно убрать временный баннер «У вас несколько складов» в `/dashboard`
-- [ ] **Stripe cleanup** — удалить мёртвый код `apps/web/app/api/stripe/*` + `apps/web/lib/stripe.ts` + 3 теста на stripe (checkout/portal/webhook). У Claude нет delete tool в gitv2 — Igor делает локально:
+- [x] **Stripe cleanup** — мёртвый код (`app/api/stripe/*`, `lib/stripe.ts`, stripe-тесты), колонки Stripe в `sellers` (миграция 20260619160000) и try-блок в `account/delete` удалены (подтверждено 19.06). Остаётся только убрать неиспользуемую npm-зависимость — локально, lockfile не пересобрать из контейнера:
   ```bash
-  rm -rf apps/web/app/api/stripe apps/web/lib/stripe.ts \
-         apps/web/__tests__/api/stripe-*.test.ts \
-         apps/web/__tests__/lib/stripe.test.ts
-  git add -A && git commit -m "chore: удаление мёртвого Stripe кода" && git push
+  npm pkg delete dependencies.stripe -w apps/web && npm install --legacy-peer-deps
+  git add apps/web/package.json package-lock.json && git commit -m "chore: убрать неиспользуемую зависимость stripe" && git push
   ```
-  Заодно из `apps/web/app/api/account/delete/route.ts` убрать try-блок отмены Stripe subscription (больше неактуально).
 
 ### Средний приоритет
 - [ ] **Robokassa graph** — суточные платежи за 30 дней в `/admin/finance` (когда поедут реальные платежи)
