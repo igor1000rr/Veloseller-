@@ -14,6 +14,8 @@ export default async function CostImportPage() {
 
   const warehouses = await listWarehouses(sb, user.id);
   const selected = await getSelectedWarehouse(sb, user.id);
+  // Ставка налога — уровень кабинета (sellers.tax_rate), прокидываем как дефолт в форму.
+  const { data: seller } = await sb.from("sellers").select("tax_rate").eq("id", user.id).maybeSingle();
 
   return (
     <div className="space-y-6 max-w-2xl">
