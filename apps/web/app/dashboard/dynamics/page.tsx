@@ -121,9 +121,17 @@ export default async function DynamicsPage({ searchParams }: {
   const byProduct = new Map<string, ProductData>();
   const allBuckets = new Set<string>();
 
+  // Берём только 30-дневное окно (period_start = period_end − 29): одна точка на
+  // день, консистентно со списком SKU и дашбордом. Иначе усреднялись бы все три
+  // окна (7/30/90 дн) в одну точку — числа «плавали» и не совпадали с карточкой SKU.
+  const WINDOW_DIFF_DAYS = 29;
   for (const r of rows) {
     const product = Array.isArray(r.products) ? r.products[0] : r.products;
     if (!product) continue;
+    const winDiff = Math.round(
+      (new Date(r.period_end).getTime() - new Date(r.period_start).getTime()) / 86400_000,
+    );
+    if (Math.abs(winDiff - WINDOW_DIFF_DAYS) > 1) continue;
     const bucket = bucketize(r.period_end, period);
     allBuckets.add(bucket);
 
