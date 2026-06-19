@@ -238,6 +238,16 @@ def _fetch_wb_prices(cli: httpx.Client, token: str) -> dict[str, tuple[Decimal, 
                 break
             offset += PRICES_PAGE_LIMIT
         logger.info("WB discounts-prices: %d vendorCodes", len(out))
+    except httpx.HTTPStatusError as e:
+        if e.response is not None and e.response.status_code in (401, 403):
+            logger.warning(
+                "WB discounts-prices: %d Forbidden — у токена нет категории «Цены и скидки» "
+                "(Discounts-Prices API). Цены по FBS-товарам без FBO-остатка не загрузятся. "
+                "Добавьте категорию токену WB и пересинхроните склад.",
+                e.response.status_code,
+            )
+        else:
+            logger.warning("WB discounts-prices fetch failed: %s", e)
     except Exception as e:
         logger.warning("WB discounts-prices fetch failed: %s", e)
     return out
