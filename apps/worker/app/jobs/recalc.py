@@ -42,9 +42,33 @@ _VERBOSE_FAILURES_PER_RECALC = 3
 _MOVEMENT_EVENT_TYPES = {EventType.SALES_LIKE.value, EventType.REPLENISHMENT_LIKE.value}
 
 
-def _seller_timezone(sb, seller_id: str) -> str:
+def _resolve_timezone(tz_name: Optional[str]):
+    """Безопасно резолвит таймзону селлера в tzinfo.
+
+    Поддерживает IANA-имена (Europe/Moscow), 'UTC', а также формат 'UTC+3' /
+    'UTC-5' / 'GMT+5:30', который шлёт UI настроек — pytz его НЕ понимает и кидает
+    UnknownTimeZoneError, из-за чего весь recalc селлера падал ещё до загрузки
+    товаров. Неизвестное значение → UTC (recalc не должен падать из-за tz).
+    """
+    name = (tz_name or "UTC").strip()
+    try:
+        return pytz.timezone(name)
+    except Exception:
+        pass
+    m = re.fullmatch(r"(?:UTC|GMT)\s*([+-])\s*(\d{1,2})(?::?(\d{2}))?", name, re.IGNORECASE)
+    if m:
+        sign = 1 if m.group(1) == "+" else -1
+        offset_min = sign * (int(m.group(2)) * 60 + int(m.group(3) or 0))
+        return pytz.FixedOffset(offset_min)
+    logger.warning("неизвестная таймзона селлера, fallback UTC", extra={"tz": name})
+    return pytz.UTC
+
+
+def _seller_timezone(sb, seller_id: str):
+    """tzinfo селлера (через _resolve_timezone — терпит UTC±N и мусор)."""
     res = sb.table("sellers").select("timezone").eq("id", seller_id).execute()
-    return (res.data[0] if res.data else {}).get("timezone") or "UTC"
+    raw = (res.data[0] if res.data else {}).get("timezone")
+    return _resolve_timezone(raw)
 
 
 def _event_message(et: EventType, delta: Optional[int]) -> str:
