@@ -81,6 +81,7 @@ export default function AppHeader({
         { href: "/admin/sellers",  label: t("nav.admin.sellers") },
         { href: "/admin/activity", label: t("nav.admin.activity") },
         { href: "/admin/settings", label: t("nav.settings") },
+        { href: "/admin/email-debug", label: t("nav.admin.emailDebug") },
       ];
 
   const planLabel = plan ? PLAN_LABEL[plan] ?? plan : null;
