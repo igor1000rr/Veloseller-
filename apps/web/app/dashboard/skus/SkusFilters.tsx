@@ -269,9 +269,6 @@ export function SkusFilters({
           {t("sku.filters.dataSince", { date: new Date(minDate).toLocaleDateString("ru-RU") })}
         </p>
       )}
-      <p className="text-[11px] text-ink-hush leading-relaxed">
-        {t("sku.filters.periodHelp")}
-      </p>
       </section>
 
       {/* METRIC FILTERS — 4 диапазонных фильтра отдельными карточками */}
