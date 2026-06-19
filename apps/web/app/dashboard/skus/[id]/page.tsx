@@ -122,6 +122,33 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     changelogByDate[day].push(e);
   }
 
+  // Календарь событий: события товара + общие события склада (product_id IS NULL
+  // по connection_id товара) + виртуальные праздники на окно графика..+3 мес.
+  const evFrom = new Date(Date.now() - 60 * 86400_000).toISOString().slice(0, 10);
+  const evTo = new Date(Date.now() + 100 * 86400_000).toISOString().slice(0, 10);
+  const { data: eventRows } = await supabase
+    .from("product_events")
+    .select("id,title,start_date,end_date,comment,product_id")
+    .eq("seller_id", user.id)
+    .or(`product_id.eq.${product.product_id},and(product_id.is.null,connection_id.eq.${(product as any).connection_id})`)
+    .order("start_date", { ascending: true });
+  const userEvents: EventItem[] = (eventRows ?? []).map((e: any) => ({
+    id: e.id as string,
+    title: e.title as string,
+    startDate: e.start_date as string,
+    endDate: (e.end_date as string | null) ?? null,
+    comment: (e.comment as string | null) ?? null,
+    source: "user" as const,
+  }));
+  const holidayEvents: EventItem[] = getHolidayEventsInRange(evFrom, evTo).map((h) => ({
+    id: h.id,
+    title: h.title,
+    startDate: h.startDate,
+    endDate: h.endDate,
+    comment: h.comment,
+    source: "holiday" as const,
+  }));
+
   // Александр 04.06.2026: дни «нет данных» не показываем в списке событий —
   // они забивали блок (13 из 14 строк). В тултипе графика журнал остаётся полным.
   const visibleEvents = (changelog ?? []).filter((e: any) => e.event_type !== "missing_data");
