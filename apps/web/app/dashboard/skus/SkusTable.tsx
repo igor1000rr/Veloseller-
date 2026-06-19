@@ -139,9 +139,10 @@ export function SkusTable({
                 </td>
                 <td className="col-skucol-name px-3 sm:px-4 py-3">
                   {/* Название — ссылка для проваливания в карточку SKU (Александр 01.06.2026).
-                      Бренд — отдельная колонка (Александр 11.06.2026). Категория (по просьбе
-                      Игоря 19.06) — чипом под названием рядом с тегами: бренд + категория видны
-                      на всех кабинетах. Чип кликабелен → фильтр ?category=. */}
+                      Бренд — отдельная колонка (Александр 11.06.2026). Категория (Игорь 19.06):
+                      убрали чип из таблицы — он дублировал фильтр «Все категории» сверху и
+                      раздувал высоту строки. Фильтровать по категории теперь только через
+                      дропдаун. Под названием остаются только пользовательские теги. */}
                   <SkuLink
                     id={p.product_id}
                     name={p.product_name}
@@ -150,16 +151,9 @@ export function SkusTable({
                   {isUnderestimated && (
                     <span className="ml-2 font-mono text-[10px] uppercase tracking-widest text-azure font-semibold">{t("sku.list.underestimated")}</span>
                   )}
-                  {(p.category || (p.tags && p.tags.length > 0)) && (
+                  {p.tags && p.tags.length > 0 && (
                     <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
-                      {p.category && (
-                        <Link href={`/dashboard/skus?category=${encodeURIComponent(p.category)}` as any}
-                              className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[11px] uppercase tracking-wider border border-line bg-bg-soft text-ink-muted hover:border-azure/40 hover:text-azure transition"
-                              title={p.category}>
-                          {p.category}
-                        </Link>
-                      )}
-                      {(p.tags ?? []).map((tag: string) => (
+                      {p.tags.map((tag: string) => (
                         <Link key={tag} href={`/dashboard/skus?tag=${encodeURIComponent(tag)}` as any}
                               className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[11px] tracking-wider border border-violet-200 bg-violet-50 text-violet-700 hover:border-violet-400 hover:text-violet-900 transition"
                               title={tag}>
