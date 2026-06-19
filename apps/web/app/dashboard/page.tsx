@@ -10,6 +10,9 @@ import { InfoTooltip } from "../_components/InfoTooltip";
 import { getSelectedWarehouse, listWarehouses, warehouseKindLabel } from "@/lib/warehouse";
 import { t, plural } from "@/lib/i18n";
 import { getMetricsStamp, getDashboardComputed } from "@/lib/dashboard-cache";
+import { WarehouseEventsBlock } from "./WarehouseEventsBlock";
+import { getHolidayEventsInRange } from "@/lib/holidays";
+import type { EventItem } from "./skus/[id]/EventsEditor";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
