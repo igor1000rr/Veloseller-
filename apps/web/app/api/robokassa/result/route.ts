@@ -19,13 +19,18 @@ import { enforceRateLimitDurable, RATE_LIMITS } from "@/lib/rate-limit";
  * После успешной оплаты Robokassa вызывает этот endpoint:
  *  1. Проверяем подпись через Password2
  *  2. Проверяем совпадение test/prod-режима сервера с IsTest флагом
- *  3. Обновляем invoice → paid
- *  4. Активируем подписку — в зависимости от product_kind:
+ *  3. Проверяем сумму против сохранённого инвойса
+ *  4. АКТИВИРУЕМ подписку — в зависимости от product_kind:
  *     - veloseller: seller.plan + plan_warehouses_limit + plan_sku_per_warehouse_limit
  *                   + subscription_expires_at. Лимиты: фикс-тариф — из таблиц
  *                   robokassa.ts; «Конструктор» custom_{wh}x{sku} — из кодировки плана.
  *     - radar:      seller.radar_plan + radar_brands_limit + radar_active_until
- *  5. Отвечаем ровно "OK{InvId}" plain text — без этого Robokassa будет ретраить.
+ *  5. И ТОЛЬКО при успешной активации помечаем инвойс paid.
+ *  6. Отвечаем ровно "OK{InvId}" plain text — без этого Robokassa будет ретраить.
+ *
+ * ВАЖНО (порядок): активация идёт ДО пометки paid. Раньше было наоборот, и ошибка
+ * апдейта sellers молча проглатывалась → клиент оплатил, инвойс=paid, тариф не выдан,
+ * а быстрый путь status==='paid' навсегда блокировал повторную активацию.
  */
 
 async function handle(req: NextRequest): Promise<Response> {
@@ -85,7 +90,7 @@ async function handle(req: NextRequest): Promise<Response> {
     return new Response("FAIL: amount mismatch", { status: 400 });
   }
 
-  // Идемпотентность — если уже paid, просто отвечаем OK
+  // Идемпотентность — если уже paid, просто отвечаем OK (быстрый путь).
   if (invoice.status === "paid") {
     return new Response(`OK${invId}`, { headers: { "Content-Type": "text/plain" } });
   }
@@ -93,6 +98,62 @@ async function handle(req: NextRequest): Promise<Response> {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000); // +30 дней
 
+  // 1) Сначала АКТИВИРУЕМ подписку. Тип активации — по product_kind.
+  // Legacy invoices без product_kind (до миграции) имеют DEFAULT 'veloseller'.
+  const productKind = invoice.product_kind || "veloseller";
+  // «Конструктор» (Александр 04.06.2026): лимиты зашиты в кодировку плана.
+  const customParams = parseCustomPlanId(invoice.plan);
+
+  let sellerUpdate: Record<string, unknown> | null = null;
+  if (productKind === "radar" && isRadarPlan(invoice.plan)) {
+    // Radar подписка — radar_* поля sellers. Префикс 'radar_' в биллинге,
+    // в sellers.radar_plan — без префикса.
+    const radarPlanShort = invoice.plan.replace(/^radar_/, "") as "start" | "seller" | "pro" | "expert";
+    sellerUpdate = {
+      radar_plan: radarPlanShort,
+      radar_brands_limit: RADAR_BRANDS_LIMITS[invoice.plan as RadarPlan],
+      radar_active_until: expiresAt.toISOString(),
+    };
+  } else if (customParams) {
+    // Конструктор: складов и SKU/склад ровно сколько оплачено.
+    sellerUpdate = {
+      plan: invoice.plan,
+      plan_warehouses_limit: customParams.warehouses,
+      plan_sku_per_warehouse_limit: customParams.skuPerWarehouse,
+      subscription_expires_at: expiresAt.toISOString(),
+    };
+  } else if (isVeloseLLerPlan(invoice.plan)) {
+    // Veloseller фикс-тариф — plan + лимиты складов/SKU + expires.
+    sellerUpdate = {
+      plan: invoice.plan,
+      plan_warehouses_limit: VELOSELLER_WAREHOUSES_LIMITS[invoice.plan as VeloseLLerPlan],
+      plan_sku_per_warehouse_limit: VELOSELLER_SKU_LIMITS[invoice.plan as VeloseLLerPlan],
+      subscription_expires_at: expiresAt.toISOString(),
+    };
+  }
+
+  if (sellerUpdate) {
+    const { error: actErr } = await sb
+      .from("sellers")
+      .update(sellerUpdate)
+      .eq("id", invoice.seller_id);
+    if (actErr) {
+      // Транзиентная ошибка БД: НЕ помечаем инвойс paid → Robokassa повторит,
+      // активация идемпотентна (абсолютные значения полей).
+      console.error("[robokassa-result] seller activation failed, asking retry", {
+        invId, plan: invoice.plan, error: actErr.message,
+      });
+      return new Response("FAIL: activation deferred", { status: 500 });
+    }
+  } else {
+    // Неустранимо: plan не сопоставляется с product_kind (баг данных). Повтор не
+    // поможет — закрываем инвойс (деньги получены) и логируем critical для сверки.
+    console.error("[robokassa-result] cannot activate: plan/product_kind mismatch", {
+      invId, plan: invoice.plan, productKind,
+    });
+  }
+
+  // 2) Активация успешна (или нечего применять) → фиксируем инвойс paid.
   const { error: updErr } = await sb
     .from("robokassa_invoices")
     .update({
@@ -103,61 +164,10 @@ async function handle(req: NextRequest): Promise<Response> {
     })
     .eq("id", invoice.id);
   if (updErr) {
+    // Активация уже применена (идемпотентна), но статус не зафиксировали — просим
+    // Robokassa повторить; на повторе быстрый путь / повторный апдейт закроют инвойс.
+    console.error("[robokassa-result] invoice mark-paid failed", { invId, error: updErr.message });
     return new Response("FAIL: db update failed", { status: 500 });
-  }
-
-  // Активируем подписку — в зависимости от product_kind.
-  // Legacy invoices без product_kind (до этой миграции) имеют DEFAULT 'veloseller'.
-  const productKind = invoice.product_kind || "veloseller";
-  // «Конструктор» (Александр 04.06.2026): лимиты зашиты в кодировку плана.
-  const customParams = parseCustomPlanId(invoice.plan);
-
-  if (productKind === "radar" && isRadarPlan(invoice.plan)) {
-    // Radar подписка — обновляем radar_* поля sellers.
-    // Старый radar_plan → новый (с увеличенным лимитом). Если юзер был на
-    // trial — более продвинутый тариф перепишет его на платный.
-    // Префикс 'radar_' в биллинге но в sellers.radar_plan без префикса.
-    const radarPlanShort = invoice.plan.replace(/^radar_/, "") as "start" | "seller" | "pro" | "expert";
-    const brandsLimit = RADAR_BRANDS_LIMITS[invoice.plan as RadarPlan];
-
-    await sb
-      .from("sellers")
-      .update({
-        radar_plan: radarPlanShort,
-        radar_brands_limit: brandsLimit,
-        radar_active_until: expiresAt.toISOString(),
-      })
-      .eq("id", invoice.seller_id);
-  } else if (customParams) {
-    // Конструктор: складов и SKU/склад ровно сколько оплачено.
-    await sb
-      .from("sellers")
-      .update({
-        plan: invoice.plan,
-        plan_warehouses_limit: customParams.warehouses,
-        plan_sku_per_warehouse_limit: customParams.skuPerWarehouse,
-        subscription_expires_at: expiresAt.toISOString(),
-      })
-      .eq("id", invoice.seller_id);
-  } else if (isVeloseLLerPlan(invoice.plan)) {
-    // Veloseller фикс-тариф — plan + лимиты складов/SKU + expires.
-    const warehousesLimit = VELOSELLER_WAREHOUSES_LIMITS[invoice.plan as VeloseLLerPlan];
-    const skuLimit = VELOSELLER_SKU_LIMITS[invoice.plan as VeloseLLerPlan];
-
-    await sb
-      .from("sellers")
-      .update({
-        plan: invoice.plan,
-        plan_warehouses_limit: warehousesLimit,
-        plan_sku_per_warehouse_limit: skuLimit,
-        subscription_expires_at: expiresAt.toISOString(),
-      })
-      .eq("id", invoice.seller_id);
-  } else {
-    // Невозможно сопоставить plan с product_kind — лог и не активируем.
-    console.error("[robokassa-result] cannot activate: plan/product_kind mismatch", {
-      invId, plan: invoice.plan, productKind,
-    });
   }
 
   return new Response(`OK${invId}`, {
