@@ -79,6 +79,23 @@ export default async function HealthPage() {
         <p className="mt-1.5 text-ink-muted text-sm">Синхронизация, ошибки, производительность pipeline</p>
       </header>
 
+      <div className={`rounded-xl border px-4 py-3 flex items-center justify-between gap-3 ${onboardingOk ? "border-lime-deep/30 bg-lime-soft" : "border-rose/40 bg-rose/10"}`}>
+        <div className="flex items-center gap-2.5">
+          <span className={`size-1.5 rounded-full ${onboardingOk ? "bg-lime-deep" : "bg-rose animate-pulse"}`} />
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush font-semibold">Онбординг</span>
+        </div>
+        <div className="font-mono text-[11px]">
+          {onboardingOk ? (
+            <span className="text-lime-deep">триггер sellers активен · сирот 0</span>
+          ) : (
+            <span className="text-rose">
+              {onboarding?.trigger_present ? "" : "триггер on_auth_user_created пропал · "}
+              сирот без sellers: {Number(onboarding?.orphan_count ?? 0)} · авто-хил поднимет ≤15 мин
+            </span>
+          )}
+        </div>
+      </div>
+
       <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="md:col-span-1 rounded-2xl border border-line bg-paper p-6 relative">
           <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush mb-2">Pipeline Health</div>
