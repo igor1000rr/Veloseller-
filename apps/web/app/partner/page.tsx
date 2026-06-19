@@ -351,17 +351,10 @@ export default async function PartnerPage() {
           <p className="mt-4 text-ink-muted text-base md:text-lg leading-relaxed">
             Оставьте заявку — расскажем про условия, выдадим кабинет и реф-ссылку. Отвечаем в течение рабочего дня.
           </p>
-          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <a href={MAILTO} className="rounded-lg bg-ink text-paper px-6 py-3.5 text-sm font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
-              Оставить заявку
-            </a>
-            {PARTNER_TG ? (
-              <a href={"https://t.me/" + PARTNER_TG} target="_blank" rel="noopener noreferrer" className="rounded-lg bg-paper text-ink border border-line px-6 py-3.5 text-sm font-semibold hover:border-lime-deep/40 transition hover:-translate-y-0.5">
-                Написать в Telegram
-              </a>
-            ) : null}
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-2">
+            <span className="text-sm md:text-base font-semibold text-ink">Оставить заявку:</span>
+            <ContactLinks className="flex" />
           </div>
-          <p className="mt-4 font-mono text-xs text-ink-hush">{PARTNER_EMAIL}</p>
         </div>
       </section>
 
