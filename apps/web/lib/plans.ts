@@ -35,7 +35,7 @@ const VELOSELLER_PLANS_RU: BillingPlan[] = [
 
 const VELOSELLER_PLANS_EN: BillingPlan[] = [
   { id: "trial",   name: "Trial",   price: 0,   period: "30 days free",
-    features: ["15 warehouses", "10,000 SKUs per warehouse", "Full feature set, free"] },
+    features: ["3 warehouses", "10,000 SKUs per warehouse", "Full feature set, free"] },
   { id: "starter", name: "Starter", price: 29,  period: "/mo",
     features: ["2 warehouses", "1,000 SKUs per warehouse"] },
   { id: "growth",  name: "Growth",  price: 79,  period: "/mo",
