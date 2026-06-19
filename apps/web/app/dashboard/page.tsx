@@ -173,6 +173,34 @@ export default async function DashboardOverview({ searchParams }: {
     .order("created_at", { ascending: false })
     .limit(5);
 
+  // Календарь событий склада: общие события (product_id IS NULL) активного склада
+  // + виртуальные праздники. Те же общие события видны на карточках товаров склада.
+  const evFrom = new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+  const evTo = new Date(Date.now() + 100 * 86400_000).toISOString().slice(0, 10);
+  const { data: storeEventRows } = await supabase
+    .from("product_events")
+    .select("id,title,start_date,end_date,comment")
+    .eq("seller_id", user.id)
+    .eq("connection_id", currentWarehouseId)
+    .is("product_id", null)
+    .order("start_date", { ascending: true });
+  const generalEvents: EventItem[] = (storeEventRows ?? []).map((e: any) => ({
+    id: e.id as string,
+    title: e.title as string,
+    startDate: e.start_date as string,
+    endDate: (e.end_date as string | null) ?? null,
+    comment: (e.comment as string | null) ?? null,
+    source: "user" as const,
+  }));
+  const holidayEventsStore: EventItem[] = getHolidayEventsInRange(evFrom, evTo).map((h) => ({
+    id: h.id,
+    title: h.title,
+    startDate: h.startDate,
+    endDate: h.endDate,
+    comment: h.comment,
+    source: "holiday" as const,
+  }));
+
   const skusLink = (filter: string) => `/dashboard/skus?period=${period}&filter=${filter}` as any;
 
   // Подпись для тултипов графиков (поверх warehouse vs store fallback).
