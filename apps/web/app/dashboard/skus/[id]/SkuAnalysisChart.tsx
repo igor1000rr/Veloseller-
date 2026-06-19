@@ -178,6 +178,28 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
     }
   }
 
+  // Для каждого события — средняя TVelo до и после (по дням с наличием в видимом
+  // окне). Отвечает на вопрос «сработало ли событие» (реклама/акция) — аналогично
+  // эластичности цены. Берём до 7 ближайших точек с каждой стороны.
+  const eventVelocity = new Map<string, { before: number; after: number; pct: number }>();
+  for (const ev of calEvents) {
+    const end = ev.endDate ?? ev.startDate;
+    const before: number[] = [];
+    const after: number[] = [];
+    for (const p of formatted) {
+      const v = p.velocity;
+      if (v == null) continue;
+      if (p.date < ev.startDate) before.push(v);
+      else if (p.date > end) after.push(v);
+    }
+    const avg = (arr: number[]) => (arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : null);
+    const b = avg(before.slice(-7));
+    const a = avg(after.slice(0, 7));
+    if (b != null && a != null && b > 0) {
+      eventVelocity.set(ev.id, { before: b, after: a, pct: ((a - b) / b) * 100 });
+    }
+  }
+
   // Custom tooltip — под warm-paper палитру + changelog раскрытие
   const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload || !payload.length) return null;
