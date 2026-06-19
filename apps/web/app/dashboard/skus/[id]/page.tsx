@@ -4,6 +4,8 @@ import { SkuAnalysisChart, type ChartPoint } from "./SkuAnalysisChart";
 import { ReorderPanel } from "./ReorderPanel";
 import { UnitEconomics } from "./UnitEconomics";
 import { TagsEditor } from "./TagsEditor";
+import { EventsEditor, type EventItem } from "./EventsEditor";
+import { getHolidayEventsInRange } from "@/lib/holidays";
 import { HealthKpi } from "./HealthTooltip";
 import { buildHealthBreakdown, buildConfidenceBreakdown } from "./health-breakdown";
 import BackToSkus from "./BackToSkus";
