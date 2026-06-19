@@ -155,6 +155,29 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
     dateLabel: chartLabel(d.date, period),
   }));
 
+  // Оверлей событий: оранжевый отрезок по верхней границе на каждое событие,
+  // пересекающее видимый диапазон точек. x привязываем к меткам существующих
+  // точек (ось категориальная), y — на скрытой шкале band (1 = верх). Несколько
+  // событий слегка раздвигаем по вертикали, чтобы отрезки не сливались.
+  const eventSegments: { id: string; title: string; comment: string; startLabel: string; endLabel: string; y: number }[] = [];
+  {
+    let idx = 0;
+    for (const ev of calEvents) {
+      const end = ev.endDate ?? ev.startDate;
+      const inRange = formatted.filter((p) => p.date >= ev.startDate && p.date <= end);
+      if (inRange.length === 0) continue;
+      eventSegments.push({
+        id: ev.id,
+        title: ev.title,
+        comment: ev.comment ?? "",
+        startLabel: inRange[0].dateLabel,
+        endLabel: inRange[inRange.length - 1].dateLabel,
+        y: Math.max(0.62, 1 - idx * 0.06),
+      });
+      idx++;
+    }
+  }
+
   // Custom tooltip — под warm-paper палитру + changelog раскрытие
   const CustomTooltip = ({ active, payload }: any) => {
     if (!active || !payload || !payload.length) return null;
