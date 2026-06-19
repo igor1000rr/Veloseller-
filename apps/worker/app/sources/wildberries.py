@@ -503,10 +503,13 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
         ))
 
     logger.info(
-        "WB FBS fetch done: warehouses=%d, cards=%d, with_stock=%d, with_price=%d, total_barcodes=%d",
+        "WB FBS fetch done: warehouses=%d, cards=%d, with_stock=%d, prices_fetched=%d, "
+        "priced_snapshots=%d (Discounts-Prices=%d, Statistics-фолбэк=%d), total_barcodes=%d",
         len(warehouses), len(snapshots),
         sum(1 for v in stocks_by_vendor.values() if v > 0),
-        len(set(prices_disc) | set(prices_by_vendor)), len(all_barcodes),
+        len(set(prices_disc) | set(prices_by_vendor)),
+        sum(1 for s in snapshots if s.price and s.price > 0),
+        len(prices_disc), len(prices_by_vendor), len(all_barcodes),
     )
     return snapshots
 
