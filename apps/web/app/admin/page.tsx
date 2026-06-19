@@ -2,15 +2,11 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import Link from "next/link";
 import { RegistrationsChart, SnapshotsChart, PlansPieChart } from "./AdminCharts";
 import { Icons } from "../_components/Icons";
+import { computeMrr } from "@/lib/admin/mrr";
 
 export const dynamic = "force-dynamic";
 
-// Цены рублевые (Robokassa). Должны совпадать с PLAN_PRICES в lib/robokassa.ts.
-const PLAN_PRICE_RUB: Record<string, number> = {
-  starter: 2500,
-  growth: 6900,
-  pro: 14900,
-};
+// MRR считаем через computeMrr (lib/admin/mrr.ts) — только активные платные подписки.
 
 export default async function AdminOverview() {
   const supabase = createSupabaseAdminClient();
@@ -27,7 +23,7 @@ export default async function AdminOverview() {
     { count: connectionsTotal }, { count: connectionsError }, { count: connectionsActive },
     { count: metricsTotal }, { count: sellersWithMetrics },
     { data: recentSellers30d }, { data: recentSnapshots30d },
-    { data: errorConnections }, { data: recentRegs },
+    { data: errorConnections }, { data: recentRegs }, { data: billingRows },
   ] = await Promise.all([
     supabase.from("sellers").select("id", { count: "exact", head: true }),
     supabase.from("sellers").select("id", { count: "exact", head: true }).eq("plan", "trial"),
@@ -51,6 +47,7 @@ export default async function AdminOverview() {
     supabase.from("data_connections").select("id,name,source,marketplace,last_error,last_sync_at,seller_id,sellers(email)")
       .eq("status", "error").order("last_sync_at", { ascending: false }).limit(5),
     supabase.from("sellers").select("id,email,plan,created_at").order("created_at", { ascending: false }).limit(5),
+    supabase.from("sellers").select("plan,subscription_expires_at,last_payment_failed_at,payment_failure_count"),
   ]);
 
   const regsByDay = bucketByDay((recentSellers30d ?? []).map((r: any) => r.created_at), 30);
@@ -63,10 +60,10 @@ export default async function AdminOverview() {
     { plan: "pro",     count: sellersPro     ?? 0 },
   ];
 
-  const mrr = (sellersStarter ?? 0) * PLAN_PRICE_RUB.starter
-            + (sellersGrowth ?? 0)  * PLAN_PRICE_RUB.growth
-            + (sellersPro ?? 0)     * PLAN_PRICE_RUB.pro;
-  const paidTotal = (sellersStarter ?? 0) + (sellersGrowth ?? 0) + (sellersPro ?? 0);
+  // MRR/ARPU только по активным платным подпискам (истёкшие не считаем).
+  const billing = computeMrr((billingRows ?? []) as any[]);
+  const mrr = billing.mrr;
+  const paidTotal = billing.activePaid;
   const conversion = (sellersTotal ?? 0) > 0 ? (paidTotal / (sellersTotal ?? 1)) * 100 : 0;
   const arpu = paidTotal > 0 ? mrr / paidTotal : 0;
 
