@@ -11,8 +11,7 @@ const CONTACT_EMAIL = "info@proaim.ru";
  *
  * РФ (PAYMENT_PROVIDER=robokassa, дефолт): редирект на Robokassa (рублёвые платежи).
  * .com (PAYMENT_PROVIDER=stub): онлайн-оплаты ещё нет — кнопка ведёт на mailto,
- * тариф активируем вручную. Международный эквайринг (Paddle/Stripe) — отдельная фаза.
- * Stripe endpoints остаются в коде как задел.
+ * тариф активируем вручную. Международный эквайринг — отдельная фаза.
  */
 export function UpgradeButton({ plan, isCurrent, label }: { plan: string; isCurrent: boolean; label: string }) {
   const [busy, setBusy] = useState(false);
