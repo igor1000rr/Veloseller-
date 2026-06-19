@@ -199,6 +199,12 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
           SKU: <span className="text-ink-soft normal-case">{product.sku}</span>
         </div>
         <TagsEditor productId={product.product_id} initial={product.tags ?? null} />
+        <EventsEditor
+          productId={product.product_id}
+          connectionId={(product as any).connection_id}
+          initial={userEvents}
+          holidays={holidayEvents}
+        />
       </header>
 
       {/* Верхний блок KPI — переработан 01.06.2026 по ТЗ Александра.
