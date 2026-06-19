@@ -204,6 +204,11 @@ def _fetch_ozon_attributes(cli: httpx.Client, client_id: str, api_key: str, prod
                     "brand": brand,
                     "dcid": it.get("description_category_id"),
                     "type_id": it.get("type_id"),
+                    # Фоллбэк-имена напрямую из attributes (если Ozon их отдаёт): нужны,
+                    # когда у ключа нет прав на /v1/description-category/tree (403) —
+                    # тогда категория берётся отсюда вместо карт дерева.
+                    "type_name": (str(it.get("type_name")).strip() or None) if it.get("type_name") else None,
+                    "cat_name": (str(it.get("description_category_name") or it.get("category_name") or "").strip() or None),
                 }
             new_last = data.get("last_id") or ""
             if not new_last or new_last == last_id or not items:
