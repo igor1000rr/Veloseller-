@@ -12,6 +12,7 @@
   "nav.admin.health": "Здоровье",
   "nav.admin.sellers": "Селлеры",
   "nav.admin.activity": "Активность",
+  "nav.admin.emailDebug": "Почта",
   "nav.currentPlan": "Текущий тариф: {plan}",
   "nav.selectedWarehouse": "Выбранный склад",
   "nav.planShort": "Тариф: {plan}",

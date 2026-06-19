@@ -12,6 +12,7 @@
   "nav.admin.health": "Health",
   "nav.admin.sellers": "Sellers",
   "nav.admin.activity": "Activity",
+  "nav.admin.emailDebug": "Email",
   "nav.currentPlan": "Current plan: {plan}",
   "nav.selectedWarehouse": "Selected warehouse",
   "nav.planShort": "Plan: {plan}",
