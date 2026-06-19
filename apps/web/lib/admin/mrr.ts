@@ -1,51 +1,66 @@
 /**
- * Подсчёт MRR и состояния подписок для админ-финансов.
+ * Расчёт MRR только по АКТИВНЫМ платным подпискам Veloseller.
  *
- * Истина о платящем клиенте — subscription_expires_at (см. комментарий колонки в БД:
- * NULL = trial, прошедшая дата = откат в trial). Поэтому MRR считается ТОЛЬКО по
- * селлерам с активной подпиской (expires_at > now), а не по колонке plan, которая
- * может остаться 'pro' у уже истёкшего или неактивированного аккаунта.
+ * Истёкшая подписка (subscription_expires_at в прошлом) в MRR не входит —
+ * иначе «повисшие» на платном плане селлеры завышают выручку. null в
+ * subscription_expires_at трактуем как активную (выдана вручную / legacy).
  */
-import { PLAN_PRICES } from "@/lib/robokassa";
+import { PLAN_PRICES, type VeloseLLerPlan } from "@/lib/robokassa";
 
-const PAID_PLANS = ["starter", "growth", "pro"] as const;
+const VELO_PLANS: VeloseLLerPlan[] = ["starter", "growth", "pro"];
 
 export type SellerBillingRow = {
-  plan: string;
-  subscription_expires_at: string | null;
+  plan: string | null;
+  subscription_expires_at?: string | null;
+  last_payment_failed_at?: string | null;
+  payment_failure_count?: number | null;
 };
 
 export type MrrBreakdown = {
   mrr: number;
   activePaid: number;
-  lapsed: number; // платный план, подписка истекла (expires_at <= now)
-  ghost: number;  // платный план, но subscription_expires_at = null (фактически trial)
-  byPlan: Record<string, { active: number; revenue: number }>;
+  lapsedCount: number;
+  lapsedMrr: number;
+  atRisk: number;
+  byPlan: { plan: VeloseLLerPlan; price: number; active: number; mrr: number }[];
 };
 
-function isPaid(plan: string): boolean {
-  return (PAID_PLANS as readonly string[]).includes(plan);
-}
-
 export function computeMrr(rows: SellerBillingRow[], now: Date = new Date()): MrrBreakdown {
-  const nowMs = now.getTime();
-  let mrr = 0, activePaid = 0, lapsed = 0, ghost = 0;
-  const byPlan: Record<string, { active: number; revenue: number }> = {};
+  const byPlanMap: Record<VeloseLLerPlan, { active: number; mrr: number }> = {
+    starter: { active: 0, mrr: 0 },
+    growth: { active: 0, mrr: 0 },
+    pro: { active: 0, mrr: 0 },
+  };
+  let mrr = 0;
+  let activePaid = 0;
+  let lapsedCount = 0;
+  let lapsedMrr = 0;
+  let atRisk = 0;
 
   for (const r of rows) {
-    if (!isPaid(r.plan)) continue;
-    const price = (PLAN_PRICES as Record<string, number>)[r.plan] ?? 0;
-    if (r.subscription_expires_at == null) { ghost++; continue; }
-    const exp = new Date(r.subscription_expires_at).getTime();
-    if (exp > nowMs) {
-      activePaid++;
-      mrr += price;
-      byPlan[r.plan] ??= { active: 0, revenue: 0 };
-      byPlan[r.plan].active++;
-      byPlan[r.plan].revenue += price;
-    } else {
-      lapsed++;
+    const plan = (r.plan ?? "") as VeloseLLerPlan;
+    if (!VELO_PLANS.includes(plan)) continue;
+    const price = PLAN_PRICES[plan] ?? 0;
+    const lapsed = !!r.subscription_expires_at
+      && new Date(r.subscription_expires_at).getTime() <= now.getTime();
+    if (lapsed) {
+      lapsedCount++;
+      lapsedMrr += price;
+      continue;
     }
+    mrr += price;
+    activePaid++;
+    byPlanMap[plan].active++;
+    byPlanMap[plan].mrr += price;
+    if (r.last_payment_failed_at && Number(r.payment_failure_count ?? 0) > 0) atRisk++;
   }
-  return { mrr, activePaid, lapsed, ghost, byPlan };
+
+  const byPlan = VELO_PLANS.map(p => ({
+    plan: p,
+    price: PLAN_PRICES[p] ?? 0,
+    active: byPlanMap[p].active,
+    mrr: byPlanMap[p].mrr,
+  }));
+
+  return { mrr, activePaid, lapsedCount, lapsedMrr, atRisk, byPlan };
 }

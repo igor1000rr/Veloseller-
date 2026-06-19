@@ -4,21 +4,15 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import {
-  VELOSELLER_WAREHOUSES_LIMITS,
-  VELOSELLER_SKU_LIMITS,
   RADAR_BRANDS_LIMITS,
-  type VeloseLLerPlan,
   type RadarPlan,
 } from "@/lib/robokassa";
 
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
   .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
 
-export type ActionResult = { ok: boolean; message: string; link?: string };
+export type ActionResult = { ok: true; link?: string } | { ok: false; error: string };
 
-const DAY_MS = 86400_000;
-
-/** Проверка прав + email текущего админа (для журнала). */
 async function requireAdmin(): Promise<string> {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -28,182 +22,212 @@ async function requireAdmin(): Promise<string> {
   return email;
 }
 
-/** Запись в журнал. Ошибку журналирования глотаем — она не должна валить само действие. */
-async function logAction(adminEmail: string, action: string, sellerId: string, details: Record<string, unknown>) {
-  try {
-    const admin = createSupabaseAdminClient();
-    await admin.from("admin_audit_log").insert({
-      admin_email: adminEmail,
-      action,
-      target_seller_id: sellerId,
-      details,
-    });
-  } catch { /* журнал не критичен */ }
+async function logAdminAction(
+  adminEmail: string,
+  action: string,
+  targetSellerId: string | null,
+  details: Record<string, unknown>,
+) {
+  const admin = createSupabaseAdminClient();
+  await admin.from("admin_audit_log").insert({
+    admin_email: adminEmail,
+    action,
+    target_seller_id: targetSellerId,
+    details,
+  });
 }
 
-function asInt(v: FormDataEntryValue | null, fallback = 0): number {
-  const n = parseInt(String(v ?? ""), 10);
-  return Number.isFinite(n) ? n : fallback;
-}
+const VELO_PLANS = ["trial", "starter", "growth", "pro"] as const;
+const RADAR_STORED = ["none", "start", "seller", "pro", "expert"] as const;
 
-/**
- * Тариф Veloseller + лимиты + срок подписки.
- * Платный план с months > 0 → активирует/продлевает подписку (от max(now, текущая дата)).
- * Trial → откат в триал (subscription_expires_at = null, лимиты 15×10000).
- */
+/** План + лимиты (+ опционально продлить подписку на N дней). */
 export async function adminSaveBilling(formData: FormData): Promise<ActionResult> {
-  const adminEmail = await requireAdmin();
-  const sellerId = String(formData.get("sellerId") || "");
-  const plan = String(formData.get("plan") || "");
-  if (!sellerId) return { ok: false, message: "sellerId required" };
-
-  const admin = createSupabaseAdminClient();
-  const now = new Date();
-
-  if (plan === "trial") {
-    const { error } = await admin.from("sellers").update({
-      plan: "trial",
-      subscription_expires_at: null,
-      plan_warehouses_limit: 15,
-      plan_sku_per_warehouse_limit: 10000,
-      subscription_status: null,
-      updated_at: now.toISOString(),
-    }).eq("id", sellerId);
-    if (error) return { ok: false, message: error.message };
-    await logAction(adminEmail, "billing.downgrade_trial", sellerId, { plan });
-    revalidatePath(`/admin/sellers/${sellerId}`);
-    return { ok: true, message: "Откат в триал выполнен" };
-  }
-
-  if (!(plan in VELOSELLER_WAREHOUSES_LIMITS)) {
-    return { ok: false, message: `Неизвестный план: ${plan}` };
-  }
-  const p = plan as VeloseLLerPlan;
-
-  const months = asInt(formData.get("months"), 0);
-  const whRaw = String(formData.get("warehouses") ?? "");
-  const skuRaw = String(formData.get("sku") ?? "");
-  const warehouses = whRaw === "" ? VELOSELLER_WAREHOUSES_LIMITS[p] : asInt(whRaw, VELOSELLER_WAREHOUSES_LIMITS[p]);
-  const sku = skuRaw === "" ? VELOSELLER_SKU_LIMITS[p] : asInt(skuRaw, VELOSELLER_SKU_LIMITS[p]);
-
-  const patch: Record<string, unknown> = {
-    plan: p,
-    plan_warehouses_limit: warehouses,
-    plan_sku_per_warehouse_limit: sku,
-    last_payment_failed_at: null,
-    last_payment_failed_reason: null,
-    payment_failure_count: 0,
-    subscription_status: "active",
-    updated_at: now.toISOString(),
-  };
-
-  if (months > 0) {
-    const { data: cur } = await admin.from("sellers")
-      .select("subscription_expires_at").eq("id", sellerId).maybeSingle();
-    const base = cur?.subscription_expires_at && new Date(cur.subscription_expires_at).getTime() > now.getTime()
-      ? new Date(cur.subscription_expires_at)
-      : now;
-    patch.subscription_expires_at = new Date(base.getTime() + months * 30 * DAY_MS).toISOString();
-    patch.last_payment_succeeded_at = now.toISOString();
-  }
-
-  const { error } = await admin.from("sellers").update(patch).eq("id", sellerId);
-  if (error) return { ok: false, message: error.message };
-  await logAction(adminEmail, "billing.set_plan", sellerId, { plan: p, warehouses, sku, months });
-  revalidatePath(`/admin/sellers/${sellerId}`);
-  return {
-    ok: true,
-    message: months > 0
-      ? `План ${p}, лимиты ${warehouses}×${sku}, подписка +${months} мес`
-      : `План ${p}, лимиты ${warehouses}×${sku} (срок подписки не изменён)`,
-  };
-}
-
-/** Триал: дата окончания = сегодня + N дней. */
-export async function adminSaveTrial(formData: FormData): Promise<ActionResult> {
-  const adminEmail = await requireAdmin();
-  const sellerId = String(formData.get("sellerId") || "");
-  const days = asInt(formData.get("days"), 0);
-  if (!sellerId) return { ok: false, message: "sellerId required" };
-  if (days <= 0) return { ok: false, message: "Дней должно быть > 0" };
-
-  const admin = createSupabaseAdminClient();
-  const ends = new Date(Date.now() + days * DAY_MS).toISOString();
-  const { error } = await admin.from("sellers")
-    .update({ trial_ends_at: ends, updated_at: new Date().toISOString() })
-    .eq("id", sellerId);
-  if (error) return { ok: false, message: error.message };
-  await logAction(adminEmail, "trial.set", sellerId, { days, ends });
-  revalidatePath(`/admin/sellers/${sellerId}`);
-  return { ok: true, message: `Триал до ${new Date(ends).toLocaleDateString("ru-RU")}` };
-}
-
-/** Radar: план + срок + лимит брендов. */
-const RADAR_PLAN_VALUES = ["none", "trial", "start", "seller", "pro", "expert"] as const;
-function radarBrandsDefault(plan: string): number {
-  if (plan === "trial") return 3;
-  const key = `radar_${plan}` as RadarPlan;
-  return (RADAR_BRANDS_LIMITS as Record<string, number>)[key] ?? 0;
-}
-
-export async function adminSaveRadar(formData: FormData): Promise<ActionResult> {
-  const adminEmail = await requireAdmin();
-  const sellerId = String(formData.get("sellerId") || "");
-  const plan = String(formData.get("radarPlan") || "");
-  if (!sellerId) return { ok: false, message: "sellerId required" };
-  if (!(RADAR_PLAN_VALUES as readonly string[]).includes(plan)) {
-    return { ok: false, message: `Неизвестный Radar-план: ${plan}` };
-  }
-  const admin = createSupabaseAdminClient();
-  const now = new Date();
-
-  if (plan === "none") {
-    const { error } = await admin.from("sellers").update({
-      radar_plan: "none", radar_brands_limit: 0, radar_active_until: null,
-      updated_at: now.toISOString(),
-    }).eq("id", sellerId);
-    if (error) return { ok: false, message: error.message };
-    await logAction(adminEmail, "radar.disable", sellerId, {});
-    revalidatePath(`/admin/sellers/${sellerId}`);
-    return { ok: true, message: "Radar выключен" };
-  }
-
-  const days = asInt(formData.get("radarDays"), plan === "trial" ? 14 : 30);
-  const brandsRaw = String(formData.get("radarBrands") ?? "");
-  const brands = brandsRaw === "" ? radarBrandsDefault(plan) : asInt(brandsRaw, radarBrandsDefault(plan));
-  const until = new Date(now.getTime() + days * DAY_MS).toISOString();
-
-  const patch: Record<string, unknown> = {
-    radar_plan: plan,
-    radar_brands_limit: brands,
-    radar_active_until: until,
-    updated_at: now.toISOString(),
-  };
-  if (plan === "trial") patch.radar_trial_started_at = now.toISOString();
-
-  const { error } = await admin.from("sellers").update(patch).eq("id", sellerId);
-  if (error) return { ok: false, message: error.message };
-  await logAction(adminEmail, "radar.set", sellerId, { plan, days, brands });
-  revalidatePath(`/admin/sellers/${sellerId}`);
-  return { ok: true, message: `Radar ${plan}: ${brands} брендов до ${new Date(until).toLocaleDateString("ru-RU")}` };
-}
-
-/** Одноразовая ссылка сброса пароля (Supabase recovery). Письмо не шлём — админ передаёт ссылку сам. */
-export async function adminPasswordReset(formData: FormData): Promise<ActionResult> {
-  const adminEmail = await requireAdmin();
-  const sellerId = String(formData.get("sellerId") || "");
-  if (!sellerId) return { ok: false, message: "sellerId required" };
-  const admin = createSupabaseAdminClient();
-  const { data: seller } = await admin.from("sellers").select("email").eq("id", sellerId).maybeSingle();
-  if (!seller?.email) return { ok: false, message: "email селлера не найден" };
   try {
-    const { data, error } = await admin.auth.admin.generateLink({ type: "recovery", email: seller.email });
-    if (error) return { ok: false, message: error.message };
-    const link = (data as any)?.properties?.action_link as string | undefined;
-    if (!link) return { ok: false, message: "ссылка не сгенерирована" };
-    await logAction(adminEmail, "account.password_reset_link", sellerId, { email: seller.email });
-    return { ok: true, message: "Ссылка сброса пароля сгенерирована", link };
-  } catch (e: any) {
-    return { ok: false, message: e?.message || "ошибка генерации ссылки" };
+    const adminEmail = await requireAdmin();
+    const sellerId = String(formData.get("sellerId") || "");
+    const plan = String(formData.get("plan") || "");
+    const warehousesLimit = parseInt(String(formData.get("warehousesLimit") || ""), 10);
+    const skuLimit = parseInt(String(formData.get("skuLimit") || ""), 10);
+    const extendDays = parseInt(String(formData.get("extendDays") || "0"), 10) || 0;
+
+    if (!sellerId) return { ok: false, error: "sellerId required" };
+    if (!(VELO_PLANS as readonly string[]).includes(plan)) return { ok: false, error: "invalid plan" };
+    if (!Number.isFinite(warehousesLimit) || warehousesLimit < 0) return { ok: false, error: "invalid warehouses limit" };
+    if (!Number.isFinite(skuLimit) || skuLimit < 0) return { ok: false, error: "invalid sku limit" };
+
+    const admin = createSupabaseAdminClient();
+    const { data: current } = await admin.from("sellers")
+      .select("subscription_expires_at").eq("id", sellerId).maybeSingle();
+
+    const patch: Record<string, unknown> = {
+      plan,
+      plan_warehouses_limit: warehousesLimit,
+      plan_sku_per_warehouse_limit: skuLimit,
+      updated_at: new Date().toISOString(),
+    };
+    if (extendDays > 0) {
+      const existing = current?.subscription_expires_at ? new Date(current.subscription_expires_at) : null;
+      const base = existing && existing.getTime() > Date.now() ? existing : new Date();
+      patch.subscription_expires_at = new Date(base.getTime() + extendDays * 86400_000).toISOString();
+      patch.subscription_status = "active";
+      patch.last_payment_failed_at = null;
+      patch.last_payment_failed_reason = null;
+      patch.payment_failure_count = 0;
+    }
+
+    const { error } = await admin.from("sellers").update(patch).eq("id", sellerId);
+    if (error) return { ok: false, error: error.message };
+
+    await logAdminAction(adminEmail, "billing.save", sellerId, { plan, warehousesLimit, skuLimit, extendDays });
+    revalidatePath(`/admin/sellers/${sellerId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "failed" };
+  }
+}
+
+/** Триал: trial_ends_at = сегодня + N дней. */
+export async function adminSaveTrial(formData: FormData): Promise<ActionResult> {
+  try {
+    const adminEmail = await requireAdmin();
+    const sellerId = String(formData.get("sellerId") || "");
+    const trialDays = parseInt(String(formData.get("trialDays") || ""), 10);
+    if (!sellerId) return { ok: false, error: "sellerId required" };
+    if (!Number.isFinite(trialDays) || trialDays < 0 || trialDays > 365) return { ok: false, error: "invalid days" };
+
+    const until = new Date(Date.now() + trialDays * 86400_000).toISOString();
+    const admin = createSupabaseAdminClient();
+    const { error } = await admin.from("sellers")
+      .update({ trial_ends_at: until, updated_at: new Date().toISOString() })
+      .eq("id", sellerId);
+    if (error) return { ok: false, error: error.message };
+
+    await logAdminAction(adminEmail, "trial.set", sellerId, { trialDays, until });
+    revalidatePath(`/admin/sellers/${sellerId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "failed" };
+  }
+}
+
+/** Radar: тариф + лимит брендов из сетки + продление radar_active_until. */
+export async function adminSaveRadar(formData: FormData): Promise<ActionResult> {
+  try {
+    const adminEmail = await requireAdmin();
+    const sellerId = String(formData.get("sellerId") || "");
+    const radarPlan = String(formData.get("radarPlan") || "");
+    const radarDays = parseInt(String(formData.get("radarDays") || "0"), 10) || 0;
+    if (!sellerId) return { ok: false, error: "sellerId required" };
+    if (!(RADAR_STORED as readonly string[]).includes(radarPlan)) return { ok: false, error: "invalid radar plan" };
+
+    const admin = createSupabaseAdminClient();
+    const patch: Record<string, unknown> = { radar_plan: radarPlan, updated_at: new Date().toISOString() };
+
+    if (radarPlan === "none") {
+      patch.radar_brands_limit = 0;
+      patch.radar_active_until = null;
+    } else {
+      const billingKey = ("radar_" + radarPlan) as RadarPlan;
+      patch.radar_brands_limit = RADAR_BRANDS_LIMITS[billingKey] ?? 0;
+      const { data: current } = await admin.from("sellers")
+        .select("radar_active_until").eq("id", sellerId).maybeSingle();
+      const existing = current?.radar_active_until ? new Date(current.radar_active_until) : null;
+      const base = existing && existing.getTime() > Date.now() ? existing : new Date();
+      const days = radarDays > 0 ? radarDays : 30;
+      patch.radar_active_until = new Date(base.getTime() + days * 86400_000).toISOString();
+    }
+
+    const { error } = await admin.from("sellers").update(patch).eq("id", sellerId);
+    if (error) return { ok: false, error: error.message };
+
+    await logAdminAction(adminEmail, "radar.set", sellerId, { radarPlan, radarDays });
+    revalidatePath(`/admin/sellers/${sellerId}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "failed" };
+  }
+}
+
+/** Ссылка восстановления пароля (Supabase generateLink type=recovery). */
+export async function adminPasswordReset(formData: FormData): Promise<ActionResult> {
+  try {
+    const adminEmail = await requireAdmin();
+    const sellerId = String(formData.get("sellerId") || "");
+    const email = String(formData.get("email") || "");
+    if (!sellerId || !email) return { ok: false, error: "sellerId/email required" };
+
+    const admin = createSupabaseAdminClient();
+    const { data, error } = await admin.auth.admin.generateLink({ type: "recovery", email });
+    if (error) return { ok: false, error: error.message };
+    const link = (data as { properties?: { action_link?: string } } | null)?.properties?.action_link;
+
+    await logAdminAction(adminEmail, "password.reset_link", sellerId, { email });
+    return { ok: true, link };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "failed" };
+  }
+}
+
+const WORKER_TIMEOUT_MS = 30_000;
+
+/** Форс-ресинк склада: тот же вызов воркера, что и у юзера, но по id без привязки к владельцу. */
+export async function adminResyncConnection(formData: FormData): Promise<ActionResult> {
+  try {
+    const adminEmail = await requireAdmin();
+    const connectionId = String(formData.get("connectionId") || "");
+    if (!connectionId) return { ok: false, error: "connectionId required" };
+
+    const admin = createSupabaseAdminClient();
+    const { data: conn } = await admin.from("data_connections")
+      .select("id, source, marketplace, seller_id").eq("id", connectionId).maybeSingle();
+    if (!conn) return { ok: false, error: "connection не найдена" };
+
+    const workerUrl = process.env.WORKER_URL;
+    const workerSecret = process.env.WORKER_SECRET;
+    if (!workerUrl || !workerSecret) return { ok: false, error: "worker не сконфигурирован" };
+
+    let endpoint = "";
+    if (conn.source === "google_sheet") endpoint = `/ingest/google-sheet/${connectionId}`;
+    else if (conn.source === "marketplace_api" && conn.marketplace === "ozon") endpoint = `/ingest/ozon/${connectionId}`;
+    else if (conn.source === "marketplace_api" && conn.marketplace === "wildberries") endpoint = `/ingest/wb/${connectionId}`;
+    else if (conn.source === "marketplace_api" && conn.marketplace === "shopify") endpoint = `/ingest/shopify/${connectionId}`;
+    else return { ok: false, error: "ресинк недоступен для этого источника (CSV)" };
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS);
+    let res: Response;
+    try {
+      res = await fetch(`${workerUrl}${endpoint}`, {
+        method: "POST",
+        headers: { "X-Worker-Secret": workerSecret },
+        signal: controller.signal,
+      });
+    } catch (e) {
+      clearTimeout(timer);
+      const aborted = e instanceof Error && e.name === "AbortError";
+      return { ok: false, error: aborted ? "worker не ответил вовремя" : "ошибка связи с worker" };
+    }
+    clearTimeout(timer);
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      return { ok: false, error: text.slice(0, 300) || `worker ${res.status}` };
+    }
+
+    // recalc после синка (fire-and-forget)
+    const rc = new AbortController();
+    const rcTimer = setTimeout(() => rc.abort(), 5_000);
+    fetch(`${workerUrl}/jobs/recalc/${conn.seller_id}`, {
+      method: "POST",
+      headers: { "X-Worker-Secret": workerSecret },
+      signal: rc.signal,
+    }).catch(() => null).finally(() => clearTimeout(rcTimer));
+
+    await logAdminAction(adminEmail, "connection.resync", conn.seller_id, {
+      connectionId, marketplace: conn.marketplace || conn.source,
+    });
+    revalidatePath(`/admin/sellers/${conn.seller_id}`);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "failed" };
   }
 }
