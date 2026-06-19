@@ -21,11 +21,6 @@ export const metadata: Metadata = {
 const SHARE_PCT = 20;
 const COOKIE_DAYS = 60;
 const MIN_PAYOUT = "5 000 ₽";
-const PARTNER_EMAIL = "partners@veloseller.ru";
-
-const MAILTO =
-  "mailto:" + PARTNER_EMAIL + "?subject=" +
-  encodeURIComponent("Заявка в партнёрскую программу Veloseller");
 
 const ACCENTS = ["lime", "azure", "emerald", "orange"];
 const MQTINT = [
