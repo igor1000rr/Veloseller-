@@ -27,8 +27,8 @@ export default async function AdminSellersPage({ searchParams }: {
     .order("created_at", { ascending: false }).range(from, to);
 
   const sellerIds = (sellers ?? []).map((s: any) => s.id);
-  const counts: Record<string, { products: number; alerts: number; snapshots: number }> = {};
-  for (const id of sellerIds) counts[id] = { products: 0, alerts: 0, snapshots: 0 };
+  const counts: Record<string, { products: number; alerts: number }> = {};
+  for (const id of sellerIds) counts[id] = { products: 0, alerts: 0 };
   if (sellerIds.length > 0) {
     const [{ data: pRows }, { data: aRows }] = await Promise.all([
       supabase.from("products").select("seller_id").in("seller_id", sellerIds),
@@ -87,7 +87,7 @@ export default async function AdminSellersPage({ searchParams }: {
             </thead>
             <tbody className="divide-y divide-line">
               {(sellers ?? []).map((s: any) => {
-                const c = counts[s.id] || { products: 0, alerts: 0, snapshots: 0 };
+                const c = counts[s.id] || { products: 0, alerts: 0 };
                 return (
                   <tr key={s.id} className="hover:bg-bg-soft transition">
                     <td className="px-4 py-3 text-ink font-mono text-xs whitespace-nowrap">{s.email}</td>

@@ -36,10 +36,14 @@ export default async function FinancePage() {
   ]);
 
   const allSellers = (sellers ?? []) as { plan: string; subscription_expires_at: string | null; created_at: string }[];
-  const { mrr, activePaid, lapsed, ghost, byPlan } = computeMrr(allSellers, now);
+  const { mrr, activePaid, lapsedCount, byPlan } = computeMrr(allSellers, now);
   const arr = mrr * 12;
   const arpu = activePaid > 0 ? mrr / activePaid : 0;
   const trial = trialC ?? 0;
+  // «Призраки»: платный план, но subscription_expires_at не задан (выдан вручную / legacy).
+  const ghost = allSellers.filter(
+    s => (["starter", "growth", "pro"] as readonly string[]).includes(s.plan) && !s.subscription_expires_at,
+  ).length;
 
   // Реально собранные деньги (оплаченные инвойсы Robokassa).
   const paid = (paidInvoices ?? []) as { amount: number | string; paid_at: string | null }[];
@@ -65,12 +69,15 @@ export default async function FinancePage() {
     });
   }
 
-  const revenueByPlan = (["starter", "growth", "pro"] as const).map(p => ({
-    plan: p.charAt(0).toUpperCase() + p.slice(1),
-    price: (PLAN_PRICES as Record<string, number>)[p] ?? 0,
-    count: byPlan[p]?.active ?? 0,
-    total: byPlan[p]?.revenue ?? 0,
-  }));
+  const revenueByPlan = (["starter", "growth", "pro"] as const).map(p => {
+    const bp = byPlan.find(b => b.plan === p);
+    return {
+      plan: p.charAt(0).toUpperCase() + p.slice(1),
+      price: (PLAN_PRICES as Record<string, number>)[p] ?? 0,
+      count: bp?.active ?? 0,
+      total: bp?.mrr ?? 0,
+    };
+  });
 
   const failed = (failedSellers ?? []) as {
     id: string; email: string; plan: string;
@@ -96,7 +103,7 @@ export default async function FinancePage() {
         <Kpi label="MRR" value={rubFmt(mrr)} sub="активные подписки" tone="lime" />
         <Kpi label="ARR" value={rubFmt(arr)} sub="annual run rate" tone="emerald" />
         <Kpi label="ARPU" value={rubFmt(Math.round(arpu))} sub="на активного платника" tone="azure" />
-        <Kpi label="Активных платных" value={String(activePaid)} sub={`${trial} в триале · ${lapsed} истекли`} tone="lime" />
+        <Kpi label="Активных платных" value={String(activePaid)} sub={`${trial} в триале · ${lapsedCount} истекли`} tone="lime" />
       </section>
 
       <section className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">

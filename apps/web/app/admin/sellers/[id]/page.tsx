@@ -1,35 +1,70 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import {
+  RADAR_BRANDS_LIMITS,
+  VELOSELLER_WAREHOUSES_LIMITS,
+  VELOSELLER_SKU_LIMITS,
+} from "@/lib/robokassa";
+import { SellerAdminActions, AdminResyncButton } from "./SellerAdminActions";
 
 export const dynamic = "force-dynamic";
+
+// Сетки лимитов для автоподстановки в форме смены плана (из lib/robokassa.ts).
+const veloLimits: Record<string, { wh: number; sku: number }> = {
+  starter: { wh: VELOSELLER_WAREHOUSES_LIMITS.starter, sku: VELOSELLER_SKU_LIMITS.starter },
+  growth:  { wh: VELOSELLER_WAREHOUSES_LIMITS.growth,  sku: VELOSELLER_SKU_LIMITS.growth },
+  pro:     { wh: VELOSELLER_WAREHOUSES_LIMITS.pro,     sku: VELOSELLER_SKU_LIMITS.pro },
+};
+const radarLimits: Record<string, number> = {
+  start:  RADAR_BRANDS_LIMITS.radar_start,
+  seller: RADAR_BRANDS_LIMITS.radar_seller,
+  pro:    RADAR_BRANDS_LIMITS.radar_pro,
+  expert: RADAR_BRANDS_LIMITS.radar_expert,
+};
+
+// Какие источники можно форс-ресинкать (см. adminResyncConnection в actions.ts).
+function canResync(c: any): boolean {
+  if (c.source === "google_sheet") return true;
+  if (c.source === "marketplace_api") return ["ozon", "wildberries", "shopify"].includes(c.marketplace);
+  return false;
+}
 
 export default async function SellerDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = createSupabaseAdminClient();
+  const now = new Date();
 
   const { data: seller } = await supabase
     .from("sellers")
-    .select("id,email,display_name,plan,trial_ends_at,timezone,created_at,telegram_chat_id,notify_email,notify_telegram")
+    .select("id,email,display_name,plan,trial_ends_at,timezone,created_at,telegram_chat_id,notify_email,notify_telegram,plan_warehouses_limit,plan_sku_per_warehouse_limit,subscription_expires_at,subscription_status,last_payment_failed_at,last_payment_failed_reason,payment_failure_count,last_payment_succeeded_at,radar_plan,radar_brands_limit,radar_active_until,tax_rate,currency")
     .eq("id", id).maybeSingle();
   if (!seller) notFound();
 
   const [
     { count: skusCount },
-    { count: snapshotsCount },
     { count: alertsUnack },
     { data: connections },
     { data: latestStore },
     { data: recentAlerts },
+    { data: auditRows },
   ] = await Promise.all([
     supabase.from("products").select("product_id", { count: "exact", head: true }).eq("seller_id", id),
-    supabase.from("inventory_snapshots").select("snapshot_id", { count: "exact", head: true }),
     supabase.from("alerts").select("id", { count: "exact", head: true }).eq("seller_id", id).is("acknowledged_at", null),
     supabase.from("data_connections").select("*").eq("seller_id", id).order("created_at", { ascending: false }),
     supabase.from("store_metrics").select("*").eq("seller_id", id).order("period_end", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("alerts").select("id,kind,message,created_at,acknowledged_at,products(sku)").eq("seller_id", id)
       .order("created_at", { ascending: false }).limit(15),
+    supabase.from("admin_audit_log").select("id,admin_email,action,details,created_at")
+      .eq("target_seller_id", id).order("created_at", { ascending: false }).limit(10),
   ]);
+
+  const subExp = seller.subscription_expires_at ? new Date(seller.subscription_expires_at) : null;
+  const subLapsed = subExp ? subExp.getTime() <= now.getTime() : false;
+  const subDaysLeft = subExp ? Math.ceil((subExp.getTime() - now.getTime()) / 86400_000) : null;
+
+  const radarUntil = seller.radar_active_until ? new Date(seller.radar_active_until) : null;
+  const radarActive = radarUntil ? radarUntil.getTime() > now.getTime() : false;
 
   return (
     <div className="space-y-8">
@@ -57,6 +92,47 @@ export default async function SellerDetailPage({ params }: { params: Promise<{ i
       </section>
 
       <section>
+        <SectionTitle>Подписка и биллинг</SectionTitle>
+        <div className="bg-paper border border-line rounded-2xl p-5 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+          <Field label="План" value={seller.plan} />
+          <Field label="Статус подписки" value={seller.subscription_status ?? "—"} />
+          <Field
+            label="Подписка действует до"
+            tone={subLapsed ? "rose" : undefined}
+            value={
+              subExp
+                ? `${subExp.toLocaleDateString("ru-RU")} · ${subLapsed ? "истекла" : `ещё ${subDaysLeft} дн.`}`
+                : "бессрочно / не задана"
+            }
+          />
+          <Field label="Лимит складов" value={seller.plan_warehouses_limit ?? "—"} />
+          <Field label="Лимит SKU / склад" value={seller.plan_sku_per_warehouse_limit ?? "—"} />
+          <Field label="Налог" value={seller.tax_rate != null ? `${seller.tax_rate}%` : "—"} />
+          <Field
+            label="Radar"
+            tone={seller.radar_plan && seller.radar_plan !== "none" && radarUntil && !radarActive ? "rose" : undefined}
+            value={
+              !seller.radar_plan || seller.radar_plan === "none"
+                ? "выключен"
+                : `${seller.radar_plan} · ${seller.radar_brands_limit ?? 0} бр.${radarUntil ? ` · ${radarActive ? "до " + radarUntil.toLocaleDateString("ru-RU") : "истёк"}` : ""}`
+            }
+          />
+          <Field label="Последняя оплата" value={seller.last_payment_succeeded_at ? new Date(seller.last_payment_succeeded_at).toLocaleDateString("ru-RU") : "—"} />
+          <Field label="Валюта" value={seller.currency ?? "RUB"} />
+        </div>
+        {seller.last_payment_failed_at && (
+          <div className="mt-3 rounded-2xl border border-rose/30 bg-rose/[0.04] p-4 text-sm">
+            <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-rose font-semibold mb-1">Сбой оплаты</div>
+            <div className="text-ink-soft">
+              {new Date(seller.last_payment_failed_at).toLocaleString("ru-RU")}
+              {" · попыток: "}{seller.payment_failure_count ?? 0}
+              {seller.last_payment_failed_reason ? ` · ${seller.last_payment_failed_reason}` : ""}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section>
         <SectionTitle>Каналы уведомлений</SectionTitle>
         <div className="bg-paper border border-line rounded-2xl p-5 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
           <div>
@@ -79,14 +155,28 @@ export default async function SellerDetailPage({ params }: { params: Promise<{ i
       </section>
 
       <section>
+        <SectionTitle>Действия администратора</SectionTitle>
+        <SellerAdminActions
+          sellerId={seller.id}
+          email={seller.email ?? ""}
+          plan={seller.plan}
+          warehousesLimit={seller.plan_warehouses_limit ?? 0}
+          skuLimit={seller.plan_sku_per_warehouse_limit ?? 0}
+          radarPlan={seller.radar_plan ?? "none"}
+          veloLimits={veloLimits}
+          radarLimits={radarLimits}
+        />
+      </section>
+
+      <section>
         <SectionTitle>Источники данных ({connections?.length ?? 0})</SectionTitle>
         <div className="bg-paper border border-line rounded-2xl overflow-hidden">
           {(connections ?? []).length > 0 ? (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm min-w-[640px]">
+              <table className="w-full text-sm min-w-[780px]">
                 <thead className="bg-bg-soft border-b border-line">
                   <tr>
-                    <Th>Имя</Th><Th>Тип</Th><Th>Статус</Th><Th>Последний sync</Th><Th>Ошибка</Th>
+                    <Th>Имя</Th><Th>Тип</Th><Th>Статус</Th><Th>Последний sync</Th><Th>Ошибка</Th><Th>Ресинк</Th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-line">
@@ -99,6 +189,9 @@ export default async function SellerDetailPage({ params }: { params: Promise<{ i
                         {c.last_sync_at ? new Date(c.last_sync_at).toLocaleString("ru-RU") : "—"}
                       </td>
                       <td className="px-4 py-2.5 text-rose text-xs max-w-xs truncate" title={c.last_error}>{c.last_error ?? "—"}</td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <AdminResyncButton connectionId={c.id} disabled={!canResync(c)} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -141,6 +234,48 @@ export default async function SellerDetailPage({ params }: { params: Promise<{ i
           )}
         </div>
       </section>
+
+      <section>
+        <SectionTitle>Журнал действий админа</SectionTitle>
+        <div className="bg-paper border border-line rounded-2xl overflow-hidden">
+          {(auditRows ?? []).length > 0 ? (
+            <div className="divide-y divide-line">
+              {(auditRows ?? []).map((r: any) => (
+                <div key={r.id} className="px-4 py-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-sm text-ink"><code className="font-mono text-xs">{r.action}</code></div>
+                    {compactDetails(r.details) && (
+                      <div className="mt-0.5 font-mono text-[11px] text-ink-hush break-words">{compactDetails(r.details)}</div>
+                    )}
+                    <div className="mt-0.5 font-mono text-[10px] text-ink-hush">{r.admin_email}</div>
+                  </div>
+                  <div className="font-mono text-[10px] text-ink-muted whitespace-nowrap shrink-0">
+                    {new Date(r.created_at).toLocaleString("ru-RU")}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-8 text-center text-ink-hush text-sm">Действий ещё не было</div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function compactDetails(d: any): string {
+  if (!d || typeof d !== "object") return "";
+  return Object.entries(d)
+    .map(([k, v]) => `${k}=${v !== null && typeof v === "object" ? JSON.stringify(v) : String(v)}`)
+    .join(" · ");
+}
+
+function Field({ label, value, tone }: { label: string; value: React.ReactNode; tone?: "rose" }) {
+  return (
+    <div className="min-w-0">
+      <div className="font-mono text-[10px] uppercase tracking-[0.16em] text-ink-hush">{label}</div>
+      <div className={`mt-0.5 text-sm break-words ${tone === "rose" ? "text-rose font-medium" : "text-ink"}`}>{value}</div>
     </div>
   );
 }
