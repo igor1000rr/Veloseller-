@@ -116,7 +116,8 @@ const TYPE_LABELS: Record<string, string> = {
 // Иначе при остатках в сотни штук линия TVelo (0–3) лежала на дне.
 const STOCK_BAND = 0.28;
 
-export function SkuAnalysisChart({ data, changelogByDate }: { data: ChartPoint[]; changelogByDate?: ChangelogByDate }) {
+export function SkuAnalysisChart({ data, changelogByDate, events }: { data: ChartPoint[]; changelogByDate?: ChangelogByDate; events?: SkuChartEvent[] }) {
+  const calEvents = events ?? [];
   const [period, setPeriod] = useState<ChartPeriod>("1d");
   const { points, changelog: cl } = useMemo(
     () => resampleChart(data, changelogByDate, period),
