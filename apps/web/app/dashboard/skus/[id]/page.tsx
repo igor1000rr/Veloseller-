@@ -267,7 +267,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         {chartData.length < 2 ? (
           <p className="text-sm text-ink-muted">{t("sku.detail.chartEmpty")}</p>
         ) : (
-          <SkuAnalysisChart data={chartData} changelogByDate={changelogByDate} />
+          <SkuAnalysisChart data={chartData} changelogByDate={changelogByDate} events={[...holidayEvents, ...userEvents]} />
         )}
       </div>
 
