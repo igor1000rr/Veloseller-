@@ -161,7 +161,7 @@ export function EventsEditor({
 
 type Draft = { title: string; startDate: string; endDate: string; comment: string };
 
-function EventsTable({
+export function EventsTable({
   rows,
   onUpdate,
   onDelete,
