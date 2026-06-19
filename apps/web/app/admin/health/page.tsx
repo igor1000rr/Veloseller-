@@ -20,6 +20,7 @@ export default async function HealthPage() {
     { data: connectionsBySource },
     { data: errorConns },
     { data: connectionsAge },
+    { data: onboardingHealth },
   ] = await Promise.all([
     supabase.from("data_connections").select("id", { count: "exact", head: true }),
     supabase.from("data_connections").select("id", { count: "exact", head: true }).eq("status", "active"),
