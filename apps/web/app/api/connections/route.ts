@@ -187,10 +187,27 @@ export async function POST(req: NextRequest) {
     }, { status: 402 }); // 402 Payment Required — семантически правильнее для upgrade required
   }
 
-  // 5. Шифрование sensitive полей
+  // 5. Шифрование sensitive полей.
+  // Fail-closed: в проде запрещаем сохранять секреты маркетплейса открытым текстом.
+  // Раньше при отсутствии SECRET_ENCRYPTION_KEY ключи молча писались в БД как есть.
+  const sensitive = SENSITIVE_KEYS_BY_KIND[kind] ?? [];
+  const cfg = (config ?? {}) as Record<string, unknown>;
+  const hasSensitiveValues = sensitive.some(
+    (k) => typeof cfg[k] === "string" && (cfg[k] as string).length > 0,
+  );
+  if (hasSensitiveValues && !isEncryptionConfigured()) {
+    if (process.env.NODE_ENV === "production") {
+      console.error("[connections-create] SECRET_ENCRYPTION_KEY не задан — отказ сохранять секреты открытым текстом");
+      return NextResponse.json(
+        { error: "Шифрование секретов не настроено на сервере. Обратитесь к администратору." },
+        { status: 503 },
+      );
+    }
+    console.warn("[connections-create] SECRET_ENCRYPTION_KEY не задан — секреты сохранятся открытым текстом (dev)");
+  }
+
   const encryptedConfig: Record<string, unknown> = { ...(config ?? {}) };
   if (isEncryptionConfigured()) {
-    const sensitive = SENSITIVE_KEYS_BY_KIND[kind] ?? [];
     for (const k of sensitive) {
       const v = encryptedConfig[k];
       if (typeof v === "string" && v.length > 0) {
