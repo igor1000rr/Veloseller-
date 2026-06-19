@@ -27,7 +27,7 @@ from app.engine import coverage as cov_mod
 from app.engine import health as health_mod
 from app.engine import velocity as vel_mod
 from app.config import settings
-from app.engine.confidence import calculate_confidence
+from app.engine.confidence import MIN_REPRESENTATIVE_DAYS, calculate_confidence
 from app.schemas import EventType, InventorySegment, TVeloMetric
 
 
