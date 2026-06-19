@@ -141,9 +141,10 @@ export default async function PartnerPage() {
               Агентствам, консультантам и сервисам для селлеров: рекомендуйте Veloseller и зарабатывайте на каждом платеже клиента, пока он с нами.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <a href={MAILTO} className="rounded-lg bg-ink text-paper px-6 py-3.5 text-sm font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
-                Стать партнёром
-              </a>
+              <div className="flex items-center gap-2">
+                <span className="text-sm md:text-base font-semibold text-ink">Стать партнёром:</span>
+                <ContactLinks className="flex" />
+              </div>
               <a href="#calc" className="rounded-lg bg-paper text-ink border border-line px-6 py-3.5 text-sm font-semibold hover:border-lime-deep/40 transition hover:-translate-y-0.5">
                 Посчитать доход
               </a>
