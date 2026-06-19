@@ -43,7 +43,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
   ] = await Promise.all([
     supabase
       .from("sellers")
-      .select("default_lead_time_days,default_safety_days")
+      .select("default_lead_time_days,default_safety_days,tax_rate")
       .eq("id", user.id)
       .single(),
     supabase
