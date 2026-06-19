@@ -6,13 +6,13 @@ import { saveCostPrice } from "../actions";
 
 const isEn = LOCALE === "en";
 
-// Правка 10 (#5): юнит-экономика (beta). Комиссия маркетплейса приходит из API
-// (commission_pct последнего снапшота) как стартовый дефолт; логистику, эквайринг,
-// рекламу и себестоимость продавец правит под себя. Прибыль с единицы =
-// цена − (сумма %) × цена − себестоимость. Значения пока не персистятся (v1).
+// Правка 10 (#5): юнит-экономика. Комиссия маркетплейса приходит из API
+// (commission_pct последнего снапшота) как стартовый дефолт; налог — из ставки
+// кабинета (sellers.tax_rate, задаётся в массовой загрузке). Логистику, эквайринг
+// и рекламу продавец правит под себя. Прибыль с единицы = цена − (сумма %) × цена
+// − себестоимость. Себестоимость персистится per-товар, налог — на кабинет.
 const L = {
   title: isEn ? "UNIT ECONOMICS" : "ЮНИТ-ЭКОНОМИКА",
-  beta: "beta",
   h: isEn ? "Profit per unit" : "Прибыль с единицы",
   sub: isEn
     ? "Quick net-profit estimate per sale. Commission comes from the marketplace, the rest you adjust."
@@ -28,6 +28,7 @@ const L = {
   margin: isEn ? "Margin" : "Маржа",
   spend: isEn ? "Fees + cost" : "Расходы + с/с",
   fromApi: isEn ? "from API" : "из API",
+  fromCabinet: isEn ? "from cabinet" : "из кабинета",
   note: isEn ? "Cost is saved; the rest is for quick modeling." : "Себестоимость сохраняется; остальное — для быстрой прикидки.",
   saveCost: isEn ? "Save cost" : "Сохранить себестоимость",
   saving: isEn ? "saving…" : "сохранение…",
@@ -37,7 +38,7 @@ const L = {
 
 const RUB = "₽";
 
-export function UnitEconomics({ priceRub, commissionPct, costRub, productId }: { priceRub: number; commissionPct: number | null; costRub?: number | null; productId: string }) {
+export function UnitEconomics({ priceRub, commissionPct, costRub, taxRate, productId }: { priceRub: number; commissionPct: number | null; costRub?: number | null; taxRate?: number | null; productId: string }) {
   const [price, setPrice] = useState<string>(priceRub ? priceRub.toFixed(0) : "");
   const [cost, setCost] = useState<string>(costRub != null ? String(costRub) : "");
   const [savedCost, setSavedCost] = useState<string>(costRub != null ? String(costRub) : "");
@@ -46,7 +47,7 @@ export function UnitEconomics({ priceRub, commissionPct, costRub, productId }: {
   const [commission, setCommission] = useState<string>(commissionPct != null ? String(commissionPct) : "");
   const [logistics, setLogistics] = useState<string>("1");
   const [acquiring, setAcquiring] = useState<string>("2");
-  const [tax, setTax] = useState<string>("0");
+  const [tax, setTax] = useState<string>(taxRate != null ? String(taxRate) : "0");
   const [ads, setAds] = useState<string>("0");
 
   const n = (s: string) => {
@@ -86,10 +87,7 @@ export function UnitEconomics({ priceRub, commissionPct, costRub, productId }: {
 
   return (
     <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
-      <div className="flex items-center gap-2">
-        <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">{L.title}</h2>
-        <span className="font-mono text-[9px] uppercase tracking-wider px-1.5 py-px rounded bg-azure/10 text-azure border border-azure/30">{L.beta}</span>
-      </div>
+      <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold">{L.title}</h2>
       <h3 className="font-display text-base sm:text-lg font-medium text-ink mt-1">{L.h}</h3>
       <div className="flex items-start justify-between gap-3 mb-4">
         <p className="text-sm text-ink-muted">{L.sub}</p>
@@ -107,7 +105,7 @@ export function UnitEconomics({ priceRub, commissionPct, costRub, productId }: {
         <Field label={L.commission} suffix="%" value={commission} onChange={setCommission} hint={commissionPct != null ? L.fromApi : undefined} />
         <Field label={L.logistics} suffix="%" value={logistics} onChange={setLogistics} />
         <Field label={L.acquiring} suffix="%" value={acquiring} onChange={setAcquiring} />
-        <Field label={L.tax} suffix="%" value={tax} onChange={setTax} />
+        <Field label={L.tax} suffix="%" value={tax} onChange={setTax} hint={taxRate != null ? L.fromCabinet : undefined} />
         <Field label={L.ads} suffix="%" value={ads} onChange={setAds} />
       </div>
 
