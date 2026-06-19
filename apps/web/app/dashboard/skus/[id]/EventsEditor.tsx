@@ -270,7 +270,7 @@ export function EventsTable({
   );
 }
 
-function AddEventModal({
+export function AddEventModal({
   onClose,
   onSubmit,
 }: {
