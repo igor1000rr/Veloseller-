@@ -276,7 +276,7 @@ def recalc_seller(seller_id, period_days=30, progress=None):
     sb = get_supabase()
     period_end = date.today()
     period_start = period_end - timedelta(days=period_days - 1)
-    seller_tz = pytz.timezone(_seller_timezone(sb, seller_id))
+    seller_tz = _seller_timezone(sb, seller_id)
 
     _bump_progress(progress, phase="loading_products", period_days=period_days, processed=0, total=0)
 
@@ -624,7 +624,7 @@ def recalc_seller_asof(seller_id, as_of, period_days=30):
     sb = get_supabase()
     period_end = as_of
     period_start = period_end - timedelta(days=period_days - 1)
-    seller_tz = pytz.timezone(_seller_timezone(sb, seller_id))
+    seller_tz = _seller_timezone(sb, seller_id)
 
     products = fetch_all(
         sb.table("products").select("product_id,sku,connection_id").eq("seller_id", seller_id)
