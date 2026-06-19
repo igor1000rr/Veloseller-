@@ -236,6 +236,10 @@ def _resolve_ozon_tag(attrs_by_pid: dict[str, dict], cat_by_id: dict[int, str], 
                 category = cat_by_id.get(int(dcid))
             except (TypeError, ValueError):
                 category = None
+    # Фоллбэк: дерево недоступно (403) или id не нашлись в картах → берём имя
+    # напрямую из attributes, если Ozon его вернул. type_name точнее категории.
+    if not category:
+        category = a.get("type_name") or a.get("cat_name")
     return brand, category
 
 
