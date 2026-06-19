@@ -208,3 +208,154 @@ export async function saveSellerTaxRate(rate: number | null): Promise<{ ok: bool
     return { ok: false, error: e?.message ?? "unknown error" };
   }
 }
+
+// =============================================================================
+// Календарь событий по SKU и складам (таблица product_events).
+//
+// product_id = NULL → общее событие склада (привязано к connection_id) и при
+// чтении «дублируется» во все товары этого склада. product_id задан → событие
+// конкретного товара. Праздники в БД НЕ пишем — они виртуальные (lib/holidays).
+// Везде защита: явный eq(seller_id) + RLS product_events_seller_all.
+// =============================================================================
+
+const EVENT_TITLE_MAX = 100;
+const EVENT_COMMENT_MAX = 1000;
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+type EventCoreFields = {
+  title: string;
+  startDate: string;
+  endDate?: string | null;
+  comment?: string | null;
+};
+
+type NormalizedEvent =
+  | { ok: true; title: string; startDate: string; endDate: string | null; comment: string | null }
+  | { ok: false; error: string };
+
+function normalizeEventFields(input: EventCoreFields): NormalizedEvent {
+  const title = (input?.title ?? "").trim().slice(0, EVENT_TITLE_MAX);
+  if (!title) return { ok: false, error: "Название события обязательно" };
+  if (!ISO_DATE_RE.test(input?.startDate ?? "")) return { ok: false, error: "Некорректная дата начала" };
+  const endDate = input.endDate && ISO_DATE_RE.test(input.endDate) ? input.endDate : null;
+  if (endDate && endDate < input.startDate) return { ok: false, error: "Дата окончания раньше даты начала" };
+  const comment = typeof input.comment === "string" && input.comment.trim()
+    ? input.comment.slice(0, EVENT_COMMENT_MAX)
+    : null;
+  return { ok: true, title, startDate: input.startDate, endDate, comment };
+}
+
+/**
+ * Создать событие. connectionId обязателен. productId опционален: если задан —
+ * событие товара (проверяем, что товар принадлежит селлеру и этому складу),
+ * если нет — общее событие склада.
+ */
+export async function createProductEvent(
+  input: EventCoreFields & { connectionId: string; productId?: string | null },
+): Promise<{ ok: boolean; id?: string; error?: string }> {
+  if (!input?.connectionId || typeof input.connectionId !== "string") {
+    return { ok: false, error: "Не указан склад" };
+  }
+  const norm = normalizeEventFields(input);
+  if (!norm.ok) return { ok: false, error: norm.error };
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "unauthorized" };
+
+    const { data: conn } = await supabase
+      .from("data_connections")
+      .select("id")
+      .eq("id", input.connectionId)
+      .eq("seller_id", user.id)
+      .maybeSingle();
+    if (!conn) return { ok: false, error: "Склад не найден" };
+
+    let productId: string | null = null;
+    if (input.productId) {
+      const { data: prod } = await supabase
+        .from("products")
+        .select("product_id")
+        .eq("product_id", input.productId)
+        .eq("seller_id", user.id)
+        .eq("connection_id", input.connectionId)
+        .maybeSingle();
+      if (!prod) return { ok: false, error: "Товар не найден" };
+      productId = input.productId;
+    }
+
+    const { data, error } = await supabase
+      .from("product_events")
+      .insert({
+        seller_id: user.id,
+        connection_id: input.connectionId,
+        product_id: productId,
+        title: norm.title,
+        start_date: norm.startDate,
+        end_date: norm.endDate,
+        comment: norm.comment,
+      })
+      .select("id")
+      .single();
+    if (error) return { ok: false, error: error.message };
+
+    revalidatePath("/dashboard/skus");
+    revalidatePath("/dashboard");
+    return { ok: true, id: (data?.id as string) ?? undefined };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "unknown error" };
+  }
+}
+
+/** Обновить событие (своё — eq(seller_id) + RLS). */
+export async function updateProductEvent(
+  id: string,
+  patch: EventCoreFields,
+): Promise<{ ok: boolean; error?: string }> {
+  if (!id || typeof id !== "string") return { ok: false, error: "invalid id" };
+  const norm = normalizeEventFields(patch);
+  if (!norm.ok) return { ok: false, error: norm.error };
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "unauthorized" };
+    const { error } = await supabase
+      .from("product_events")
+      .update({
+        title: norm.title,
+        start_date: norm.startDate,
+        end_date: norm.endDate,
+        comment: norm.comment,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id)
+      .eq("seller_id", user.id);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath("/dashboard/skus");
+    revalidatePath("/dashboard");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "unknown error" };
+  }
+}
+
+/** Удалить событие (своё — eq(seller_id) + RLS). */
+export async function deleteProductEvent(id: string): Promise<{ ok: boolean; error?: string }> {
+  if (!id || typeof id !== "string") return { ok: false, error: "invalid id" };
+  try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return { ok: false, error: "unauthorized" };
+    const { error } = await supabase
+      .from("product_events")
+      .delete()
+      .eq("id", id)
+      .eq("seller_id", user.id);
+    if (error) return { ok: false, error: error.message };
+    revalidatePath("/dashboard/skus");
+    revalidatePath("/dashboard");
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "unknown error" };
+  }
+}
