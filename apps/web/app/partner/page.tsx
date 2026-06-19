@@ -22,7 +22,6 @@ const SHARE_PCT = 20;
 const COOKIE_DAYS = 60;
 const MIN_PAYOUT = "5 000 ₽";
 const PARTNER_EMAIL = "partners@veloseller.ru";
-const PARTNER_TG = ""; // впиши хэндл (напр. veloseller_partners) — появится кнопка Telegram
 
 const MAILTO =
   "mailto:" + PARTNER_EMAIL + "?subject=" +
