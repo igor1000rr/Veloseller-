@@ -239,13 +239,22 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
         {activeCalForTip.length > 0 && (
           <div className="mt-3 pt-2 border-t border-line">
             <div className="font-mono text-[10px] uppercase tracking-widest text-orange font-semibold mb-1">{isEn ? "Events" : "События"}</div>
-            {activeCalForTip.map((e) => (
-              <div key={e.id} className="text-xs text-ink-muted mb-1 leading-snug">
-                <span className="font-semibold text-ink-soft">{e.title}</span>
-                <span className="text-ink-hush">{" · "}{e.startDate.slice(8, 10)}.{e.startDate.slice(5, 7)}{e.endDate && e.endDate !== e.startDate ? ` – ${e.endDate.slice(8, 10)}.${e.endDate.slice(5, 7)}` : ""}</span>
-                {e.comment ? <div className="text-ink-muted">{e.comment.slice(0, 100)}{e.comment.length > 100 ? "…" : ""}</div> : null}
-              </div>
-            ))}
+            {activeCalForTip.map((e) => {
+              const vd = eventVelocity.get(e.id);
+              return (
+                <div key={e.id} className="text-xs text-ink-muted mb-1 leading-snug">
+                  <span className="font-semibold text-ink-soft">{e.title}</span>
+                  <span className="text-ink-hush">{" · "}{e.startDate.slice(8, 10)}.{e.startDate.slice(5, 7)}{e.endDate && e.endDate !== e.startDate ? ` – ${e.endDate.slice(8, 10)}.${e.endDate.slice(5, 7)}` : ""}</span>
+                  {vd && (
+                    <div className="font-mono text-[10px] text-ink-soft">
+                      TVelo: {vd.before.toFixed(2)} → {vd.after.toFixed(2)}{" "}
+                      <span className={vd.pct >= 0 ? "text-lime-deep font-semibold" : "text-rose font-semibold"}>({vd.pct >= 0 ? "+" : ""}{vd.pct.toFixed(0)}%)</span>
+                    </div>
+                  )}
+                  {e.comment ? <div className="text-ink-muted">{e.comment.slice(0, 100)}{e.comment.length > 100 ? "…" : ""}</div> : null}
+                </div>
+              );
+            })}
           </div>
         )}
         {events.length > 0 && (
