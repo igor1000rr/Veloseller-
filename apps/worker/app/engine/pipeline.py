@@ -105,14 +105,25 @@ def compute_metrics_for_sku(
     consumption = vel_mod.confirmed_consumption(sales_like_deltas)
     conf_vel = vel_mod.confirmed_velocity(consumption, in_stock_days)
 
-    # Медиана для estimated_continuity:
-    # - Если вызывающий передал history_for_median (преферабльно: 30-day pre-period sales) — берём её.
-    # - Иначе fallback: текущие sales_like_deltas (циклично, но лучше чем ничего).
+    # Медиана для estimated_continuity — тиры (матаудит #2): не схлопнуться в 0 и
+    # не считать по шумной мелкой выборке.
+    #  1) >= MIN_REPRESENTATIVE_DAYS чистых дней в истории (30д до периода) → медиана по ней;
+    #  2) < порога → расширяем окно чистыми sales_like днями самого периода (уже
+    #     загруженные данные, суммарно ~60-90 дней — закрывает «месяц шумный,
+    #     чистых дней мало», без лишнего фетча снапшотов / egress);
+    #  3) положительных всё ещё нет → soft-velocity по всем дням-расхода без экстремумов.
+    in_period_clean = [abs(d) for d in sales_like_deltas]
     if history_for_median is None:
-        history_for_median = [abs(d) for d in sales_like_deltas]
-    median_30d_vel = vel_mod.median_30d_velocity(history_for_median)
+        history_for_median = list(in_period_clean)
+    primary_hist = [h for h in history_for_median if h > 0]
 
-    # Деадлок-в-0 fix: если чистых sales_like дней мало/нет, медиана = 0 и
+    if len(primary_hist) >= MIN_REPRESENTATIVE_DAYS:
+        median_30d_vel = vel_mod.median_30d_velocity(primary_hist)
+    else:
+        widened = primary_hist + [v for v in in_period_clean if v > 0]
+        median_30d_vel = vel_mod.median_30d_velocity(widened)
+
+    # Деадлок-в-0 fix: если чистых дней не нашлось вообще (median = 0),
     # adjusted_velocity схлопывается в 0 — товар выглядит мёртвым, хотя реально
     # расходовался спайками (всё ушло в anomaly_like/excluded). Берём грубую
     # soft-velocity по всем дням-расхода без экстремальных выбросов. Confidence
