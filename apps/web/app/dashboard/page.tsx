@@ -238,7 +238,7 @@ export default async function DashboardOverview({ searchParams }: {
       <DayProgress daysSinceSetup={daysSinceSetup} />
 
       {/* ===== ПОЛОСА 1: 3 средних блока ===== */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <ActionCard
           href={skusLink("low_stock")}
           label={t("dashboard.card.lowStock.label")}
@@ -262,6 +262,11 @@ export default async function DashboardOverview({ searchParams }: {
           value={wm?.dead_inventory_sku_count ?? "—"}
           sub={t("dashboard.card.dead.sub")}
           tone="warn"
+        />
+        <WarehouseEventsBlock
+          connectionId={currentWarehouseId}
+          initial={generalEvents}
+          holidays={holidayEventsStore}
         />
       </div>
 
