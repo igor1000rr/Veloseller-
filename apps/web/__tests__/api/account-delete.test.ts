@@ -53,13 +53,6 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
-vi.mock("@/lib/stripe", () => ({
-  getStripe: () => ({
-    subscriptions: { cancel: vi.fn() },
-    customers: { del: vi.fn() },
-  }),
-}));
-
 beforeEach(() => {
   getUserMock.mockReset();
   getSellerMock.mockReset();
