@@ -2,7 +2,7 @@
 import { useMemo, useState } from "react";
 import {
   ComposedChart, Line, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Legend, ReferenceDot, ReferenceLine, Area,
+  Legend, ReferenceDot, ReferenceLine, ReferenceArea, Area,
 } from "recharts";
 import { t } from "@/lib/i18n";
 import { LOCALE } from "@/lib/features";
