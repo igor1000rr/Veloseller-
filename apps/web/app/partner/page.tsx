@@ -16,6 +16,14 @@ export const metadata: Metadata = {
   title: "Партнёрская программа",
   description:
     "Приводите клиентов в Veloseller и получайте 20% с их платежей пожизненно. Программа для агентств, консультантов и сервисов для селлеров Wildberries и Ozon.",
+  alternates: { canonical: "/partner" },
+  openGraph: {
+    title: "Партнёрская программа Veloseller — 20% пожизненно",
+    description:
+      "Приводите селлеров Wildberries и Ozon в Veloseller и получайте 20% с их платежей пожизненно. Для агентств, консультантов и сервисов.",
+    url: "https://veloseller.ru/partner",
+    type: "website",
+  },
 };
 
 const SHARE_PCT = 20;
