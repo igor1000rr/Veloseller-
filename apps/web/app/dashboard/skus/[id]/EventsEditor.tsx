@@ -198,7 +198,7 @@ export function EventsTable({
           title: d.title.trim().slice(0, 50),
           startDate: d.startDate,
           endDate: d.endDate || null,
-          comment: d.comment.trim() ? d.comment.slice(0, 1000) : null,
+          comment: d.comment.trim() ? d.comment.slice(0, 100) : null,
         });
       }
     }
@@ -316,7 +316,7 @@ export function AddEventModal({
           <button
             type="button"
             disabled={!valid}
-            onClick={() => onSubmit({ title: title.trim().slice(0, 50), startDate, endDate: endDate || null, comment: comment.trim() ? comment.slice(0, 1000) : null })}
+            onClick={() => onSubmit({ title: title.trim().slice(0, 50), startDate, endDate: endDate || null, comment: comment.trim() ? comment.slice(0, 100) : null })}
             className="rounded-lg bg-orange px-4 py-1.5 font-mono text-[11px] uppercase tracking-wider text-white hover:opacity-90 transition disabled:opacity-40"
           >
             {L.save}
