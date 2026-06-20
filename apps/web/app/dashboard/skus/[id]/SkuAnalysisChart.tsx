@@ -344,10 +344,14 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
             фолбэк на price для исторических точек до появления раздельных полей (#3) */}
         <Line yAxisId="price" type="monotone" dataKey={(d: any) => d.marketingPrice ?? d.price} stroke="#7c3aed"
               strokeWidth={2} strokeDasharray="4 4" dot={false} name={L.marketingPrice} connectNulls />
-        {/* Ваша цена (номинал, что ставит продавец) — янтарная сплошная.
-            Расхождение с фиолетовой = манипуляция маркетплейса скидками (#3) */}
-        <Line yAxisId="price" type="monotone" dataKey={(d: any) => d.sellerPrice ?? d.price} stroke="#d97706"
+        {/* Ваша цена (номинал, что ставит продавец) — красная сплошная (Игорь 20.06:
+            оранжевый отдали под «События», янтарный с ним путался). Расхождение с
+            фиолетовой = манипуляция маркетплейса скидками (#3) */}
+        <Line yAxisId="price" type="monotone" dataKey={(d: any) => d.sellerPrice ?? d.price} stroke="#dc2626"
               strokeWidth={1.5} dot={false} name={L.sellerPrice} connectNulls />
+        {/* Пункт легенды «События» (оранжевый): оверлей рисуется ReferenceArea/ReferenceLine
+            ниже и в легенду не попадает — добавляем фантомной линией без данных. */}
+        <Line yAxisId="band" dataKey="__events_legend" stroke="#ea580c" strokeWidth={3} dot={false} name={isEn ? "Events" : "События"} isAnimationActive={false} legendType="line" />
 
         {/* Rule 12.2 — vertical markers на каждое изменение цены */}
         {priceChanges.map((pc, i) => (
