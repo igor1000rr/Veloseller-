@@ -5,15 +5,20 @@
  * Перед праздником на маркетплейсах всегда идёт пик продаж. Селлеру важно видеть
  * текущую скорость продаж именно в этот ужатый период, а не в обычный 30-дневный.
  *
- * Окна по Игорю:
- *   01.01 — за 14 дней до (18.12 — 31.12)
- *   14.02 — за 7 дней до (07.02 — 13.02)
- *   23.02 — за 7 дней до (16.02 — 22.02)
- *   08.03 — за 7 дней до (01.03 — 07.03)
+ * Окна по Игорю (20.06.2026):
+ *   31.12 — за 21 день (10.12 — 31.12)  ← Новый год
+ *   23.02 — за 14 дней (09.02 — 23.02)
+ *   08.03 — за 14 дней (22.02 — 08.03)
+ *   11.11 — за 7 дней  (04.11 — 11.11)  ← всемирный день шопинга / распродажа
+ *   14.02 — за 7 дней  (07.02 — 14.02)
+ *
+ * Праздники заданы как (месяц, день) БЕЗ года — окна считаются на лету для нужного
+ * года в getHolidayEventsInRange / getPreHolidayWindow. Добавлять вручную каждый
+ * год НЕ нужно: всё повторяется автоматически.
  */
 
 export type PreHolidayWindow = {
-  /** Длительность окна в днях (7 или 14). */
+  /** Длительность окна в днях. */
   daysBefore: number;
   /** Читабельное название праздника. */
   holidayName: string;
@@ -36,10 +41,11 @@ type HolidayDef = {
 };
 
 const HOLIDAYS: HolidayDef[] = [
-  { month: 1,  day: 1,  daysBefore: 14, name: "Нового года", calendarName: "Новый год" },
-  { month: 2,  day: 14, daysBefore: 7,  name: "14 февраля",  calendarName: "14 февраля" },
-  { month: 2,  day: 23, daysBefore: 7,  name: "23 февраля",  calendarName: "23 февраля" },
-  { month: 3,  day: 8,  daysBefore: 7,  name: "8 марта",     calendarName: "8 марта" },
+  { month: 2,  day: 14, daysBefore: 7,  name: "14 февраля",       calendarName: "14 февраля" },
+  { month: 2,  day: 23, daysBefore: 14, name: "23 февраля",       calendarName: "23 февраля" },
+  { month: 3,  day: 8,  daysBefore: 14, name: "8 марта",          calendarName: "8 марта" },
+  { month: 11, day: 11, daysBefore: 7,  name: "распродажи 11.11", calendarName: "Распродажа 11.11" },
+  { month: 12, day: 31, daysBefore: 21, name: "Нового года",      calendarName: "Новый год" },
 ];
 
 function isoDateUtc(d: Date): string {
@@ -50,14 +56,13 @@ function isoDateUtc(d: Date): string {
  * Если today попадает в окно [holiday - N, holiday - 1] одного из праздников —
  * возвращаем параметры этого окна. Иначе null.
  *
- * Для Нового года проверяем и текущий, и следующий год (в декабре идёт отсчёт
- * до НГ следующего года).
+ * Проверяем текущий и следующий год, чтобы корректно ловить окна на стыке лет.
  */
 export function getPreHolidayWindow(today: Date): PreHolidayWindow | null {
   const year = today.getUTCFullYear();
 
   for (const h of HOLIDAYS) {
-    // Кандидаты — текущий и следующий год (на случай НГ в декабре).
+    // Кандидаты — текущий и следующий год (на случай окон на стыке лет).
     for (const candidateYear of [year, year + 1]) {
       const holidayDate = new Date(Date.UTC(candidateYear, h.month - 1, h.day));
       const windowStart = new Date(holidayDate);
