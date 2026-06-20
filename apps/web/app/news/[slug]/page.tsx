@@ -72,6 +72,7 @@ export default async function NewsPostPage({ params }: Props) {
     '@type': 'Article',
     headline: post.title,
     description: post.description,
+    image: [`${SITE_URL}/og-image.png`],
     datePublished: post.publishedAt,
     dateModified: post.publishedAt,
     keywords: post.keywords.join(', '),
