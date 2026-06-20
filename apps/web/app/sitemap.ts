@@ -52,6 +52,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: 'yearly',
       priority: 0.3,
     },
+    // Партнёрская программа — публичная маркетинговая страница
+    {
+      url: `${SITE_URL}/partner`,
+      lastModified: now,
+      changeFrequency: 'monthly',
+      priority: 0.6,
+    },
     // Гайды — каждый отдельной записью
     ...posts.map((post) => ({
       url: `${SITE_URL}/news/${post.slug}`,
