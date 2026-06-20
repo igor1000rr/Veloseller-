@@ -19,6 +19,14 @@ export const metadata: Metadata = {
   title: "Мобильное приложение",
   description:
     "Мобильное приложение Veloseller для iOS и Android — скоро. Дашборд остатков, push о дозаказе, склады WB и Ozon, прогноз нехватки на телефоне. А пока — установите веб-версию.",
+  alternates: { canonical: "/apps" },
+  openGraph: {
+    title: "Мобильное приложение Veloseller — iOS и Android",
+    description:
+      "Дашборд остатков, push о дозаказе, склады WB и Ozon, прогноз нехватки — на телефоне.",
+    url: "https://veloseller.ru/apps",
+    type: "website",
+  },
 };
 
 const HOVER: Record<string, string> = {
