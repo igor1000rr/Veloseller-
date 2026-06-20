@@ -317,7 +317,7 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
         <CartesianGrid strokeDasharray="3 3" stroke="#e6e3d4" vertical={false} />
         <XAxis dataKey="dateLabel" stroke="#8a8a7e" fontSize={11} tickLine={false} />
         {/* Левая шкала — только TVelo (Александр 04.06.2026). */}
-        <YAxis yAxisId="velocity" stroke="#3f6212" fontSize={11} tickLine={false} domain={[0, "auto"]}
+        <YAxis yAxisId="velocity" stroke="#3f6212" fontSize={11} tickLine={false} domain={[0, (max: number) => (max > 0 ? max * 1.18 : 1)]}
                label={{ value: t("sku.chart.axisLeft"), angle: -90, position: "insideLeft", fill: "#3f6212", fontSize: 11 }} />
         <YAxis yAxisId="price" orientation="right" stroke="#7c3aed" fontSize={11} tickLine={false}
                label={{ value: t("sku.chart.price"), angle: 90, position: "insideRight", fill: "#7c3aed", fontSize: 11 }} />
