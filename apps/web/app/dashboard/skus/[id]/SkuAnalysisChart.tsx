@@ -383,7 +383,21 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
           />
         ))}
 
-        {/* Календарь событий — оранжевый отрезок по верхней границе + точки на концах */}
+        {/* Календарь событий — компактная полоса сверху: рамка-контейнер + отрезки по под-рядам */}
+        {hasEvents && (
+          <ReferenceArea
+            yAxisId="band"
+            x1={formatted[0].dateLabel}
+            x2={formatted[formatted.length - 1].dateLabel}
+            y1={laneBottom}
+            y2={1}
+            fill="#ea580c"
+            fillOpacity={0.05}
+            stroke="#ea580c"
+            strokeOpacity={0.35}
+            strokeWidth={1}
+          />
+        )}
         {eventSegments.map((s) => (
           <ReferenceLine
             key={`ev-${s.id}`}
