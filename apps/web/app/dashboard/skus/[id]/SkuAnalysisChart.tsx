@@ -233,7 +233,7 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
           <Row label="TVelo" value={p.velocity != null ? Number(p.velocity).toFixed(2) : "—"} color="#3f6212" />
           {p.sellerPrice != null && p.marketingPrice != null && Math.abs(Number(p.sellerPrice) - Number(p.marketingPrice)) >= 0.01 ? (
             <>
-              <Row label={L.sellerPrice} value={Number(p.sellerPrice).toFixed(2)} color="#d97706" />
+              <Row label={L.sellerPrice} value={Number(p.sellerPrice).toFixed(2)} color="#dc2626" />
               <Row label={L.marketingPrice} value={Number(p.marketingPrice).toFixed(2)} color="#7c3aed" />
             </>
           ) : (
