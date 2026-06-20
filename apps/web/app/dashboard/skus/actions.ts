@@ -219,7 +219,7 @@ export async function saveSellerTaxRate(rate: number | null): Promise<{ ok: bool
 // =============================================================================
 
 const EVENT_TITLE_MAX = 50;
-const EVENT_COMMENT_MAX = 1000;
+const EVENT_COMMENT_MAX = 100;
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 type EventCoreFields = {
