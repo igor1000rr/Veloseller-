@@ -242,7 +242,7 @@ export function EventsTable({
             return (
               <tr key={e.id} className="border-t border-orange/15 align-top">
                 <td className="px-1 py-1">
-                  <input value={d.title} maxLength={100} onChange={(ev) => set({ title: ev.target.value })} className="w-full min-w-[120px] px-1.5 py-1 rounded border border-line bg-paper text-ink outline-none focus:border-orange/60" />
+                  <input value={d.title} maxLength={50} onChange={(ev) => set({ title: ev.target.value })} className="w-full min-w-[120px] px-1.5 py-1 rounded border border-line bg-paper text-ink outline-none focus:border-orange/60" />
                 </td>
                 <td className="px-1 py-1">
                   <input type="date" value={d.startDate} onChange={(ev) => set({ startDate: ev.target.value })} className="px-1.5 py-1 rounded border border-line bg-paper font-mono text-ink outline-none focus:border-orange/60" />
@@ -290,7 +290,7 @@ export function AddEventModal({
         <div className="space-y-3">
           <label className="block">
             <span className="font-mono text-[10px] uppercase tracking-wider text-ink-hush">{L.name} *</span>
-            <input value={title} maxLength={100} onChange={(e) => setTitle(e.target.value)} autoFocus className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-line bg-paper text-sm text-ink outline-none focus:border-orange/60" />
+            <input value={title} maxLength={50} onChange={(e) => setTitle(e.target.value)} autoFocus className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-line bg-paper text-sm text-ink outline-none focus:border-orange/60" />
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block">
