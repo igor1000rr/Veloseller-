@@ -251,7 +251,7 @@ export function EventsTable({
                   <input type="date" value={d.endDate} min={d.startDate} onChange={(ev) => set({ endDate: ev.target.value })} className="px-1.5 py-1 rounded border border-line bg-paper font-mono text-ink outline-none focus:border-orange/60" />
                 </td>
                 <td className="px-1 py-1">
-                  <input value={d.comment} maxLength={1000} onChange={(ev) => set({ comment: ev.target.value })} className="w-full min-w-[140px] px-1.5 py-1 rounded border border-line bg-paper text-ink outline-none focus:border-orange/60" />
+                  <input value={d.comment} maxLength={100} onChange={(ev) => set({ comment: ev.target.value })} className="w-full min-w-[140px] px-1.5 py-1 rounded border border-line bg-paper text-ink outline-none focus:border-orange/60" />
                 </td>
                 <td className="px-1 py-1 whitespace-nowrap">
                   <button type="button" onClick={() => onDelete(e.id)} className="font-mono text-[10px] uppercase tracking-wider text-rose hover:underline">{L.del}</button>
@@ -308,7 +308,7 @@ export function AddEventModal({
             <span className="font-mono text-[10px] uppercase tracking-wider text-ink-hush">
               {L.comment} <span className="normal-case text-ink-hush/70">({L.optional})</span>
             </span>
-            <textarea value={comment} maxLength={1000} rows={3} onChange={(e) => setComment(e.target.value)} className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-line bg-paper text-sm text-ink outline-none focus:border-orange/60 resize-none" />
+            <textarea value={comment} maxLength={100} rows={3} onChange={(e) => setComment(e.target.value)} className="mt-1 w-full px-2.5 py-1.5 rounded-lg border border-line bg-paper text-sm text-ink outline-none focus:border-orange/60 resize-none" />
           </label>
         </div>
         <div className="mt-4 flex justify-end gap-2">
