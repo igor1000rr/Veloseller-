@@ -244,8 +244,9 @@ class TestOzon:
         assert snaps[0].sku == "999"
         assert snaps[0].stock_quantity == 5
 
-    def test_price_fallback_to_zero_when_prices_endpoint_fails(self):
-        """Если /v5/product/info/prices упал — цены = 0, остальное работает."""
+    def test_price_unknown_when_prices_endpoint_fails(self):
+        """Если /v5/product/info/prices упал — цена = None (carry-forward в
+        _persist_snapshots), фантомный 0 не пишется. Остальное работает."""
         import httpx as _httpx
         list_resp = {"result": {"items": [{"product_id": 1, "offer_id": "X"}], "last_id": ""}}
         stocks_resp = {"items": [{"product_id": 1, "offer_id": "X",
@@ -265,7 +266,7 @@ class TestOzon:
         assert len(snaps) == 1
         assert snaps[0].sku == "X"
         assert snaps[0].stock_quantity == 5
-        assert snaps[0].price == Decimal("0")
+        assert snaps[0].price is None
 
 
 # ============== WILDBERRIES ==============

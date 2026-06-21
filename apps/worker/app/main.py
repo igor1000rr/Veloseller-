@@ -479,17 +479,29 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
     rows = []
     skipped_duplicates = 0
     skipped_unmapped = 0
+    skipped_no_price = 0
     for s in snapshots:
         pid = sku_to_pid.get(s.sku)
         if not pid:
             skipped_unmapped += 1
             continue
         last = last_snapshots.get(pid)
+        last_price = float(last.get("price") or 0) if last is not None else None
+
+        # Цена неизвестна (источник не смог получить — частичный сбой фетча): не
+        # пишем фантомный 0, а переносим последнюю известную цену. Нет истории —
+        # пропускаем снапшот (станет MISSING-день), чтобы не завести 0 в историю цен.
+        if s.price is None:
+            if last_price is None:
+                skipped_no_price += 1
+                continue
+            cur_price = last_price
+        else:
+            cur_price = float(s.price)
+
         if last is not None:
             last_stock = int(last.get("stock_quantity") or 0)
-            last_price = float(last.get("price") or 0)
             cur_stock = int(s.stock_quantity)
-            cur_price = float(s.price)
             # marketing_price тоже в ключе дедупа (#3): иначе изменение скидки МП при
             # тех же stock+price скипалось бы и факт. цена на графике не обновлялась.
             # Лишние строки безопасны: stock тот же → движок не видит ложных продаж.
@@ -506,7 +518,7 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
         ts = s.snapshot_time or datetime.now(timezone.utc)
         rows.append({
             "product_id": pid, "connection_id": connection_id,
-            "stock_quantity": s.stock_quantity, "price": float(s.price),
+            "stock_quantity": s.stock_quantity, "price": cur_price,
             "availability": s.stock_quantity > 0,
             "snapshot_time": ts.isoformat(), "source": source.value,
             "seller_price": float(s.seller_price) if s.seller_price is not None else None,
@@ -519,7 +531,8 @@ def _persist_snapshots(seller_id, connection_id, source, snapshots):
     logger.info("snapshots persisted", extra={
         "seller_id": seller_id, "connection_id": connection_id,
         "inserted": len(rows), "skipped_duplicates": skipped_duplicates,
-        "skipped_unmapped": skipped_unmapped, "total_skus": len(snapshots),
+        "skipped_unmapped": skipped_unmapped, "skipped_no_price": skipped_no_price,
+        "total_skus": len(snapshots),
         "batches": (len(rows) + _INSERT_BATCH - 1) // _INSERT_BATCH if rows else 0,
     })
     return len(rows)

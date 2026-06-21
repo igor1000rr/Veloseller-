@@ -41,7 +41,10 @@ class SnapshotInput(BaseModel):
     sku: str
     product_name: Optional[str] = None
     stock_quantity: int = Field(ge=0)
-    price: Decimal = Field(ge=0)
+    # None = цена не получена (частичный сбой фетча у источника). _persist_snapshots
+    # переносит последнюю известную цену вместо записи фантомного 0 (искажал бы
+    # lost_revenue / unit-экономику). Источник, получивший цену, кладёт Decimal.
+    price: Optional[Decimal] = Field(default=None, ge=0)
     snapshot_time: Optional[datetime] = None
     # Доп. поля (правки 10): цена продавца / факт. цена со скидками (#3),
     # комиссия маркетплейса в % (#5), бренд и категория для тегов (#6).

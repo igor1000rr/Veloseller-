@@ -339,7 +339,9 @@ def _fetch_fbs_stocks(cli: httpx.Client, token: str, warehouse_id: int, skus: li
 
     Батчим по FBS_STOCKS_BATCH=1000 — API имеет лимит на размер body.
 
-    Returns: {barcode: amount}. Если batch упал — пропускаем с warning, идём дальше.
+    Returns: {barcode: amount}. Если batch упал (после retry) — ПАДАЕМ (fail-loud):
+    иначе остатки этого склада ушли бы в 0 и движок увидел бы фантомные продажи.
+    Синк отметится ошибкой и повторится джобом retry-transient-errors.
     """
     if not skus:
         return {}
@@ -357,10 +359,10 @@ def _fetch_fbs_stocks(cli: httpx.Client, token: str, warehouse_id: int, skus: li
             return resp.json() or {}
         try:
             data = with_retry(_call, base_delay=5.0, max_delay=30.0)
-        except Exception as e:
-            logger.warning("WB FBS stocks batch failed for warehouse %d (batch %d): %s",
-                           warehouse_id, i // FBS_STOCKS_BATCH, e)
-            continue
+        except Exception:
+            logger.error("WB FBS stocks batch failed for warehouse %d (batch %d) — fail-loud",
+                         warehouse_id, i // FBS_STOCKS_BATCH)
+            raise
         for item in (data.get("stocks") or []):
             barcode = (item.get("sku") or "").strip()
             amount = int(item.get("amount") or 0)

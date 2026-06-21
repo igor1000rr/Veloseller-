@@ -239,3 +239,56 @@ class TestPersistSnapshotsDedup:
         snaps = [_mk_snap("A1")]
         result = _persist_snapshots("seller-1", None, SourceType.CSV_UPLOAD, snaps)
         assert result == 0
+
+
+class TestPersistSnapshotsPriceCarryForward:
+    """price=None (частичный сбой фетча цен): перенос последней цены вместо 0."""
+
+    def _setup_mock(self):
+        mock_sb = MagicMock()
+        mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
+        _setup_mock_for_select(mock_sb, [{"product_id": "pid-A", "sku": "A1"}])
+        return mock_sb
+
+    def test_unknown_price_carries_forward_last(self, monkeypatch):
+        """Цена None + есть история → пишем последнюю известную, не 0."""
+        mock_sb = self._setup_mock()
+        monkeypatch.setattr("app.main.fetch_all", lambda q: [
+            {"product_id": "pid-A", "stock_quantity": 10, "price": "100.00",
+             "snapshot_time": "2026-05-19T12:00:00Z"},
+        ])
+        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+
+        snaps = [SnapshotInput(sku="A1", stock_quantity=8, price=None)]
+        result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
+
+        assert result == 1
+        rows = mock_sb.table.return_value.insert.call_args[0][0]
+        assert rows[0]["price"] == 100.0       # перенесена последняя известная
+        assert rows[0]["stock_quantity"] == 8
+
+    def test_unknown_price_no_history_skipped(self, monkeypatch):
+        """Цена None + нет истории → снапшот пропускается (не пишем фантомный 0)."""
+        mock_sb = self._setup_mock()
+        monkeypatch.setattr("app.main.fetch_all", lambda q: [])
+        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+
+        snaps = [SnapshotInput(sku="A1", stock_quantity=8, price=None)]
+        result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
+
+        assert result == 0
+        mock_sb.table.return_value.insert.assert_not_called()
+
+    def test_unknown_price_same_stock_dedup(self, monkeypatch):
+        """Цена None + тот же сток → carry-forward даёт ту же цену → дедуп."""
+        mock_sb = self._setup_mock()
+        monkeypatch.setattr("app.main.fetch_all", lambda q: [
+            {"product_id": "pid-A", "stock_quantity": 10, "price": "100.00",
+             "snapshot_time": "2026-05-19T12:00:00Z"},
+        ])
+        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+
+        snaps = [SnapshotInput(sku="A1", stock_quantity=10, price=None)]
+        result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
+
+        assert result == 0
