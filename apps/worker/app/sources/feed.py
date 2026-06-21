@@ -15,6 +15,7 @@
 from __future__ import annotations
 import ipaddress
 import logging
+import math
 import socket
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -127,7 +128,7 @@ def fetch_snapshots(feed_url: str) -> list[SnapshotInput]:
         has_explicit_stock = False
         for param in offer.iter("param"):
             if (param.get("name") or "").lower() in ("stock", "остаток", "наличие"):
-                stock = int(float((param.text or "0").strip()))
+                stock = _safe_int_stock(param.text)
                 has_explicit_stock = True
                 break
         if not has_explicit_stock and offer.get("available") == "true":
@@ -156,11 +157,28 @@ def fetch_snapshots(feed_url: str) -> list[SnapshotInput]:
         sku = prod.findtext("sku") or prod.findtext("id") or ""
         name = prod.findtext("name") or prod.findtext("title") or sku
         price_str = prod.findtext("price") or "0"
-        stock = int(float(prod.findtext("stock") or prod.findtext("quantity") or "0"))
+        stock = _safe_int_stock(prod.findtext("stock") or prod.findtext("quantity"))
         if sku:
             snapshots.append(_make(sku, name, stock, price_str, now))
 
     return snapshots
+
+
+def _safe_int_stock(raw: object) -> int:
+    """Безопасно парсит остаток из фида: nan/inf/мусор → 0.
+
+    Раньше int(float('nan')) на одном битом offer ронял парсинг ВСЕГО файла
+    (а не пропускал строку). math.isfinite отсекает nan/inf.
+    """
+    if raw is None:
+        return 0
+    try:
+        v = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return 0
+    if not math.isfinite(v):
+        return 0
+    return max(0, int(v))
 
 
 def _make(sku: str, name: str, stock: int, price_str: str, ts: datetime) -> SnapshotInput:

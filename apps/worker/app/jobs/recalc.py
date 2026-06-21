@@ -274,9 +274,13 @@ def _write_alerts(sb, seller_id, product_id, m, underestimated):
 
 def recalc_seller(seller_id, period_days=30, progress=None):
     sb = get_supabase()
-    period_end = date.today()
-    period_start = period_end - timedelta(days=period_days - 1)
     seller_tz = _seller_timezone(sb, seller_id)
+    # Граница периода — в TZ селлера. Worker обычно крутится в UTC, и date.today()
+    # на UTC-хосте отличается на день от локального календаря селлера → сдвигает
+    # всё окно 7/30/90 и выбор «текущего» снапшота. Остальные даты в функции уже
+    # приводятся к seller_tz, граница тоже должна.
+    period_end = datetime.now(seller_tz).date()
+    period_start = period_end - timedelta(days=period_days - 1)
 
     _bump_progress(progress, phase="loading_products", period_days=period_days, processed=0, total=0)
 
@@ -363,7 +367,9 @@ def recalc_seller(seller_id, period_days=30, progress=None):
                     {
                         "product_id": pid, "seller_id": seller_id,
                         "event_date": pc.day.isoformat(),
-                        "event_type": "recount_like", "delta_stock": None,
+                        # Изменение цены — отдельный тип, а не пересчёт склада
+                        # (раньше писалось recount_like и засоряло класс пересчётов).
+                        "event_type": "price_change", "delta_stock": None,
                         "message": f"Цена изменилась: {pc.previous_price:.2f} → {pc.new_price:.2f} ({pc.delta_pct:+.1f}%)",
                         "confidence_impact": 0.0,
                     }
@@ -545,28 +551,39 @@ def recalc_seller_all_periods(seller_id, progress=None):
 
 
 def recalc_all_sellers():
-    """БАГ 32: пагинация. БАГ 50: пропускаем sellers с активным manual recalc."""
+    """БАГ 32: пагинация. БАГ 50/конкурентность: берём ОБЩИЙ БД-лок (тот же, что
+    ручной recalc через HTTP) — чтобы на нескольких репликах один селлер не
+    считался дважды и не дрался за event-таблицы. Раньше проверялся только
+    in-process dict _running_recalcs, который не виден другим репликам/процессам,
+    поэтому ночной cron мог идти параллельно ручному recalc на другой реплике."""
     sb = get_supabase()
     sellers = fetch_all(sb.table("sellers").select("id"))
     summary = {"sellers": 0, "skipped_concurrent": 0, "metrics_written": 0,
                "alerts_written": 0, "store_metrics_written": 0,
                "warehouse_metrics_written": 0, "failed_skus": 0}
 
+    # Лок-хелперы живут в main.py (единый путь с ручным recalc). Ленивый импорт:
+    # main импортирует jobs.recalc, прямой импорт наверху дал бы цикл.
     try:
-        from app.main import _running_recalcs
+        from app.main import (
+            _try_acquire_recalc_lock as _acquire,
+            _mark_recalc_done as _mark_done,
+            _mark_recalc_error as _mark_error,
+        )
     except ImportError:
-        _running_recalcs = {}
+        _acquire = _mark_done = _mark_error = None
 
     for s in sellers:
         seller_id = s["id"]
-        state = _running_recalcs.get(seller_id) if _running_recalcs else None
-        if state and state.get("status") == "running":
+        if _acquire is not None and not _acquire(seller_id):
             summary["skipped_concurrent"] += 1
-            logger.info("recalc-all: skip seller (manual recalc running)",
+            logger.info("recalc-all: skip seller (recalc уже идёт / лок занят)",
                         extra={"seller_id": seller_id})
             continue
         try:
             r = recalc_seller_all_periods(seller_id)
+            if _mark_done is not None:
+                _mark_done(seller_id, r)
             summary["sellers"] += 1
             summary["metrics_written"] += r.get("metrics_written", 0)
             summary["alerts_written"] += r.get("alerts_written", 0)
@@ -574,6 +591,8 @@ def recalc_all_sellers():
             summary["warehouse_metrics_written"] += r.get("warehouse_metrics_written", 0)
             summary["failed_skus"] += r.get("failed_skus", 0)
         except Exception as e:
+            if _mark_error is not None:
+                _mark_error(seller_id, str(e)[:500])
             logger.exception("recalc failed for seller %s: %s", seller_id, e)
     return summary
 

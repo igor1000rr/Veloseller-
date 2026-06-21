@@ -135,3 +135,39 @@ class TestRetry:
         result = with_retry(fn, max_attempts=3, base_delay=0.01)
         assert result == "ok"
         assert len(calls) == 2
+
+
+class TestParseRetryAfter:
+    """Retry-After: число секунд ИЛИ HTTP-date (RFC 7231), с клампом по max_delay."""
+
+    def test_numeric_seconds(self):
+        from app.sources._http import _parse_retry_after
+        assert _parse_retry_after("30", 60.0) == 30.0
+
+    def test_numeric_clamped_to_max(self):
+        from app.sources._http import _parse_retry_after
+        assert _parse_retry_after("9999", 60.0) == 60.0
+
+    def test_http_date_in_past_returns_zero_not_crash(self):
+        from app.sources._http import _parse_retry_after
+        assert _parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT", 60.0) == 0.0
+
+    def test_garbage_and_none_return_none(self):
+        from app.sources._http import _parse_retry_after
+        assert _parse_retry_after("not-a-date", 60.0) is None
+        assert _parse_retry_after(None, 60.0) is None
+
+    def test_with_retry_survives_http_date_header(self, monkeypatch):
+        """503 с Retry-After как HTTP-date раньше ронял float() — теперь retry'ится."""
+        monkeypatch.setattr("app.sources._http.time.sleep", lambda s: None)
+        calls = []
+        def fn():
+            calls.append(1)
+            if len(calls) < 2:
+                resp = httpx.Response(
+                    503, headers={"Retry-After": "Wed, 21 Oct 2015 07:28:00 GMT"},
+                    request=httpx.Request("GET", "http://x"))
+                raise httpx.HTTPStatusError("503", request=resp.request, response=resp)
+            return "ok"
+        assert with_retry(fn, max_attempts=3, base_delay=0.01) == "ok"
+        assert len(calls) == 2

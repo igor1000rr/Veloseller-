@@ -244,8 +244,11 @@ def _try_acquire_recalc_lock(seller_id: str) -> bool:
     Возвращает True если лок взят (можно запускать recalc), False — если взят
     другим процессом и свежий (<1ч). Stale-локи БД перехватывает автоматически.
 
-    При ошибке БД (функция не существует, сеть) — возвращаем True (graceful fallback,
-    чтобы worker не блокировался из-за проблем с lock-системой).
+    При ошибке БД (функция не существует, сеть): в ПРОДЕ — fail-closed (False),
+    чтобы при сбое лок-системы на нескольких репликах два recalc одного селлера
+    НЕ пошли параллельно (драка за event-таблицы, дубли/пустые окна). В dev —
+    оптимистично (True), чтобы локальная разработка без БД-функции не блокировалась.
+    Раньше всегда возвращалось True — это и был fail-open баг.
     """
     try:
         sb = get_supabase()
@@ -256,9 +259,9 @@ def _try_acquire_recalc_lock(seller_id: str) -> bool:
         }).execute()
         return bool(getattr(res, "data", False))
     except Exception:
-        logger.exception("try_acquire_recalc_lock RPC failed — fallback to optimistic acquire",
+        logger.exception("try_acquire_recalc_lock RPC failed",
                          extra={"seller_id": seller_id})
-        return True
+        return not _is_production()
 
 
 def _mark_recalc_done(seller_id: str, result: dict) -> None:
@@ -663,7 +666,9 @@ def _try_acquire_sync_lock(sb, connection_id: str) -> bool:
                         extra={"connection_id": connection_id})
             return False
     except Exception:
-        pass
+        # Пре-проверка paused не критична: честный лок ниже всё равно отработает.
+        # Логируем на debug, а не глотаем молча.
+        logger.debug("paused pre-check failed", extra={"connection_id": connection_id})
 
     try:
         res = (sb.table("data_connections")
@@ -710,17 +715,6 @@ def _run_wb_sync_bg(
         if warehouse_kind == "wb_fbs":
             snapshots = wildberries.fetch_fbs_snapshots(token)
             wb_flow = "fbs"
-            # DIAG (временно): образец ответа WB Content API → _wb_cards_debug.
-            try:
-                _sample = getattr(wildberries._fetch_card_data, "last_fbs_debug", None)
-                if _sample:
-                    sb.table("_wb_cards_debug").upsert({
-                        "connection_id": connection_id,
-                        "captured_at": datetime.now(timezone.utc).isoformat(),
-                        "sample": dict(_sample),
-                    }).execute()
-            except Exception:
-                logger.warning("wb fbs debug capture write failed", extra={"connection_id": connection_id})
         else:
             snapshots = wildberries.fetch_snapshots(token)
             wb_flow = "fbo"

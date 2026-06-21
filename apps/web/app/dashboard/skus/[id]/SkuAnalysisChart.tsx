@@ -118,6 +118,7 @@ const TYPE_LABELS: Record<string, string> = {
   anomaly_like: t("sku.eventType.anomaly"),
   missing_data: t("sku.eventType.missing"),
   recount_like: t("sku.eventType.recount"),
+  price_change: t("sku.eventType.priceChange"),
 };
 
 // Александр 04.06.2026: остаток отвязан от левой шкалы (там только TVelo).

@@ -18,6 +18,7 @@ class EventType(str, Enum):
     ANOMALY_LIKE = "anomaly_like"
     MISSING_DATA = "missing_data"
     RECOUNT_LIKE = "recount_like"
+    PRICE_CHANGE = "price_change"
 
 
 class SourceType(str, Enum):

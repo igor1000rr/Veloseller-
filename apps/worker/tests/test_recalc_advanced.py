@@ -113,6 +113,37 @@ def test_build_aggregates_recount_event_rows_updated():
     assert any(e["event_type"] == "recount_like" for e in matching)
 
 
+def test_build_aggregates_in_period_gap_normalized():
+    """БАГ 10 (in-period): дельта после разрыва синка делится на days_gap.
+
+    Без нормализации -30 за 5-дневный разрыв (а) ложно срабатывает как anomaly
+    против посуточной медианы (=5, порог 25) и (б) раздувает скорость. После
+    фикса дельта = -round(30/5) = -6 → остаётся sales_like.
+    """
+    tz = timezone.utc
+    rows = [
+        _snap("s1", datetime(2026, 5, 1, 12, tzinfo=tz), 100),
+        _snap("s2", datetime(2026, 5, 2, 12, tzinfo=tz), 95),   # -5 подряд → медиана 5
+        # пропуск 5/3..5/6 (4 дня без синка)
+        _snap("s3", datetime(2026, 5, 7, 12, tzinfo=tz), 65),   # -30 за gap=5 дней
+    ]
+    aggregates, _ = build_daily_aggregates(rows, date(2026, 5, 1), date(2026, 5, 7), tz)
+    day_5_7 = next(a for a in aggregates if a.day == date(2026, 5, 7))
+    assert day_5_7.delta_stock == -6           # нормализовано, не -30
+    assert day_5_7.event_type == EventType.SALES_LIKE  # не ANOMALY_LIKE
+
+
+def test_build_aggregates_consecutive_days_not_normalized():
+    """Контроль: при ежедневном синке (days_gap=1) дельта НЕ делится."""
+    tz = timezone.utc
+    rows = [
+        _snap("s1", datetime(2026, 5, 1, 12, tzinfo=tz), 100),
+        _snap("s2", datetime(2026, 5, 2, 12, tzinfo=tz), 88),  # -12 за 1 день
+    ]
+    aggregates, _ = build_daily_aggregates(rows, date(2026, 5, 1), date(2026, 5, 2), tz)
+    assert aggregates[1].delta_stock == -12
+
+
 def test_build_aggregates_anomaly_detected():
     """Резкое падение (>5× median) → anomaly_like."""
     tz = timezone.utc

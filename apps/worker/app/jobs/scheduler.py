@@ -24,6 +24,7 @@ import html
 import logging
 import os
 
+from apscheduler.events import EVENT_JOB_ERROR
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
@@ -549,11 +550,28 @@ def _persist_via_main(seller_id, connection_id, source_str, snapshots):
     _persist_snapshots(seller_id, connection_id, SourceType(source_str), snapshots)
 
 
+def _on_job_error(event) -> None:
+    """Сетка безопасности: тела джобов и так в try/except, но если исключение
+    всё же вылетит наружу — логируем (а не теряем молча). exc_info → Sentry."""
+    logger.error("scheduled job raised", extra={"job_id": event.job_id},
+                 exc_info=event.exception)
+
+
 def start_scheduler() -> None:
     global _scheduler
     if _scheduler is not None:
         return
-    _scheduler = BackgroundScheduler(timezone="UTC")
+    # job_defaults:
+    #  - misfire_grace_time=3600: рестарт воркера в момент срабатывания (деплой
+    #    в 02:00/02:40) больше НЕ роняет дневной sync/recalc молча (дефолт был 1с);
+    #  - coalesce=True: серия пропущенных запусков схлопывается в один (важно для
+    #    частых */5,*/10 джобов после долгого даунтайма — не выстреливают пачкой);
+    #  - max_instances=1: один и тот же джоб не идёт в два потока внахлёст.
+    _scheduler = BackgroundScheduler(
+        timezone="UTC",
+        job_defaults={"coalesce": True, "max_instances": 1, "misfire_grace_time": 3600},
+    )
+    _scheduler.add_listener(_on_job_error, EVENT_JOB_ERROR)
     # 05.06.2026: было CronTrigger(minute=5) — каждый час. Данные меняются раз
     # в сутки (sync 02:00), recalc после ручных синков вызывается из main —
     # 24 одинаковых пересчёта в день впустую жгли ~90% REST-вызовов (egress).

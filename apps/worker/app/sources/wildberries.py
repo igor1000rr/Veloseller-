@@ -83,21 +83,6 @@ def _fetch_card_data(cli: httpx.Client, token: str, with_skus: bool = False) -> 
             break
 
         cards = data.get("cards") or []
-        # DIAG (временно, инцидент WB FBS 11.06.2026): фиксируем форму ответа
-        # Content API по 1-й странице FBS — нужно понять, почему пусты
-        # subjectName/brand и откуда задвоенный vendorCode. Только чтение.
-        if with_skus and pages == 1:
-            try:
-                _fetch_card_data.last_fbs_debug = {
-                    "card0_keys": sorted((cards[0] or {}).keys()) if cards else [],
-                    "cards_count_page1": len(cards),
-                    "first_cards": [
-                        {k: c.get(k) for k in ("vendorCode", "subjectID", "subjectName", "brand", "title", "nmID")}
-                        for c in cards[:5]
-                    ],
-                }
-            except Exception:
-                pass
         for card in cards:
             vendor_code = (card.get("vendorCode") or "").strip()
             title = (card.get("title") or "").strip()

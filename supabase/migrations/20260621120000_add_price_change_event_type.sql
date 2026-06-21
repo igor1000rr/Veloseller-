@@ -1,0 +1,11 @@
+-- Добавляет значение 'price_change' в enum public.event_type.
+-- UI (skus/[id]) и i18n уже готовы к нему (sku.eventType.priceChange), но воркер
+-- писал изменения цены в changelog как 'recount_like' — мислейбл, засорявший
+-- класс пересчётов и индекс idx_changelog_seller_event_type.
+--
+-- ВАЖНО (порядок выката): применить ДО деплоя воркера, который начнёт писать
+-- 'price_change', иначе INSERT в changelog упадёт на несуществующем значении
+-- enum. IF NOT EXISTS делает миграцию идемпотентной. Файл содержит только ALTER
+-- TYPE (без использования значения), чтобы не упереться в ограничение
+-- "ALTER TYPE ... ADD VALUE cannot run inside a transaction block".
+alter type public.event_type add value if not exists 'price_change';

@@ -1,4 +1,9 @@
-"""Тест на БАГ 50 — recalc_all_sellers skip при concurrent manual recalc."""
+"""Тест конкурентности recalc_all_sellers — пропуск через ОБЩИЙ БД-лок.
+
+Раньше cron смотрел только in-process dict _running_recalcs (не виден другим
+репликам). Теперь recalc_all_sellers берёт тот же БД-лок, что и ручной recalc
+(_try_acquire_recalc_lock), поэтому тест драйвит именно его.
+"""
 from __future__ import annotations
 import os
 os.environ["ENABLE_SCHEDULER"] = "false"
@@ -7,33 +12,29 @@ from unittest.mock import MagicMock
 
 
 class TestRecalcAllConcurrencyLock:
-    """БАГ 50: cron skip sellers с активным manual recalc."""
+    """Cron пропускает селлеров, по которым БД-лок занят (другой процесс/реплика)."""
 
-    def setup_method(self):
-        from app.main import _running_recalcs
-        _running_recalcs.clear()
-
-    def teardown_method(self):
-        from app.main import _running_recalcs
-        _running_recalcs.clear()
-
-    def test_skips_sellers_with_running_status(self, monkeypatch):
-        from app.main import _running_recalcs
-        _running_recalcs["seller-busy"] = {
-            "status": "running",
-            "started_at": "2026-05-20T00:00:00Z",
-        }
+    def _patch_common(self, monkeypatch, sellers, called_for):
         mock_sb = MagicMock()
-        monkeypatch.setattr("app.jobs.recalc.fetch_all",
-                            lambda q: [{"id": "seller-busy"}, {"id": "seller-free"}])
+        monkeypatch.setattr("app.jobs.recalc.fetch_all", lambda q: sellers)
         monkeypatch.setattr("app.jobs.recalc.get_supabase", lambda: mock_sb)
 
-        called_for = []
         def fake_recalc(sid, progress=None):
             called_for.append(sid)
             return {"products": 0, "metrics_written": 0, "alerts_written": 0,
                     "store_metrics_written": 0}
         monkeypatch.setattr("app.jobs.recalc.recalc_seller_all_periods", fake_recalc)
+        # mark_done/error не должны ходить в БД в тесте
+        monkeypatch.setattr("app.main._mark_recalc_done", lambda *a, **k: None)
+        monkeypatch.setattr("app.main._mark_recalc_error", lambda *a, **k: None)
+
+    def test_skips_sellers_when_lock_held(self, monkeypatch):
+        called_for = []
+        self._patch_common(monkeypatch,
+                            [{"id": "seller-busy"}, {"id": "seller-free"}], called_for)
+        # Лок занят по seller-busy (его держит другой процесс), свободен по seller-free
+        monkeypatch.setattr("app.main._try_acquire_recalc_lock",
+                            lambda sid: sid != "seller-busy")
 
         from app.jobs.recalc import recalc_all_sellers
         result = recalc_all_sellers()
@@ -43,22 +44,10 @@ class TestRecalcAllConcurrencyLock:
         assert result["sellers"] == 1
         assert result["skipped_concurrent"] == 1
 
-    def test_processes_done_status_sellers(self, monkeypatch):
-        from app.main import _running_recalcs
-        _running_recalcs["seller-done"] = {
-            "status": "done",
-            "finished_at": "2026-05-20T00:00:00Z",
-        }
-        mock_sb = MagicMock()
-        monkeypatch.setattr("app.jobs.recalc.fetch_all", lambda q: [{"id": "seller-done"}])
-        monkeypatch.setattr("app.jobs.recalc.get_supabase", lambda: mock_sb)
-
+    def test_processes_when_lock_free(self, monkeypatch):
         called_for = []
-        def fake_recalc(sid, progress=None):
-            called_for.append(sid)
-            return {"products": 0, "metrics_written": 0, "alerts_written": 0,
-                    "store_metrics_written": 0}
-        monkeypatch.setattr("app.jobs.recalc.recalc_seller_all_periods", fake_recalc)
+        self._patch_common(monkeypatch, [{"id": "seller-done"}], called_for)
+        monkeypatch.setattr("app.main._try_acquire_recalc_lock", lambda sid: True)
 
         from app.jobs.recalc import recalc_all_sellers
         result = recalc_all_sellers()
@@ -67,17 +56,10 @@ class TestRecalcAllConcurrencyLock:
         assert result["skipped_concurrent"] == 0
 
     def test_no_lock_processes_all(self, monkeypatch):
-        mock_sb = MagicMock()
-        monkeypatch.setattr("app.jobs.recalc.fetch_all",
-                            lambda q: [{"id": "s1"}, {"id": "s2"}, {"id": "s3"}])
-        monkeypatch.setattr("app.jobs.recalc.get_supabase", lambda: mock_sb)
-
         called_for = []
-        def fake_recalc(sid, progress=None):
-            called_for.append(sid)
-            return {"products": 0, "metrics_written": 0, "alerts_written": 0,
-                    "store_metrics_written": 0}
-        monkeypatch.setattr("app.jobs.recalc.recalc_seller_all_periods", fake_recalc)
+        self._patch_common(monkeypatch,
+                            [{"id": "s1"}, {"id": "s2"}, {"id": "s3"}], called_for)
+        monkeypatch.setattr("app.main._try_acquire_recalc_lock", lambda sid: True)
 
         from app.jobs.recalc import recalc_all_sellers
         result = recalc_all_sellers()

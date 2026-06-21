@@ -12,6 +12,7 @@ from statistics import median as _median
 from app.engine.events import classify_event
 from app.engine.pipeline import DailyAggregate
 from app.holidays import is_holiday
+from app.logger import logger
 from app.schemas import EventType
 
 
@@ -61,11 +62,13 @@ def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
     prev_stock = None
     prev_snapshot_id = None
     prev_exists = False
+    prev_day = None  # день предыдущего РЕАЛЬНОГО снапшота (для нормализации на разрыв)
     if pre_period_days:
         last_pre = pre_period_days[-1]
         prev_stock = int(by_day[last_pre]["stock_quantity"])
         prev_snapshot_id = by_day[last_pre].get("snapshot_id")
         prev_exists = True
+        prev_day = last_pre
         prev_for_seed = None
         prev_day_for_seed = None
         for d in pre_period_days:
@@ -90,7 +93,19 @@ def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
             stock = int(row["stock_quantity"])
             price = float(row["price"])
             avail = bool(row["availability"])
-            delta = (stock - prev_stock) if prev_exists else None
+            raw_delta = (stock - prev_stock) if prev_exists else None
+            delta = raw_delta
+            # Нормализация дельты после разрыва синка (БАГ 10, in-period путь).
+            # Если предыдущий реальный снапшот был days_gap дней назад, падение
+            # остатка относится ко всему окну, а не к одному дню. Без деления
+            # gap-дельта (а) ложно срабатывает как anomaly против посуточной
+            # медианы и (б) раздувает скорость (весь расход за разрыв вешается на
+            # один in_stock-день, т.к. дни-пропуски идут MISSING и не попадают в
+            # знаменатель). Делим на days_gap — как в pre-period seed выше.
+            if raw_delta is not None and raw_delta < 0 and prev_day is not None:
+                days_gap = max(1, (cur - prev_day).days)
+                if days_gap > 1:
+                    delta = -max(1, int(round(abs(raw_delta) / days_gap)))
             median_abs = _median(abs_deltas_history) if abs_deltas_history else None
             # Передаём event_date в classify_event — праздники не классифицируются как anomaly
             et, excluded = classify_event(delta, median_abs, prev_exists, event_date=cur)
@@ -114,6 +129,7 @@ def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
             prev_stock = stock
             prev_snapshot_id = row.get("snapshot_id")
             prev_exists = True
+            prev_day = cur
         else:
             aggregates.append(DailyAggregate(
                 day=cur, availability=False, end_of_day_stock=prev_stock or 0,
@@ -136,7 +152,11 @@ def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
         if recount_pairs:
             recount_days = set()
             for snap_a, snap_b in recount_pairs:
+                # Оба дня пары: при пересчёте через полночь компенсирующий день
+                # (snap_b) тоже нужно переклассифицировать, иначе он остаётся
+                # sales_like/replenishment_like и искажает скорость.
                 recount_days.add(snap_a.snapshot_time.astimezone(seller_tz).date())
+                recount_days.add(snap_b.snapshot_time.astimezone(seller_tz).date())
             for i, a in enumerate(aggregates):
                 if a.day in recount_days and a.event_type != EventType.MISSING_DATA:
                     aggregates[i] = DailyAggregate(
@@ -151,6 +171,9 @@ def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
                             er["event_type"] = EventType.RECOUNT_LIKE.value
                             er["excluded_from_confirmed_metrics"] = True
     except Exception:
-        pass
+        # Раньше тут был молчаливый pass: любая ошибка детекции пересчётов
+        # отключала reclass для ВСЕХ SKU без следа (recount шёл как продажа/
+        # аномалия и искажал скорость + lost_revenue). Логируем, не глотаем.
+        logger.exception("recount detection failed in build_daily_aggregates")
 
     return aggregates, event_rows
