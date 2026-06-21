@@ -14,7 +14,12 @@ concurrency:
 
 jobs:
   deploy:
-    if: github.event.workflow_run.conclusion == 'success'
+    # Деплоим ТОЛЬКО зелёный CI И ТОЛЬКО по ветке main. Без явной проверки
+    # head_branch зелёный CI чужой ветки (workflow_run срабатывает на любой) мог
+    # бы инициировать прод-деплой текущего main.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

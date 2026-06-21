@@ -6,6 +6,17 @@ After=network.target veloseller-worker.service
 Type=simple
 User=veloseller
 Group=veloseller
+# Sandbox (defense-in-depth). NoNewPrivileges блокирует эскалацию через setuid/sudo,
+# обрубая путь «RCE в Next.js → sudo finalize.sh → root». ФС только на чтение, кроме
+# /opt/veloseller (там .next/cache); приватный /tmp.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/veloseller
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
 WorkingDirectory=/opt/veloseller/apps/web
 EnvironmentFile=/opt/veloseller/apps/web/.env.production
 Environment=NODE_ENV=production

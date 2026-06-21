@@ -16,10 +16,12 @@ fi
 # Генерируем общие секреты (одно значение в оба файла)
 WORKER_SECRET=$(openssl rand -base64 32 | tr -d '=+/' | head -c 40)
 ENCRYPTION_KEY=$(openssl rand -base64 32)
+WEBHOOK_SECRET=$(openssl rand -base64 32 | tr -d '=+/' | head -c 40)
 
 echo "✨ Сгенерировано:"
 echo "   WORKER_SECRET=$WORKER_SECRET"
 echo "   SECRET_ENCRYPTION_KEY=$ENCRYPTION_KEY"
+echo "   TELEGRAM_WEBHOOK_SECRET=$WEBHOOK_SECRET"
 echo
 
 cat > "$WEB_ENV" << ENVEOF
@@ -35,13 +37,6 @@ WORKER_SECRET=$WORKER_SECRET
 # Encryption (тот же что в worker)
 SECRET_ENCRYPTION_KEY=$ENCRYPTION_KEY
 
-# Stripe (опционально — можно оставить пустыми пока)
-STRIPE_SECRET_KEY=
-STRIPE_WEBHOOK_SECRET=
-STRIPE_PRICE_STARTER=
-STRIPE_PRICE_GROWTH=
-STRIPE_PRICE_PRO=
-
 # Resend email (опционально)
 RESEND_API_KEY=
 RESEND_FROM_EMAIL=Veloseller <noreply@veloseller.com>
@@ -51,15 +46,23 @@ ADMIN_EMAILS=igor1000rr@gmail.com
 ENVEOF
 
 cat > "$WORKER_ENV" << ENVEOF
-# Supabase (service role, без RLS)
+# Прод-режим: включает fail-fast проверку критичных env в app/config.py
+ENV=production
+
+# Supabase (service role, без RLS). ИМЯ важно: worker читает
+# SUPABASE_SERVICE_ROLE_KEY (раньше тут было SUPABASE_SERVICE_KEY — worker его
+# игнорировал и падал на первом DB-запросе).
 SUPABASE_URL=https://pptetnhdmxehijslbsrx.supabase.co
-SUPABASE_SERVICE_KEY=__ВСТАВИТЬ__service_role_key_из_Supabase__
+SUPABASE_SERVICE_ROLE_KEY=__ВСТАВИТЬ__service_role_key_из_Supabase__
 
 # Auth между web и worker
 WORKER_SECRET=$WORKER_SECRET
 
 # Encryption (тот же что в web)
 SECRET_ENCRYPTION_KEY=$ENCRYPTION_KEY
+
+# Верификация Telegram webhook (БАГ 52) — без неё worker не стартует в проде
+TELEGRAM_WEBHOOK_SECRET=$WEBHOOK_SECRET
 
 # Telegram bot (опционально — можно оставить пустым)
 TELEGRAM_BOT_TOKEN=

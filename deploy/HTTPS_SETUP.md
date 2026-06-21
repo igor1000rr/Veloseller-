@@ -67,10 +67,10 @@ curl -I https://veloseller.ru/
      -d "url=https://veloseller.ru/telegram/webhook"
    ```
 
-3. **Stripe webhook** (когда перейдёшь на live mode):
-   - Stripe Dashboard → Developers → Webhooks → Add endpoint
-   - URL: `https://veloseller.ru/api/stripe/webhook`
-   - Events: `checkout.session.completed`, `customer.subscription.updated`, `invoice.payment_failed`
+3. **Robokassa Result URL** (платежи; Stripe удалён, остался Robokassa):
+   - Кабинет Robokassa → Технические настройки → Result URL
+   - URL: `https://veloseller.ru/api/robokassa/result` (метод POST)
+   - Success/Fail: `https://veloseller.ru/api/robokassa/success` и `/api/robokassa/fail`
 
 4. **Update environment**:
    - `.env.local` web-приложения: `NEXT_PUBLIC_SITE_URL=https://veloseller.ru`

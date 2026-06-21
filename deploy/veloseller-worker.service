@@ -6,6 +6,17 @@ After=network.target
 Type=simple
 User=veloseller
 Group=veloseller
+# Sandbox (defense-in-depth). NoNewPrivileges блокирует эскалацию через setuid/sudo,
+# обрубая путь «RCE в worker → sudo finalize.sh → root». ФС только на чтение, кроме
+# /opt/veloseller; приватный /tmp.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/veloseller
+ProtectHome=read-only
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
 WorkingDirectory=/opt/veloseller/apps/worker
 EnvironmentFile=/opt/veloseller/apps/worker/.env
 # ВНИМАНИЕ: --workers 1 обязательно. APScheduler стартует в FastAPI lifespan,

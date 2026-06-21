@@ -25,6 +25,14 @@ dist/
 .env.*.local
 !.env.example
 
+# secrets / ключи (никогда не коммитить)
+secrets/
+gsa.json
+*.pem
+*.key
+*.p12
+*.pfx
+
 # logs
 *.log
 npm-debug.log*
