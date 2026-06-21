@@ -13,4 +13,12 @@ create index if not exists idx_radar_actions_query on public.radar_actions (quer
 
 -- 3. Дебаг-таблица дампа WB-карточек не должна торчать через PostgREST.
 --    Доступ остаётся только под service_role (worker), RLS его не касается.
-alter table public._wb_cards_debug enable row level security;
+--    Таблицу воркер создаёт ad-hoc, на свежем окружении (db reset / .com) её нет —
+--    поэтому включаем RLS только если она реально существует, иначе ALTER падает
+--    с "relation does not exist" и рушит всю миграцию.
+do $$
+begin
+  if to_regclass('public._wb_cards_debug') is not null then
+    alter table public._wb_cards_debug enable row level security;
+  end if;
+end$$;

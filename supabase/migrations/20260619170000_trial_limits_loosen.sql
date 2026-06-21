@@ -7,12 +7,16 @@
 --    чтобы не отрезать уже добавленные склады) — новые получают 3.
 
 create or replace function public.plan_sku_limit(p text)
-returns integer language sql immutable as $$
+returns integer language sql immutable
+set search_path to ''
+as $$
   select case p when 'trial' then 10000 when 'starter' then 500 when 'growth' then 4000 when 'pro' then 10000 else 50 end
 $$;
 
 create or replace function public.update_warehouses_limit_on_plan_change()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql
+set search_path to ''
+as $$
 begin
   if new.plan is distinct from old.plan then
     new.plan_warehouses_limit := case new.plan

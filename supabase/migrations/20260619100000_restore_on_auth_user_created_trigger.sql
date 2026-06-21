@@ -46,13 +46,13 @@ returns table(trigger_present boolean, orphan_count bigint)
 language sql
 security definer
 set search_path to 'public'
-as $
+as $$
   select
     exists(select 1 from pg_trigger
            where tgrelid='auth.users'::regclass and tgname='on_auth_user_created'
              and not tgisinternal and tgenabled='O') as trigger_present,
     (select count(*) from auth.users u left join public.sellers s on s.id=u.id where s.id is null) as orphan_count;
-$;
+$$;
 
 revoke execute on function public.admin_auth_onboarding_health() from anon, authenticated, public;
 grant execute on function public.admin_auth_onboarding_health() to service_role;
