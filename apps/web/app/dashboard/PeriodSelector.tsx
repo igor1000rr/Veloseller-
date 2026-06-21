@@ -18,7 +18,7 @@ export function PeriodSelector({ current, basePath = "/dashboard" }: { current: 
       {PERIODS.map(p => (
         <Link
           key={p.value}
-          href={`${basePath}?period=${p.value}` as any}
+          href={`${basePath}?period=${p.value}`}
           className={`text-xs px-3 py-1.5 rounded-md font-medium transition whitespace-nowrap min-h-[32px] inline-flex items-center ${
             current === p.value
               ? "bg-ink text-paper"

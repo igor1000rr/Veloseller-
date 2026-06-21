@@ -128,7 +128,7 @@ export function SkusTable({
                     только теги, чтобы строки не были слишком широкими. */}
                 <td className="col-skucol-brand px-3 sm:px-4 py-3">
                   {p.brand ? (
-                    <Link href={`/dashboard/skus?brand=${encodeURIComponent(p.brand)}` as any}
+                    <Link href={`/dashboard/skus?brand=${encodeURIComponent(p.brand)}`}
                           className="font-mono text-[11px] uppercase tracking-wider text-ink-soft hover:text-azure transition"
                           title={p.brand}>
                       {p.brand}
@@ -154,7 +154,7 @@ export function SkusTable({
                   {p.tags && p.tags.length > 0 && (
                     <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
                       {p.tags.map((tag: string) => (
-                        <Link key={tag} href={`/dashboard/skus?tag=${encodeURIComponent(tag)}` as any}
+                        <Link key={tag} href={`/dashboard/skus?tag=${encodeURIComponent(tag)}`}
                               className="inline-flex items-center rounded px-1.5 py-0.5 font-mono text-[11px] tracking-wider border border-violet-200 bg-violet-50 text-violet-700 hover:border-violet-400 hover:text-violet-900 transition"
                               title={tag}>
                           #{tag}

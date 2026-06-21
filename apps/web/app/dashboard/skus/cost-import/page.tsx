@@ -20,7 +20,7 @@ export default async function CostImportPage() {
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
-        <Link href={"/dashboard/skus" as any} className="text-xs font-mono uppercase tracking-wider text-ink-hush hover:text-ink transition mb-2 inline-block">
+        <Link href={"/dashboard/skus"} className="text-xs font-mono uppercase tracking-wider text-ink-hush hover:text-ink transition mb-2 inline-block">
           ← К SKU
         </Link>
         <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Добавить себестоимость</h1>
@@ -35,7 +35,7 @@ export default async function CostImportPage() {
           <div className="font-medium text-ink">Нет складов</div>
           <p className="mt-1 text-ink-muted">
             Сначала{" "}
-            <Link href={"/connections/new" as any} className="text-lime-deep underline hover:no-underline">
+            <Link href={"/connections/new"} className="text-lime-deep underline hover:no-underline">
               подключите склад
             </Link>.
           </p>

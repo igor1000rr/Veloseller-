@@ -1,6 +1,6 @@
-import { NextRequest } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { requireUser, jsonError } from "@/lib/auth";
 import { getSelectedWarehouse } from "@/lib/warehouse";
 
 export const dynamic = "force-dynamic";
@@ -26,15 +26,14 @@ export const dynamic = "force-dynamic";
  * Александр явно просил это в правке 12.
  */
 export async function GET(req: NextRequest) {
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) {
-    return new Response("Unauthorized", { status: 401 });
-  }
+  const auth = await requireUser();
+  if (auth instanceof NextResponse) return auth;
+  const { supabase, user } = auth;
 
   const limited = enforceRateLimit(req, RATE_LIMITS.EXPENSIVE, user.id);
   if (limited) return limited;
 
+  try {
   const url = new URL(req.url);
   const periodParam = (url.searchParams.get("period") ?? "day").toLowerCase();
   const period = (["day", "week", "month"].includes(periodParam) ? periodParam : "day") as "day" | "week" | "month";
@@ -83,7 +82,7 @@ export async function GET(req: NextRequest) {
   }
 
   const { data: rowsData, error } = await query;
-  if (error) return new Response(`DB error: ${error.message}`, { status: 500 });
+  if (error) return jsonError(500, "Не удалось сформировать экспорт", error.message);
   const rows = (rowsData ?? []) as Row[];
 
   // bucketize
@@ -182,4 +181,8 @@ export async function GET(req: NextRequest) {
       "Cache-Control": "no-store",
     },
   });
+  } catch (e) {
+    // Любая ошибка БД/обработки — общий текст наружу, деталь в логи.
+    return jsonError(500, "Не удалось сформировать экспорт", e);
+  }
 }

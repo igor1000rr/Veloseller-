@@ -3,22 +3,22 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { isAdminEmail } from "@/lib/auth";
+import { getWorkerConfig, callWorker, workerErrorText, fireAndForgetRecalc } from "@/lib/api";
 import {
   RADAR_BRANDS_LIMITS,
   type RadarPlan,
 } from "@/lib/robokassa";
 
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
-  .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-
 export type ActionResult = { ok: true; link?: string } | { ok: false; error: string };
 
+/** Server-action гард: бросает при отсутствии прав, возвращает e-mail админа для аудита. */
 async function requireAdmin(): Promise<string> {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("unauthorized");
   const email = (user.email || "").toLowerCase();
-  if (!ADMIN_EMAILS.includes(email)) throw new Error("forbidden");
+  if (!isAdminEmail(email)) throw new Error("forbidden");
   return email;
 }
 
@@ -182,9 +182,8 @@ export async function adminResyncConnection(formData: FormData): Promise<ActionR
       .select("id, source, marketplace, seller_id").eq("id", connectionId).maybeSingle();
     if (!conn) return { ok: false, error: "connection не найдена" };
 
-    const workerUrl = process.env.WORKER_URL;
-    const workerSecret = process.env.WORKER_SECRET;
-    if (!workerUrl || !workerSecret) return { ok: false, error: "worker не сконфигурирован" };
+    const worker = getWorkerConfig();
+    if (!worker) return { ok: false, error: "worker не сконфигурирован" };
 
     let endpoint = "";
     if (conn.source === "google_sheet") endpoint = `/ingest/google-sheet/${connectionId}`;
@@ -193,34 +192,17 @@ export async function adminResyncConnection(formData: FormData): Promise<ActionR
     else if (conn.source === "marketplace_api" && conn.marketplace === "shopify") endpoint = `/ingest/shopify/${connectionId}`;
     else return { ok: false, error: "ресинк недоступен для этого источника (CSV)" };
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS);
-    let res: Response;
-    try {
-      res = await fetch(`${workerUrl}${endpoint}`, {
-        method: "POST",
-        headers: { "X-Worker-Secret": workerSecret },
-        signal: controller.signal,
-      });
-    } catch (e) {
-      clearTimeout(timer);
-      const aborted = e instanceof Error && e.name === "AbortError";
-      return { ok: false, error: aborted ? "worker не ответил вовремя" : "ошибка связи с worker" };
+    const result = await callWorker(worker, endpoint, { method: "POST", timeoutMs: WORKER_TIMEOUT_MS });
+    if (!result.ok) {
+      return { ok: false, error: result.kind === "timeout" ? "worker не ответил вовремя" : "ошибка связи с worker" };
     }
-    clearTimeout(timer);
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      return { ok: false, error: text.slice(0, 300) || `worker ${res.status}` };
+    if (!result.res.ok) {
+      const text = await workerErrorText(result.res);
+      return { ok: false, error: text || `worker ${result.res.status}` };
     }
 
     // recalc после синка (fire-and-forget)
-    const rc = new AbortController();
-    const rcTimer = setTimeout(() => rc.abort(), 5_000);
-    fetch(`${workerUrl}/jobs/recalc/${conn.seller_id}`, {
-      method: "POST",
-      headers: { "X-Worker-Secret": workerSecret },
-      signal: rc.signal,
-    }).catch(() => null).finally(() => clearTimeout(rcTimer));
+    fireAndForgetRecalc(worker, conn.seller_id);
 
     await logAdminAction(adminEmail, "connection.resync", conn.seller_id, {
       connectionId, marketplace: conn.marketplace || conn.source,

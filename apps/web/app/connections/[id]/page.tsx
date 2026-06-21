@@ -85,7 +85,7 @@ export default async function ConnectionDetailPage({
 
   return (
     <>
-      <Link href={"/connections" as any} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition mb-4">
+      <Link href={"/connections"} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition mb-4">
         <span className="rotate-180"><Icons.ArrowRight size={12} /></span> {t("connections.backToSources")}
       </Link>
 

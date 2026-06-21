@@ -22,7 +22,7 @@ export default async function RadarUploadPage() {
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
-        <Link href={"/dashboard/radar/brands" as any} className="text-xs font-mono uppercase tracking-wider text-ink-hush hover:text-ink transition mb-2 inline-block">
+        <Link href={"/dashboard/radar/brands"} className="text-xs font-mono uppercase tracking-wider text-ink-hush hover:text-ink transition mb-2 inline-block">
           В бренды →
         </Link>
         <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Загрузка прайса</h1>

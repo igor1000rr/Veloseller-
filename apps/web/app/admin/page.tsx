@@ -160,7 +160,7 @@ export default async function AdminOverview() {
           <div className="rounded-2xl border border-line bg-paper overflow-hidden">
             <div className="divide-y divide-line">
               {recentRegs.map((r: any) => (
-                <Link key={r.id} href={`/admin/sellers/${r.id}` as any} className="flex items-center justify-between px-3 sm:px-4 md:px-5 py-3 hover:bg-bg-soft transition gap-3">
+                <Link key={r.id} href={`/admin/sellers/${r.id}`} className="flex items-center justify-between px-3 sm:px-4 md:px-5 py-3 hover:bg-bg-soft transition gap-3">
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <div className="size-9 rounded-full bg-bg-soft border border-line flex items-center justify-center font-display text-sm font-medium text-ink-muted shrink-0">
                       {(r.email || "?").slice(0, 2).toUpperCase()}
@@ -190,7 +190,7 @@ export default async function AdminOverview() {
                   <div key={c.id} className="px-3 sm:px-4 md:px-5 py-3 hover:bg-orange/[0.06] transition">
                     <div className="flex items-start justify-between gap-3 flex-wrap sm:flex-nowrap">
                       <div className="min-w-0 flex-1">
-                        <Link href={`/admin/sellers/${c.seller_id}` as any} className="text-sm text-ink hover:text-lime-deep font-medium transition break-all">
+                        <Link href={`/admin/sellers/${c.seller_id}`} className="text-sm text-ink hover:text-lime-deep font-medium transition break-all">
                           {seller?.email ?? "—"}
                         </Link>
                         <div className="mt-0.5 font-mono text-[11px] text-ink-hush">

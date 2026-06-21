@@ -30,7 +30,7 @@ export default function LandingHero({ isAuthed }: { isAuthed: boolean }) {
 
           <div className="mt-8 flex flex-wrap items-center gap-3">
             <Link
-              href={(isAuthed ? "/dashboard" : "/register") as any}
+              href={(isAuthed ? "/dashboard" : "/register")}
               className="group inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-5 md:px-6 py-3.5 font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.4)]"
             >
               {isAuthed ? t("landing.toDashboard") : t("landing.connectWarehouse")}

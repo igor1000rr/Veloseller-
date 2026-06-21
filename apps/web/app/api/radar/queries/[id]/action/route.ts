@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireRadarAccess } from "../../../_helpers";
+import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +25,9 @@ export async function POST(
   const auth = await requireRadarAccess();
   if (auth instanceof NextResponse) return auth;
   const { sb, userId } = auth;
+
+  const limited = enforceRateLimit(req, RATE_LIMITS.WRITE, userId);
+  if (limited) return limited;
 
   const { id } = await params;
 
@@ -79,10 +83,13 @@ export async function POST(
       break;
   }
 
+  // belt-and-suspenders: помимо RLS явно ограничиваем запись своим seller_id
+  // (как в роутах connections).
   const { error: updateErr } = await sb
     .from("radar_queries")
     .update(updateFields)
-    .eq("id", id);
+    .eq("id", id)
+    .eq("seller_id", userId);
 
   if (updateErr) {
     return NextResponse.json({ error: updateErr.message }, { status: 500 });

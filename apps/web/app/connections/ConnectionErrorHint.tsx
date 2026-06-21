@@ -53,7 +53,7 @@ export function ConnectionErrorHint({
           )}
           {parsed.action && (
             <Link
-              href={parsed.action.href as any}
+              href={parsed.action.href}
               className="mt-2 inline-block text-sm font-semibold text-ink underline hover:no-underline"
             >
               {parsed.action.label} →

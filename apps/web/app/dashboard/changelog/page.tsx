@@ -94,7 +94,7 @@ export default async function ChangelogPage() {
           <p className="font-display text-xl text-ink font-medium">{t("changelog.empty.title")}</p>
           <p className="mt-2 text-sm text-ink-muted max-w-md mx-auto">{t("changelog.empty.text")}</p>
           <Link
-            href={"/connections/new" as any}
+            href={"/connections/new"}
             className="mt-5 inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-5 py-3 text-sm font-semibold hover:bg-ink-soft transition"
           >
             {t("changelog.empty.btn")} <Icons.ArrowRight />

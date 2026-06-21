@@ -83,13 +83,13 @@ export default function NewsListPage() {
           </Link>
           <nav className="hidden md:flex items-center gap-7">
             <Link href="/" className="text-sm text-ink-soft hover:text-lime-deep transition">Главная</Link>
-            <Link href={'/news' as any} className="text-sm text-lime-deep font-medium">Новости</Link>
+            <Link href={'/news'} className="text-sm text-lime-deep font-medium">Новости</Link>
             <Link href="/#pricing" className="text-sm text-ink-soft hover:text-lime-deep transition">Тарифы</Link>
             <Link href="/#faq" className="text-sm text-ink-soft hover:text-lime-deep transition">FAQ</Link>
           </nav>
           <div className="flex items-center gap-2 md:gap-3">
-            <Link href={'/login' as any} className="hidden md:inline-block text-sm text-ink-soft hover:text-ink transition px-2 py-1">Войти</Link>
-            <Link href={'/register' as any} className="inline-flex rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition">Начать</Link>
+            <Link href={'/login'} className="hidden md:inline-block text-sm text-ink-soft hover:text-ink transition px-2 py-1">Войти</Link>
+            <Link href={'/register'} className="inline-flex rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition">Начать</Link>
           </div>
         </div>
       </header>
@@ -116,7 +116,7 @@ export default function NewsListPage() {
       <section className="relative w-full px-4 md:px-8 lg:px-12 pb-20 md:pb-28">
         <div className="max-w-[1100px] mx-auto space-y-5 md:space-y-6">
           {sorted.map((post) => (
-            <Link key={post.slug} href={`/news/${post.slug}` as any} className="group block">
+            <Link key={post.slug} href={`/news/${post.slug}`} className="group block">
               <article className="rounded-2xl border border-line bg-paper p-6 md:p-8 hover:border-lime-deep/40 hover:shadow-lg transition">
                 <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
                   <span className={`px-2.5 py-1 rounded border ${CATEGORY_COLORS[post.category]} font-semibold uppercase tracking-wider`}>

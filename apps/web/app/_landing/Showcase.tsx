@@ -1,5 +1,5 @@
 /** Статы, marquee интеграций и превью дашборда. Перенос из page.tsx 1:1. */
-import DashboardPreview from "../DashboardPreview";
+import DashboardPreview from "./DashboardPreviewLazy";
 import { t } from "@/lib/i18n";
 import { Eyebrow } from "./ui";
 import { stats, integrations } from "./data";

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { WAREHOUSE_COOKIE_NAME, WAREHOUSE_COOKIE_MAX_AGE } from "@/lib/warehouse";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { requireUser } from "@/lib/auth";
 
 /**
  * POST /api/warehouse/select — установить выбранный склад в cookie vs-warehouse.
@@ -14,9 +14,9 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  * - cookie httpOnly + sameSite=lax
  */
 export async function POST(req: NextRequest) {
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUser();
+  if (auth instanceof NextResponse) return auth;
+  const { supabase, user } = auth;
 
   const limited = enforceRateLimit(req, RATE_LIMITS.WRITE, user.id);
   if (limited) return limited;

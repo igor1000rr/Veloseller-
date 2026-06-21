@@ -86,7 +86,7 @@ export function SkusFilters({
       else params.set(k, v);
     }
     params.delete("page");
-    router.replace(`${pathname}?${params.toString()}` as any);
+    router.replace(`${pathname}?${params.toString()}`);
   }
 
   function recalculateNow() {

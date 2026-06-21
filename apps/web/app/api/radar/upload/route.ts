@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { requireUser, jsonError } from "@/lib/auth";
+import { getWorkerConfig, callWorker, workerErrorText, isAllowedUploadFile } from "@/lib/api";
 import crypto from "crypto";
 
 // 50MB лимит на загрузку. Прайс 5000 SKU в OZON/WB обычно ~2-5 МБ.
@@ -28,9 +29,9 @@ export const maxDuration = 60; // Ожидание worker'а ~10-30 сек.
  *   5. Редиректим юзера на /dashboard/radar/brands.
  */
 export async function POST(req: NextRequest) {
-  const sb = await createSupabaseServerClient();
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const auth = await requireUser();
+  if (auth instanceof NextResponse) return auth;
+  const { supabase: sb, user } = auth;
 
   // Rate limit — парсинг прайса (pandas/openpyxl на worker'е) дорогая операция.
   const limited = enforceRateLimit(req, RATE_LIMITS.EXPENSIVE, user.id);
@@ -59,6 +60,9 @@ export async function POST(req: NextRequest) {
       error: `Файл слишком большой: ${(file.size / 1024 / 1024).toFixed(1)}МБ > 50МБ`
     }, { status: 413 });
   }
+  if (!isAllowedUploadFile(file)) {
+    return NextResponse.json({ error: "Поддерживаются только файлы CSV или Excel (.csv, .xlsx, .xls)" }, { status: 400 });
+  }
 
   const buffer = await file.arrayBuffer();
   const fileHash = crypto.createHash("sha256")
@@ -81,17 +85,15 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (uploadErr || !uploadRow) {
-    return NextResponse.json({
-      error: "Не удалось создать запись upload: " + (uploadErr?.message ?? "")
-    }, { status: 500 });
+    // Деталь (SQL/constraint) — только в логи, наружу общий текст.
+    return jsonError(500, "Не удалось создать запись upload", uploadErr?.message);
   }
 
   const uploadId = uploadRow.id;
 
   // Проксим в worker.
-  const workerUrl = process.env.WORKER_URL || "http://127.0.0.1:8001";
-  const workerSecret = process.env.WORKER_SECRET;
-  if (!workerSecret) {
+  const worker = getWorkerConfig({ defaultUrl: "http://127.0.0.1:8001" });
+  if (!worker) {
     await admin.from("radar_price_uploads")
       .update({ status: "failed", error_message: "WORKER_SECRET not configured" })
       .eq("id", uploadId);
@@ -106,47 +108,50 @@ export async function POST(req: NextRequest) {
   const blob = new Blob([buffer]);
   workerForm.append("file", blob, file.name);
 
-  try {
-    const res = await fetch(`${workerUrl}/radar/extract-brands`, {
-      method: "POST",
-      headers: { "X-Worker-Secret": workerSecret },
-      body: workerForm,
-      // 90 сек timeout — AI обычно 10-30 сек, но бывают retry и медленные провайдеры.
-      signal: AbortSignal.timeout(90_000),
-    });
+  // 90 сек timeout — AI обычно 10-30 сек, но бывают retry и медленные провайдеры.
+  const result = await callWorker(worker, "/radar/extract-brands", {
+    method: "POST",
+    body: workerForm,
+    timeoutMs: 90_000,
+  });
 
-    if (!res.ok) {
-      const errBody = await res.text();
-      // worker уже пометил upload как failed — просто передаём ошибку в UI.
-      return NextResponse.json(
-        { error: errBody.slice(0, 500) || `Worker ${res.status}`, upload_id: uploadId },
-        { status: 500 }
-      );
-    }
-
-    const data: any = await res.json();
-    return NextResponse.json({
-      success: true,
-      upload_id: uploadId,
-      brands_extracted: data.brandsExtracted,
-      brands_approved: data.brandsApproved,
-      brands_excluded: data.brandsExcluded ?? 0,
-      ai_cost_usd: data.aiCostUsd,
-    });
-  } catch (e: any) {
+  if (!result.ok) {
     // Network/timeout — помечаем upload как failed (worker мог не успеть).
+    const detail = result.error instanceof Error ? result.error.message : String(result.error);
+    console.error("[radar-upload] worker unreachable:", detail);
     await admin.from("radar_price_uploads")
       .update({
         status: "failed",
-        error_message: `Web→Worker: ${String(e?.message ?? e).slice(0, 400)}`,
+        error_message: `Web→Worker: ${detail.slice(0, 400)}`,
         completed_at: new Date().toISOString(),
       })
       .eq("id", uploadId)
       // Обновляем только если status всё ещё processing (не перезаписываем completed/failed от worker'а).
       .eq("status", "processing");
+    // БАГ-фикс: не светим e?.message наружу — только общий текст.
     return NextResponse.json(
-      { error: "Ошибка связи с worker'ом: " + (e?.message ?? ""), upload_id: uploadId },
+      { error: "Ошибка связи с worker'ом", upload_id: uploadId },
       { status: 502 }
     );
   }
+
+  const res = result.res;
+  if (!res.ok) {
+    // worker уже пометил upload как failed — передаём его (обрезанный) текст в UI.
+    const errBody = await workerErrorText(res);
+    return NextResponse.json(
+      { error: errBody || `Worker ${res.status}`, upload_id: uploadId },
+      { status: 500 }
+    );
+  }
+
+  const data: any = await res.json();
+  return NextResponse.json({
+    success: true,
+    upload_id: uploadId,
+    brands_extracted: data.brandsExtracted,
+    brands_approved: data.brandsApproved,
+    brands_excluded: data.brandsExcluded ?? 0,
+    ai_cost_usd: data.aiCostUsd,
+  });
 }

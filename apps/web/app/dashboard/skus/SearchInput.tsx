@@ -36,7 +36,7 @@ export function SearchInput() {
       if (v) params.set("q", v);
       else params.delete("q");
       params.delete("page");
-      router.replace(`${pathname}?${params.toString()}` as any);
+      router.replace(`${pathname}?${params.toString()}`);
     }, 350);
   };
 

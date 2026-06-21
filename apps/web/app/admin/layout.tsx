@@ -1,20 +1,17 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { isAdminEmail } from "@/lib/auth";
 import AppHeader from "../_components/AppHeader";
 import FreshDataGuard from "../_components/FreshDataGuard";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
-  .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
-  const email = (user.email || "").toLowerCase();
-  if (!ADMIN_EMAILS.includes(email)) redirect("/dashboard");
+  if (!isAdminEmail(user.email)) redirect("/dashboard");
 
   return (
     <div className="min-h-screen bg-bg">

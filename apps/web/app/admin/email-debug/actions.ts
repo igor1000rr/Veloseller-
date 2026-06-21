@@ -1,6 +1,7 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { isAdminEmail } from "@/lib/auth";
 
 /**
  * Server action: отправить тестовый email через Resend SDK.
@@ -13,15 +14,12 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  * Возвращает { ok, message } — форма покажет результат человеку.
  */
 
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
-  .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-
 export async function sendTestEmail(formData: FormData): Promise<{ ok: boolean; message: string }> {
   try {
     const supabase = await createSupabaseServerClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return { ok: false, message: "Не авторизован" };
-    if (!ADMIN_EMAILS.includes((user.email || "").toLowerCase())) {
+    if (!isAdminEmail(user.email)) {
       return { ok: false, message: "Нет доступа (не в ADMIN_EMAILS)" };
     }
 

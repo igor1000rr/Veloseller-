@@ -230,7 +230,7 @@ export default async function HealthPage() {
               <div key={c.id} className="px-4 md:px-5 py-3 border-b border-line last:border-0">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    <Link href={`/admin/sellers/${c.seller_id}` as any} className="text-sm text-ink font-medium hover:text-lime-deep transition">
+                    <Link href={`/admin/sellers/${c.seller_id}`} className="text-sm text-ink font-medium hover:text-lime-deep transition">
                       {seller?.email || "—"}
                     </Link>
                     <div className="mt-0.5 font-mono text-[11px] text-ink-hush">{c.marketplace || c.source} · {c.name}</div>
@@ -300,7 +300,7 @@ function ConnectionAgeRow({ row }: { row: any }) {
       </td>
       <td className="px-4 py-3">
         <Link
-          href={`/admin/sellers/${row.seller_id}` as any}
+          href={`/admin/sellers/${row.seller_id}`}
           className="text-ink text-xs hover:text-lime-deep transition truncate inline-block max-w-[220px]"
           title={row.seller_email}
         >

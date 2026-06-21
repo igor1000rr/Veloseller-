@@ -50,13 +50,13 @@ export default async function ConnectionsPage() {
         {atLimit ? (
           <div className="inline-flex items-center gap-2 rounded-lg border border-orange/30 bg-orange/10 px-4 py-3 text-sm">
             <span className="text-orange font-semibold">{t("connections.limitReached")}</span>
-            <Link href={"/billing" as any} className="text-orange underline hover:no-underline">
+            <Link href={"/billing"} className="text-orange underline hover:no-underline">
               {t("connections.upgradePlan")} →
             </Link>
           </div>
         ) : (
           <Link
-            href={"/connections/new" as any}
+            href={"/connections/new"}
             className="inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-5 py-3 text-sm font-semibold hover:bg-ink-soft transition"
           >
             <Icons.Plus /> {t("connections.addWarehouse")}
@@ -91,7 +91,7 @@ export default async function ConnectionsPage() {
                 <div className="flex items-start justify-between gap-4 flex-wrap">
                   <div className="min-w-0 flex-1">
                     <Link
-                      href={`/connections/${c.id}` as any}
+                      href={`/connections/${c.id}`}
                       className="inline-flex items-center gap-3 flex-wrap group"
                     >
                       <span className="font-display text-lg font-medium text-ink group-hover:text-lime-deep transition truncate">
@@ -147,7 +147,7 @@ export default async function ConnectionsPage() {
               {t("connections.emptyDesc")}
             </p>
             <Link
-              href={"/connections/new" as any}
+              href={"/connections/new"}
               className="mt-6 inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-6 py-3 text-sm font-semibold hover:bg-ink-soft transition"
             >
               {t("connections.addFirstWarehouse")} <Icons.ArrowRight />

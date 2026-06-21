@@ -33,7 +33,7 @@ export function SkuAttributeFilters({
     if (value === "") params.delete(key);
     else params.set(key, value);
     params.delete("page");
-    router.replace(`${pathname}?${params.toString()}` as any);
+    router.replace(`${pathname}?${params.toString()}`);
   }
 
   const cls =

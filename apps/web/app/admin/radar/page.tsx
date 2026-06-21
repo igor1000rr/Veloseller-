@@ -193,7 +193,7 @@ export default async function AdminRadarPage() {
                   return (
                     <tr key={u.id} className="border-b border-line last:border-0 hover:bg-bg-soft/40">
                       <td className="px-4 py-3">
-                        <Link href={`/admin/sellers/${u.seller_id}` as any} className="text-ink hover:text-lime-deep transition text-xs">
+                        <Link href={`/admin/sellers/${u.seller_id}`} className="text-ink hover:text-lime-deep transition text-xs">
                           {seller?.email ?? "—"}
                         </Link>
                       </td>
@@ -239,7 +239,7 @@ export default async function AdminRadarPage() {
                   return (
                     <tr key={u.id} className="border-b border-line last:border-0 hover:bg-bg-soft/40">
                       <td className="px-4 py-3">
-                        <Link href={`/admin/sellers/${u.seller_id}` as any} className="text-ink hover:text-lime-deep transition text-xs">
+                        <Link href={`/admin/sellers/${u.seller_id}`} className="text-ink hover:text-lime-deep transition text-xs">
                           {seller?.email ?? "—"}
                         </Link>
                       </td>
@@ -279,7 +279,7 @@ export default async function AdminRadarPage() {
               return (
                 <Link
                   key={s.id}
-                  href={`/admin/sellers/${s.id}` as any}
+                  href={`/admin/sellers/${s.id}`}
                   className="flex items-center justify-between px-4 py-3 hover:bg-bg-soft/40 transition gap-3"
                 >
                   <div className="min-w-0 flex-1">

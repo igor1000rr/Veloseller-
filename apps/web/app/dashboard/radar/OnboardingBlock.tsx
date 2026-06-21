@@ -20,7 +20,7 @@ export function OnboardingBlock({ plan, brandsLimit }: { plan: string; brandsLim
 
       <div className="grid sm:grid-cols-2 gap-4">
         <Link
-          href={"/dashboard/radar/upload" as any}
+          href={"/dashboard/radar/upload"}
           className="group rounded-2xl border-2 border-lime-deep/30 bg-lime-soft/30 p-6 hover:border-lime-deep/60 hover:shadow-md transition"
         >
           <div className="font-mono text-[10px] uppercase tracking-widest text-lime-deep font-semibold mb-2">
@@ -37,7 +37,7 @@ export function OnboardingBlock({ plan, brandsLimit }: { plan: string; brandsLim
         </Link>
 
         <Link
-          href={"/dashboard/radar/brands" as any}
+          href={"/dashboard/radar/brands"}
           className="group rounded-2xl border border-line bg-paper p-6 hover:border-lime-deep/40 hover:shadow-sm transition"
         >
           <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush font-semibold mb-2">

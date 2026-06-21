@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { requireUser } from "@/lib/auth";
+import { getWorkerConfig, callWorker, workerErrorText } from "@/lib/api";
 
 /**
  * POST /api/jobs/recalc
@@ -13,37 +14,30 @@ import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
  * БАГ 76 fix: не светим внутренние error messages в response.
  */
 export async function POST(req: NextRequest) {
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUser();
+  if (auth instanceof NextResponse) return auth;
+  const { user } = auth;
 
   // Rate limit — recalc дорогая операция, 10/min/user
   const limited = enforceRateLimit(req, RATE_LIMITS.EXPENSIVE, user.id);
   if (limited) return limited;
 
-  const workerUrl = process.env.WORKER_URL;
-  const workerSecret = process.env.WORKER_SECRET;
-  if (!workerUrl || !workerSecret) {
+  const worker = getWorkerConfig();
+  if (!worker) {
     console.error("[recalc] WORKER_URL or WORKER_SECRET not configured");
     return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
   }
 
-  try {
-    const res = await fetch(`${workerUrl}/jobs/recalc/${user.id}`, {
-      method: "POST",
-      headers: { "X-Worker-Secret": workerSecret },
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) {
-      // БАГ 76: подробно в console, наружу — только статус и общий код
-      const body = await res.text();
-      console.error("[recalc] worker non-2xx:", res.status, body.slice(0, 500));
-      return NextResponse.json({ error: `Worker error (HTTP ${res.status})` }, { status: 502 });
-    }
-    const data = await res.json();
-    return NextResponse.json(data);
-  } catch (e: any) {
-    console.error("[recalc] network error:", e?.message);
+  const result = await callWorker(worker, `/jobs/recalc/${user.id}`, { method: "POST", timeoutMs: 15_000 });
+  if (!result.ok) {
+    console.error("[recalc] network error:", result.error instanceof Error ? result.error.message : result.error);
     return NextResponse.json({ error: "Worker unreachable" }, { status: 502 });
   }
+  const res = result.res;
+  if (!res.ok) {
+    // БАГ 76: подробно в console, наружу — только статус и общий код
+    console.error("[recalc] worker non-2xx:", res.status, await workerErrorText(res));
+    return NextResponse.json({ error: `Worker error (HTTP ${res.status})` }, { status: 502 });
+  }
+  return NextResponse.json(await res.json());
 }

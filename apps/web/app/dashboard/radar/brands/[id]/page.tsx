@@ -101,7 +101,7 @@ export default async function BrandDetailPage({
     <div className="space-y-6 max-w-5xl">
       <div>
         <Link
-          href={"/dashboard/radar/brands" as any}
+          href={"/dashboard/radar/brands"}
           className="text-xs font-mono uppercase tracking-wider text-ink-hush hover:text-ink transition mb-2 inline-block"
         >
           ← К списку брендов

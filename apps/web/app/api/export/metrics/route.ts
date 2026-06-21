@@ -1,6 +1,6 @@
-import { NextRequest } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { requireUser, jsonError } from "@/lib/auth";
 import { getSelectedWarehouse } from "@/lib/warehouse";
 
 export const dynamic = "force-dynamic";
@@ -92,13 +92,14 @@ type PeriodRow = {
 };
 
 export async function GET(req: NextRequest) {
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return new Response("Unauthorized", { status: 401 });
+  const auth = await requireUser();
+  if (auth instanceof NextResponse) return auth;
+  const { supabase, user } = auth;
 
   const limited = enforceRateLimit(req, RATE_LIMITS.EXPENSIVE, user.id);
   if (limited) return limited;
 
+  try {
   const url = new URL(req.url);
   const periodParam = url.searchParams.get("period") ?? "30";
   const periodDays = ["7", "30", "90"].includes(periodParam) ? parseInt(periodParam) : 30;
@@ -121,7 +122,7 @@ export async function GET(req: NextRequest) {
       .eq("id", warehouseId)
       .eq("seller_id", user.id)
       .maybeSingle();
-    if (!wh) return new Response("Склад не найден", { status: 404 });
+    if (!wh) return NextResponse.json({ error: "Склад не найден" }, { status: 404 });
     warehouseName = wh.name;
   }
 
@@ -255,7 +256,7 @@ export async function GET(req: NextRequest) {
       .order("sku")
       .range(fromOffset, fromOffset + PAGE - 1);
 
-    if (error) return new Response(`DB error: ${error.message}`, { status: 500 });
+    if (error) return jsonError(500, "Не удалось сформировать экспорт", error.message);
     if (!data || data.length === 0) break;
     allRows.push(...data);
     if (data.length < PAGE) break;
@@ -276,7 +277,7 @@ export async function GET(req: NextRequest) {
         p_period_end: periodEnd,
         p_product_ids: ids.slice(i, i + RPC_BATCH),
       });
-      if (rpcError) return new Response(`DB error: ${rpcError.message}`, { status: 500 });
+      if (rpcError) return jsonError(500, "Не удалось сформировать экспорт", rpcError.message);
       for (const r of (rpcRows ?? []) as any[]) {
         periodMetrics.set(r.product_id, {
           velocity: Number(r.velocity ?? 0),
@@ -462,4 +463,8 @@ export async function GET(req: NextRequest) {
   }
   respHeaders["Content-Type"] = "text/csv; charset=utf-8";
   return new Response(csv, { headers: respHeaders });
+  } catch (e) {
+    // \u041B\u044E\u0431\u0430\u044F \u043E\u0448\u0438\u0431\u043A\u0430 \u0411\u0414/\u043E\u0431\u0440\u0430\u0431\u043E\u0442\u043A\u0438 \u2014 \u043E\u0431\u0449\u0438\u0439 \u0442\u0435\u043A\u0441\u0442 \u043D\u0430\u0440\u0443\u0436\u0443, \u0434\u0435\u0442\u0430\u043B\u044C \u0432 \u043B\u043E\u0433\u0438.
+    return jsonError(500, "\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u0441\u0444\u043E\u0440\u043C\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u044D\u043A\u0441\u043F\u043E\u0440\u0442", e);
+  }
 }

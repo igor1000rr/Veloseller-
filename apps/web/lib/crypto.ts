@@ -9,9 +9,14 @@ function masterKey(): Buffer {
   const raw = process.env.SECRET_ENCRYPTION_KEY;
   if (!raw) throw new Error("SECRET_ENCRYPTION_KEY не задан");
   if (raw.length === 64) {
-    try {
-      return Buffer.from(raw, "hex");
-    } catch {}
+    // Buffer.from(raw, "hex") молча отбрасывает невалидные hex-символы (даёт
+    // буфер < 32 байт), поэтому проверяем длину результата явно и не глотаем
+    // ошибку пустым catch — иначе кривой ключ привёл бы к падению createCipheriv.
+    const hexKey = Buffer.from(raw, "hex");
+    if (hexKey.length !== 32) {
+      throw new Error("SECRET_ENCRYPTION_KEY: 64 символа, но это не валидный hex (ожидается 32 байта)");
+    }
+    return hexKey;
   }
   const key = Buffer.from(raw, "base64");
   if (key.length !== 32) {

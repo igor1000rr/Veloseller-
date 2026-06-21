@@ -28,7 +28,7 @@ export default function WarehouseSelector({
   if (warehouses.length === 0) {
     return (
       <Link
-        href={"/connections/new" as any}
+        href={"/connections/new"}
         className={`${visibilityCls} items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-orange/30 bg-orange/10 text-orange hover:bg-orange/15 transition`}
       >
         <Icons.Plus size={11} />
@@ -134,7 +134,7 @@ export default function WarehouseSelector({
             </ul>
             <div className="border-t border-line">
               <Link
-                href={"/connections/new" as any}
+                href={"/connections/new"}
                 onClick={() => setOpen(false)}
                 className="flex items-center gap-2 px-3 py-2.5 text-sm text-ink-muted hover:bg-bg-soft hover:text-lime-deep transition min-h-[44px]"
               >

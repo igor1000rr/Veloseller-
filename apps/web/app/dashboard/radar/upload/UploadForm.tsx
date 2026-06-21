@@ -65,7 +65,7 @@ export default function UploadForm() {
             Дальше отберите бренды для отслеживания.
           </span>
           <Link
-            href={"/dashboard/radar/brands" as any}
+            href={"/dashboard/radar/brands"}
             className="shrink-0 inline-flex items-center rounded-lg bg-lime-deep text-paper px-4 py-2 text-sm font-mono uppercase tracking-wider font-semibold hover:bg-lime-deep/90 transition whitespace-nowrap"
           >
             В бренды →

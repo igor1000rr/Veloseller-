@@ -11,13 +11,13 @@ export default function RadarEmpty() {
       </p>
       <div className="mt-6 flex gap-3 justify-center flex-wrap">
         <Link
-          href={"/dashboard/radar/upload" as any}
+          href={"/dashboard/radar/upload"}
           className="inline-flex items-center rounded-lg bg-lime-deep text-paper px-5 py-3 font-mono uppercase tracking-wider text-sm font-semibold hover:bg-lime-deep/90 transition"
         >
           Загрузить прайс
         </Link>
         <Link
-          href={"/dashboard/radar/brands" as any}
+          href={"/dashboard/radar/brands"}
           className="inline-flex items-center rounded-lg border border-line bg-paper text-ink-muted hover:text-ink px-5 py-3 font-mono uppercase tracking-wider text-sm transition"
         >
           Добавить руками

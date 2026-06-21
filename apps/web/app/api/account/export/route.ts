@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { requireUser } from "@/lib/auth";
 import { batchedIn } from "@/lib/supabase/batched";
 
 /**
@@ -14,11 +14,9 @@ import { batchedIn } from "@/lib/supabase/batched";
  *   реально есть 'source' и 'marketplace'. Экспорт падал с 500. GDPR Art. 20 violation.
  */
 export async function GET(req: NextRequest) {
-  const sb = await createSupabaseServerClient();
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireUser();
+  if (auth instanceof NextResponse) return auth;
+  const { user } = auth;
 
   // Rate limit — GDPR запросы очень редкие
   const limited = enforceRateLimit(req, RATE_LIMITS.SENSITIVE, user.id);

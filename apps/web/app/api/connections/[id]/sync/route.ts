@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { requireUser } from "@/lib/auth";
+import { getWorkerConfig, callWorker, workerErrorText, fireAndForgetRecalc } from "@/lib/api";
 
 /**
  * POST /api/connections/[id]/sync
@@ -20,9 +21,9 @@ const WORKER_TIMEOUT_MS = 30_000;
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUser();
+  if (auth instanceof NextResponse) return auth;
+  const { supabase, user } = auth;
 
   const limited = enforceRateLimit(req, RATE_LIMITS.EXPENSIVE, user.id);
   if (limited) return limited;
@@ -36,9 +37,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
   if (!conn) return NextResponse.json({ error: "Connection не найдена" }, { status: 404 });
 
-  const workerUrl = process.env.WORKER_URL;
-  const workerSecret = process.env.WORKER_SECRET;
-  if (!workerUrl || !workerSecret) {
+  const worker = getWorkerConfig();
+  if (!worker) {
     console.error("[sync] WORKER_URL/WORKER_SECRET not configured");
     return NextResponse.json({ error: "Server misconfigured" }, { status: 500 });
   }
@@ -50,46 +50,27 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   else if (conn.source === "marketplace_api" && conn.marketplace === "shopify") endpoint = `/ingest/shopify/${id}`;
   else return NextResponse.json({ error: "Для CSV используй upload-csv" }, { status: 400 });
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS);
-
-  let res: Response;
-  try {
-    res = await fetch(`${workerUrl}${endpoint}`, {
-      method: "POST",
-      headers: { "X-Worker-Secret": workerSecret },
-      signal: controller.signal,
-    });
-  } catch (e: any) {
-    clearTimeout(timeout);
-    if (e?.name === "AbortError") {
+  const result = await callWorker(worker, endpoint, { method: "POST", timeoutMs: WORKER_TIMEOUT_MS });
+  if (!result.ok) {
+    if (result.kind === "timeout") {
       return NextResponse.json({
         error: `Worker не ответил за ${WORKER_TIMEOUT_MS / 1000}с. Попробуйте позже.`
       }, { status: 504 });
     }
-    console.error("[sync] worker network error:", e?.message);
+    console.error("[sync] worker network error:", result.error instanceof Error ? result.error.message : result.error);
     return NextResponse.json({ error: "Ошибка связи с worker" }, { status: 502 });
   }
-  clearTimeout(timeout);
 
+  const res = result.res;
   if (!res.ok) {
-    const text = await res.text();
-    return NextResponse.json({ error: text.slice(0, 500) }, { status: res.status });
+    return NextResponse.json({ error: await workerErrorText(res) }, { status: res.status });
   }
 
   // Fire-and-forget пересчёт — запустим после того как sync завершится в worker'е.
   // Но поскольку sync теперь BG task, просто пускаем recalc через ~2 минуты
   // (чтобы дать sync завершиться). UI также нажмёт recalc вручную.
   // Worker /jobs/recalc сам дедуплицирует.
-  const recalcController = new AbortController();
-  const recalcTimeout = setTimeout(() => recalcController.abort(), 5_000);
-  fetch(`${workerUrl}/jobs/recalc/${user.id}`, {
-    method: "POST",
-    headers: { "X-Worker-Secret": workerSecret },
-    signal: recalcController.signal,
-  })
-    .catch(() => null)
-    .finally(() => clearTimeout(recalcTimeout));
+  fireAndForgetRecalc(worker, user.id);
 
   return NextResponse.json(await res.json());
 }

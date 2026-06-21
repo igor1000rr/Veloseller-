@@ -117,13 +117,13 @@ export default async function NewsPostPage({ params }: Props) {
           </Link>
           <nav className="hidden md:flex items-center gap-7">
             <Link href="/" className="text-sm text-ink-soft hover:text-lime-deep transition">Главная</Link>
-            <Link href={'/news' as any} className="text-sm text-ink-soft hover:text-lime-deep transition">Новости</Link>
+            <Link href={'/news'} className="text-sm text-ink-soft hover:text-lime-deep transition">Новости</Link>
             <Link href="/#pricing" className="text-sm text-ink-soft hover:text-lime-deep transition">Тарифы</Link>
             <Link href="/#faq" className="text-sm text-ink-soft hover:text-lime-deep transition">FAQ</Link>
           </nav>
           <div className="flex items-center gap-2 md:gap-3">
-            <Link href={'/login' as any} className="hidden md:inline-block text-sm text-ink-soft hover:text-ink transition px-2 py-1">Войти</Link>
-            <Link href={'/register' as any} className="inline-flex rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition">Начать</Link>
+            <Link href={'/login'} className="hidden md:inline-block text-sm text-ink-soft hover:text-ink transition px-2 py-1">Войти</Link>
+            <Link href={'/register'} className="inline-flex rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition">Начать</Link>
           </div>
         </div>
       </header>
@@ -133,7 +133,7 @@ export default async function NewsPostPage({ params }: Props) {
           <nav className="text-xs font-mono text-ink-hush mb-8 flex items-center gap-2 flex-wrap" aria-label="Breadcrumb">
             <Link href="/" className="hover:text-lime-deep transition">Главная</Link>
             <span className="text-ink-hush/50">/</span>
-            <Link href={'/news' as any} className="hover:text-lime-deep transition">Новости</Link>
+            <Link href={'/news'} className="hover:text-lime-deep transition">Новости</Link>
             <span className="text-ink-hush/50">/</span>
             <span className="text-ink-soft">{CATEGORY_LABELS[post.category]}</span>
           </nav>
@@ -173,7 +173,7 @@ export default async function NewsPostPage({ params }: Props) {
               </p>
               <div className="mt-5 flex flex-wrap gap-3">
                 <Link
-                  href={'/register' as any}
+                  href={'/register'}
                   className="inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-5 py-3 text-sm font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.4)]"
                 >
                   Начать бесплатно <Icons.ArrowRight size={12} />
@@ -195,7 +195,7 @@ export default async function NewsPostPage({ params }: Props) {
               </h3>
               <div className="space-y-3">
                 {related.map((r) => (
-                  <Link key={r.slug} href={`/news/${r.slug}` as any} className="block group">
+                  <Link key={r.slug} href={`/news/${r.slug}`} className="block group">
                     <div className="rounded-xl border border-line bg-paper p-4 md:p-5 hover:border-lime-deep/40 transition">
                       <div className="flex flex-wrap items-center gap-2 text-[10px] font-mono mb-2">
                         <span className={`px-2 py-0.5 rounded border ${CATEGORY_COLORS[r.category]} font-semibold uppercase tracking-wider`}>
@@ -215,7 +215,7 @@ export default async function NewsPostPage({ params }: Props) {
           )}
 
           <div className="mt-12 md:mt-14 pt-8 border-t border-line">
-            <Link href={'/news' as any} className="inline-flex items-center gap-2 text-sm text-ink-muted hover:text-lime-deep transition">
+            <Link href={'/news'} className="inline-flex items-center gap-2 text-sm text-ink-muted hover:text-lime-deep transition">
               <span className="font-mono">←</span> Все материалы
             </Link>
           </div>

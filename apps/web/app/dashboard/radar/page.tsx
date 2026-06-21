@@ -111,13 +111,13 @@ export default async function RadarPage({ searchParams }: {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Link
-            href={"/dashboard/radar/brands" as any}
+            href={"/dashboard/radar/brands"}
             className="inline-flex items-center rounded-lg border border-line bg-paper text-ink-muted hover:text-ink hover:border-lime-deep/40 px-3 py-2 text-sm font-mono uppercase tracking-wider transition"
           >
             Бренды ({approvedBrands.length})
           </Link>
           <Link
-            href={"/dashboard/radar/upload" as any}
+            href={"/dashboard/radar/upload"}
             className="inline-flex items-center rounded-lg bg-lime-deep text-paper hover:bg-lime-deep/90 px-4 py-2 text-sm font-mono uppercase tracking-wider font-semibold transition"
           >
             Загрузить прайс
@@ -213,7 +213,7 @@ function UntrackedBrandsTeaser({
         </div>
         {!isMaxTier ? (
           <Link
-            href={"/billing" as any}
+            href={"/billing"}
             className="shrink-0 inline-flex items-center rounded-lg bg-orange text-paper hover:bg-orange/90 px-4 py-2.5 text-sm font-mono uppercase tracking-wider font-semibold transition whitespace-nowrap"
           >
             Тариф {nextTier.name} — {nextTier.limit}{" "}
@@ -230,7 +230,7 @@ function UntrackedBrandsTeaser({
         {visible.map(b => (
           <Link
             key={b.id}
-            href={`/dashboard/radar/brands/${b.id}` as any}
+            href={`/dashboard/radar/brands/${b.id}`}
             className="group relative rounded-lg border border-line bg-paper/70 px-3 py-2.5 hover:bg-paper hover:border-orange/40 transition"
             title={limitReached
               ? "Лимит брендов исчерпан. Перейдите на старший тариф или исключите другой бренд."
@@ -268,7 +268,7 @@ function UntrackedBrandsTeaser({
             {" "}— ни одной новинки не пропустите.
           </div>
           <Link
-            href={"/dashboard/radar/brands" as any}
+            href={"/dashboard/radar/brands"}
             className="font-mono text-[10px] uppercase tracking-wider text-ink-hush hover:text-ink transition"
           >
             Управление списком →
@@ -307,7 +307,7 @@ function WelcomeBanner({ plan }: { plan: string }) {
             новинки которых у вас ещё нет. Первый дайджест — через неделю.
           </p>
           <Link
-            href={"/dashboard/radar" as any}
+            href={"/dashboard/radar"}
             className="mt-3 inline-block font-mono text-[10px] uppercase tracking-wider text-ink-hush hover:text-ink transition"
           >
             Закрыть
@@ -331,7 +331,7 @@ function RadarNoAccess({ plan }: { plan: string }) {
         через Wordstat и сопоставление с вашим прайсом. Trial 14 дней — бесплатно.
       </p>
       <Link
-        href={"/billing" as any}
+        href={"/billing"}
         className="inline-flex items-center mt-6 rounded-lg bg-ink text-paper px-5 py-3 font-mono uppercase tracking-wider text-sm font-semibold hover:bg-ink-soft transition"
       >
         Активировать Trial

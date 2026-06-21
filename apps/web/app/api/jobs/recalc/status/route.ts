@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { requireUser } from "@/lib/auth";
+import { getWorkerConfig, callWorker } from "@/lib/api";
 
 /**
  * GET /api/jobs/recalc/status
@@ -11,28 +12,21 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
  * БАГ 76 fix: не светим e.message в response — info disclosure про internal hostnames.
  */
 export async function GET(_req: NextRequest) {
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUser();
+  if (auth instanceof NextResponse) return auth;
+  const { user } = auth;
 
-  const workerUrl = process.env.WORKER_URL;
-  const workerSecret = process.env.WORKER_SECRET;
-  if (!workerUrl || !workerSecret) {
+  const worker = getWorkerConfig();
+  if (!worker) {
     return NextResponse.json({ status: "unknown" }, { status: 500 });
   }
 
-  try {
-    const res = await fetch(`${workerUrl}/jobs/recalc/${user.id}/status`, {
-      method: "GET",
-      headers: { "X-Worker-Secret": workerSecret },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return NextResponse.json({ status: "unknown" });
-    const data = await res.json();
-    return NextResponse.json(data);
-  } catch (e: any) {
+  const result = await callWorker(worker, `/jobs/recalc/${user.id}/status`, { method: "GET", timeoutMs: 5_000 });
+  if (!result.ok) {
     // БАГ 76: логируем подробно, отдаём наружу только статус
-    console.error("[recalc-status] worker unreachable:", e?.message);
+    console.error("[recalc-status] worker unreachable:", result.error instanceof Error ? result.error.message : result.error);
     return NextResponse.json({ status: "unknown" });
   }
+  if (!result.res.ok) return NextResponse.json({ status: "unknown" });
+  return NextResponse.json(await result.res.json());
 }

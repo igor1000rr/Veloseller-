@@ -65,7 +65,7 @@ export default function ForgotPasswordPage() {
             </form>
           )}
           <div className="mt-5 text-center">
-            <Link href={"/login" as any} className="text-sm text-ink-muted hover:text-lime-deep transition">
+            <Link href={"/login"} className="text-sm text-ink-muted hover:text-lime-deep transition">
               {t("auth.backToLogin")}
             </Link>
           </div>

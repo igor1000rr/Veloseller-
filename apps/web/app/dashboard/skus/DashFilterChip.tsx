@@ -86,7 +86,7 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
       params.set("threshold", String(n));
     }
     params.delete("page");
-    router.replace(`${pathname}?${params.toString()}` as any);
+    router.replace(`${pathname}?${params.toString()}`);
   }
 
   const currentThreshold = threshold ?? defaultThreshold(filter);
@@ -158,7 +158,7 @@ export function DashFilterChip({ filter, periodDays, threshold, segmentFilter }:
           onClick={() => {
             const params = new URLSearchParams();
             if (segmentFilter) params.set("segment", segmentFilter);
-            router.replace(`${pathname}${params.toString() ? `?${params.toString()}` : ""}` as any);
+            router.replace(`${pathname}${params.toString() ? `?${params.toString()}` : ""}`);
           }}
           className="text-xs font-medium text-ink-muted hover:text-ink underline underline-offset-2 transition py-1"
         >

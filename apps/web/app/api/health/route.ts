@@ -15,7 +15,8 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { enforceRateLimit } from "@/lib/rate-limit";
+import { callWorker } from "@/lib/api";
 
 export async function GET(req: NextRequest) {
   // БАГ 75: лимит 60 запросов в минуту с IP (UptimeRobot шлёт каждые 5 мин, для healthcheck'а с запасом)
@@ -37,15 +38,19 @@ export async function GET(req: NextRequest) {
     checks.supabase = { ok: false };  // БАГ 74: без детального error
   }
 
-  // Worker ping
+  // Worker ping. /health воркера публичный — секрет не обязателен (передаём,
+  // если задан, воркеру он не мешает). Таймаут/AbortController — через callWorker.
   try {
     const t0 = Date.now();
     const workerUrl = process.env.WORKER_URL;
     if (!workerUrl) throw new Error("WORKER_URL not configured");
-    const res = await fetch(`${workerUrl}/health`, {
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const result = await callWorker(
+      { url: workerUrl, secret: process.env.WORKER_SECRET ?? "" },
+      "/health",
+      { method: "GET", timeoutMs: 3000 },
+    );
+    if (!result.ok) throw result.error;
+    if (!result.res.ok) throw new Error(`HTTP ${result.res.status}`);
     checks.worker = { ok: true, latency_ms: Date.now() - t0 };
   } catch (e: any) {
     console.error("[health] worker down:", e?.message);

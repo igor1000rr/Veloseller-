@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { requireUser, jsonError } from "@/lib/auth";
 import {
   buildPaymentUrl,
   checkRobokassaConfig,
@@ -24,9 +24,9 @@ import {
  * Подписка активируется с Result URL webhook'a (асинхронно от редиректа).
  */
 export async function POST(req: NextRequest) {
-  const supabase = await createSupabaseServerClient();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const auth = await requireUser();
+  if (auth instanceof NextResponse) return auth;
+  const { supabase, user } = auth;
 
   const limited = enforceRateLimit(req, RATE_LIMITS.WRITE, user.id);
   if (limited) return limited;
@@ -91,10 +91,8 @@ export async function POST(req: NextRequest) {
       email: seller?.email ?? user.email ?? null,
     });
   } catch (e: any) {
-    return NextResponse.json(
-      { error: `Ошибка генерации URL: ${e?.message || "unknown"}` },
-      { status: 500 },
-    );
+    // Деталь генерации (подпись/конфиг) — только в логи, наружу общий текст.
+    return jsonError(500, "Не удалось сформировать ссылку на оплату", e);
   }
 
   return NextResponse.json({ url, inv_id: invoice.inv_id });

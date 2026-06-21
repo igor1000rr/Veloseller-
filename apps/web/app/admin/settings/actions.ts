@@ -3,16 +3,14 @@
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
-  .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+import { isAdminEmail } from "@/lib/auth";
 
 export async function updateSystemSetting(formData: FormData) {
   // Auth check
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("unauthorized");
-  if (!ADMIN_EMAILS.includes((user.email || "").toLowerCase())) throw new Error("forbidden");
+  if (!isAdminEmail(user.email)) throw new Error("forbidden");
 
   const key = String(formData.get("key") || "");
   const rawValue = String(formData.get("value") ?? "");

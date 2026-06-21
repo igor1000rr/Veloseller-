@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { isAdminEmail } from "@/lib/auth";
 import AppHeader from "../_components/AppHeader";
 import FreshDataGuard from "../_components/FreshDataGuard";
 import { listWarehouses, getSelectedWarehouse } from "@/lib/warehouse";
@@ -7,15 +8,12 @@ import { listWarehouses, getSelectedWarehouse } from "@/lib/warehouse";
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || "")
-  .split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
-
 export default async function OnboardingLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
-  const isAdmin = ADMIN_EMAILS.includes((user.email || "").toLowerCase());
+  const isAdmin = isAdminEmail(user.email);
 
   const [{ count: unreadAlerts }, { data: seller }, warehouses, selected] = await Promise.all([
     supabase.from("alerts").select("id", { count: "exact", head: true }).is("acknowledged_at", null),

@@ -57,13 +57,13 @@ export function DayProgress({ daysSinceSetup }: Props) {
         </div>
         <div className="hidden md:flex flex-col items-end gap-1.5 shrink-0">
           <Link
-            href={"/onboarding" as any}
+            href={"/onboarding"}
             className="inline-flex items-center gap-1 text-xs text-ink-muted hover:text-lime-deep transition whitespace-nowrap"
           >
             Гид <Icons.ArrowRight size={11} />
           </Link>
           <Link
-            href={"/connections" as any}
+            href={"/connections"}
             className="inline-flex items-center gap-1 text-xs text-ink-muted hover:text-lime-deep transition whitespace-nowrap"
           >
             Проверить синхронизацию <Icons.ArrowRight size={11} />

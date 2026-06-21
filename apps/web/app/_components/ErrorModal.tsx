@@ -104,7 +104,7 @@ export function ErrorModal({
             </button>
             {error.action && (
               <Link
-                href={error.action.href as any}
+                href={error.action.href}
                 onClick={onClose}
                 className={`px-4 py-2 text-sm font-mono uppercase tracking-wider rounded-lg ${accent.btn} text-paper transition`}
               >

@@ -140,7 +140,7 @@ export default async function AppsPage() {
               Остатки, скорость продаж и риск out-of-stock — на телефоне. Push прилетит, как только товар пора дозаказать.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-3">
-              <Link href={"/register" as any} className="rounded-lg bg-ink text-paper px-6 py-3.5 text-sm font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
+              <Link href={"/register"} className="rounded-lg bg-ink text-paper px-6 py-3.5 text-sm font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
                 Получить ранний доступ
               </Link>
               <a href="#pwa" className="rounded-lg bg-paper text-ink border border-line px-6 py-3.5 text-sm font-semibold hover:border-lime-deep/40 transition hover:-translate-y-0.5">
@@ -289,7 +289,7 @@ export default async function AppsPage() {
             <AppsInstallTabs />
           </div>
           <div className="mt-8 text-center reveal">
-            <Link href={"/dashboard" as any} className="inline-flex rounded-lg bg-paper text-ink border border-line px-6 py-3.5 text-sm font-semibold hover:border-lime-deep/40 transition hover:-translate-y-0.5">
+            <Link href={"/dashboard"} className="inline-flex rounded-lg bg-paper text-ink border border-line px-6 py-3.5 text-sm font-semibold hover:border-lime-deep/40 transition hover:-translate-y-0.5">
               Открыть веб-версию
             </Link>
           </div>
@@ -306,7 +306,7 @@ export default async function AppsPage() {
             Создайте аккаунт — дадим ранний доступ к мобильной бете и сообщим о релизе в сторах.
           </p>
           <div className="mt-8">
-            <Link href={"/register" as any} className="rounded-lg bg-ink text-paper px-6 py-3.5 text-sm font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
+            <Link href={"/register"} className="rounded-lg bg-ink text-paper px-6 py-3.5 text-sm font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
               Получить ранний доступ
             </Link>
           </div>

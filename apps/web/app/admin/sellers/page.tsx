@@ -104,7 +104,7 @@ export default async function AdminSellersPage({ searchParams }: {
                       {new Date(s.created_at).toLocaleString("ru-RU")}
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <Link href={`/admin/sellers/${s.id}` as any} className="text-lime-deep hover:text-ink text-xs font-medium transition">
+                      <Link href={`/admin/sellers/${s.id}`} className="text-lime-deep hover:text-ink text-xs font-medium transition">
                         Открыть →
                       </Link>
                     </td>

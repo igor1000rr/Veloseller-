@@ -564,7 +564,7 @@ export default async function SkusPage({ searchParams }: {
             return (
               <Link
                 key={s.value}
-                href={`/dashboard/skus${qs ? `?${qs}` : ""}` as any}
+                href={`/dashboard/skus${qs ? `?${qs}` : ""}`}
                 className={`text-xs px-3 py-1.5 rounded-md font-medium transition whitespace-nowrap shrink-0 ${
                   isActive ? "bg-ink text-paper" : "text-ink-muted hover:text-ink hover:bg-bg-soft"
                 }`}
@@ -606,7 +606,7 @@ export default async function SkusPage({ searchParams }: {
           <div className="flex-1 text-sm">
             <div className="font-medium text-ink">{t("sku.list.noWarehouse.title")}</div>
             <p className="mt-1 text-ink-muted">
-              <Link href={"/connections/new" as any} className="text-lime-deep underline hover:no-underline">
+              <Link href={"/connections/new"} className="text-lime-deep underline hover:no-underline">
                 {t("sku.list.noWarehouse.link")}
               </Link>{" "}
               {t("sku.list.noWarehouse.tail")}
@@ -634,13 +634,13 @@ export default async function SkusPage({ searchParams }: {
           </span>
           <div className="flex gap-2">
             {page > 1 && (
-              <Link href={`?${buildQs({ page: page - 1 })}` as any}
+              <Link href={`?${buildQs({ page: page - 1 })}`}
                     className="inline-flex items-center gap-1 px-3 py-2 border border-line rounded-lg text-ink-muted hover:text-ink hover:bg-bg-soft transition text-xs min-h-[36px]">
                 <span className="rotate-180"><Icons.ArrowRight size={11} /></span> {t("sku.list.prev")}
               </Link>
             )}
             {page < totalPages && (
-              <Link href={`?${buildQs({ page: page + 1 })}` as any}
+              <Link href={`?${buildQs({ page: page + 1 })}`}
                     className="inline-flex items-center gap-1 px-3 py-2 border border-line rounded-lg text-ink-muted hover:text-ink hover:bg-bg-soft transition text-xs min-h-[36px]">
                 {t("sku.list.next")} <Icons.ArrowRight size={11} />
               </Link>
@@ -667,7 +667,7 @@ function TagFilterChip({ kind, value, removeHref }: {
       <span className={`font-mono text-[10px] uppercase tracking-widest font-semibold ${isTag ? "text-violet-700" : "text-azure"}`}>{label}</span>
       <span className="font-medium text-ink break-all">{isTag ? `#${value}` : value}</span>
       <Link
-        href={removeHref as any}
+        href={removeHref}
         className="inline-flex items-center justify-center size-5 rounded text-ink-hush hover:text-ink hover:bg-bg-soft transition shrink-0"
         aria-label={isEn ? "Clear" : "Сбросить"}
       >

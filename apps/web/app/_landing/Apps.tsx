@@ -53,10 +53,10 @@ export default function LandingApps() {
             </div>
           </div>
           <div className="flex flex-col gap-3 shrink-0 w-full md:w-auto">
-            <Link href={"/apps" as any} className="rounded-lg bg-ink text-paper px-6 py-3 text-sm font-semibold text-center hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
+            <Link href={"/apps"} className="rounded-lg bg-ink text-paper px-6 py-3 text-sm font-semibold text-center hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.45)] hover:-translate-y-0.5">
               {COPY.more}
             </Link>
-            <Link href={"/register" as any} className="rounded-lg bg-paper text-ink border border-line px-6 py-3 text-sm font-semibold text-center hover:border-lime-deep/40 transition hover:-translate-y-0.5">
+            <Link href={"/register"} className="rounded-lg bg-paper text-ink border border-line px-6 py-3 text-sm font-semibold text-center hover:border-lime-deep/40 transition hover:-translate-y-0.5">
               {COPY.cta}
             </Link>
           </div>

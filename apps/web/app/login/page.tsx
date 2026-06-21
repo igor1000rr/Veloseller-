@@ -32,7 +32,7 @@ function LoginForm() {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setLoading(false);
     if (error) { setError(error.message); return; }
-    router.push(redirect as any);
+    router.push(redirect);
     router.refresh();
   }
 
@@ -101,10 +101,10 @@ export default function LoginPage() {
             <LoginForm />
           </Suspense>
           <div className="mt-5 flex items-center justify-between text-sm">
-            <Link href={"/forgot-password" as any} className="text-ink-muted hover:text-lime-deep transition">
+            <Link href={"/forgot-password"} className="text-ink-muted hover:text-lime-deep transition">
               {t("auth.forgotPassword")}
             </Link>
-            <Link href={"/register" as any} className="text-ink hover:text-lime-deep transition font-medium">
+            <Link href={"/register"} className="text-ink hover:text-lime-deep transition font-medium">
               {t("auth.register")}
             </Link>
           </div>

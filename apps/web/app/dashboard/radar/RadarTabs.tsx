@@ -35,7 +35,7 @@ export default function RadarTabs({
         return (
           <Link
             key={t.key}
-            href={buildHref(t.key) as any}
+            href={buildHref(t.key)}
             title={t.hint}
             className={`shrink-0 px-3 sm:px-4 py-2.5 text-sm font-medium border-b-2 transition flex items-center gap-2 ${
               active

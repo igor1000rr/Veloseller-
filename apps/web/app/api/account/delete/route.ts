@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { requireUser, jsonError } from "@/lib/auth";
 import { batchedInDelete } from "@/lib/supabase/batched";
 
 /**
@@ -10,11 +10,9 @@ import { batchedInDelete } from "@/lib/supabase/batched";
  * БАГ 15 fix: .in("product_id", ...) батчится через batchedInDelete.
  */
 export async function DELETE(req: NextRequest) {
-  const sb = await createSupabaseServerClient();
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireUser();
+  if (auth instanceof NextResponse) return auth;
+  const { user } = auth;
 
   const limited = enforceRateLimit(req, RATE_LIMITS.SENSITIVE, user.id);
   if (limited) return limited;
@@ -90,10 +88,8 @@ export async function DELETE(req: NextRequest) {
     await admin.from("sellers").delete().eq("id", sellerId);
     await admin.auth.admin.deleteUser(sellerId);
   } catch (e: any) {
-    return NextResponse.json({
-      error: "Deletion partially failed.",
-      detail: e?.message || String(e),
-    }, { status: 500 });
+    // Деталь сбоя удаления — только в логи, наружу общий текст (без SQL/детали).
+    return jsonError(500, "Deletion partially failed.", e);
   }
 
   return NextResponse.json({

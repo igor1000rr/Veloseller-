@@ -73,7 +73,7 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
             ))}
             {APP_PROMO_ENABLED && (
               <Link
-                href={"/apps" as any}
+                href={"/apps"}
                 onClick={() => setOpen(false)}
                 className="flex items-center justify-between py-4 border-b border-line text-2xl font-display text-ink hover:text-lime-deep transition"
               >
@@ -82,7 +82,7 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
               </Link>
             )}
             <Link
-              href={"/partner" as any}
+              href={"/partner"}
               onClick={() => setOpen(false)}
               className="flex items-center justify-between py-4 border-b border-line text-2xl font-display text-lime-deep hover:text-lime transition"
             >
@@ -95,7 +95,7 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
             <ContactLinks className="flex justify-center pb-1" />
             {isAuthed ? (
               <Link
-                href={"/dashboard" as any}
+                href={"/dashboard"}
                 onClick={() => setOpen(false)}
                 className="flex items-center justify-center gap-2 w-full rounded-lg bg-ink text-paper px-5 py-3.5 font-semibold"
               >
@@ -104,14 +104,14 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
             ) : (
               <>
                 <Link
-                  href={"/register" as any}
+                  href={"/register"}
                   onClick={() => setOpen(false)}
                   className="flex items-center justify-center w-full rounded-lg bg-ink text-paper px-5 py-3.5 font-semibold"
                 >
                   {t("landing.pr.startFree")}
                 </Link>
                 <Link
-                  href={"/login" as any}
+                  href={"/login"}
                   onClick={() => setOpen(false)}
                   className="flex items-center justify-center w-full rounded-lg border border-line bg-paper text-ink px-5 py-3.5 font-medium"
                 >

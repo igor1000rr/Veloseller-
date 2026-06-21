@@ -101,7 +101,7 @@ function Step({ n, title, done, description, cta }: {
         <p className="text-sm text-ink-muted mt-1 leading-relaxed">{description}</p>
         {cta && (
           <Link
-            href={cta.href as any}
+            href={cta.href}
             className="inline-flex items-center gap-1 mt-3 text-sm text-lime-deep hover:text-ink font-medium transition"
           >
             {cta.label} <Icons.ArrowRight size={12} />

@@ -22,6 +22,20 @@ describe("lib/crypto", () => {
     expect(decrypt(enc)).toBe("hello");
   });
 
+  it("64 символа, но НЕ валидный hex — throws (Buffer.from молча обрезает)", async () => {
+    // 'z' не hex → Buffer.from(..,"hex") вернёт буфер < 32 байт.
+    process.env.SECRET_ENCRYPTION_KEY = "z".repeat(64);
+    const { encrypt } = await import("@/lib/crypto");
+    expect(() => encrypt("x")).toThrow(/hex/);
+  });
+
+  it("64 символа, частично валидный hex — throws (длина != 32)", async () => {
+    // 62 валидных hex-символа + 2 невалидных: Buffer оборвётся раньше 32 байт.
+    process.env.SECRET_ENCRYPTION_KEY = "a".repeat(62) + "zz";
+    const { encrypt } = await import("@/lib/crypto");
+    expect(() => encrypt("x")).toThrow();
+  });
+
   it("encrypt('') → ''", async () => {
     process.env.SECRET_ENCRYPTION_KEY = Buffer.alloc(32).toString("base64");
     const { encrypt } = await import("@/lib/crypto");

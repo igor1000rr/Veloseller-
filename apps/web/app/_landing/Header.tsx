@@ -30,29 +30,29 @@ export default function LandingHeader({ isAuthed }: { isAuthed: boolean }) {
           <a href="#how" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.how")}</a>
           <a href="#integrations" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.integrations")}</a>
           <a href="#pricing" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.pricing")}</a>
-          <Link href={"/news" as any} className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.news")}</Link>
+          <Link href={"/news"} className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.news")}</Link>
           {APP_PROMO_ENABLED && (
-            <Link href={"/apps" as any} className="text-sm text-ink-soft hover:text-lime-deep transition">{isEn ? "App" : "Приложение"}</Link>
+            <Link href={"/apps"} className="text-sm text-ink-soft hover:text-lime-deep transition">{isEn ? "App" : "Приложение"}</Link>
           )}
-          <Link href={"/partner" as any} className="text-sm font-medium text-lime-deep hover:text-lime transition">{isEn ? "Partners" : "Партнёрам"}</Link>
+          <Link href={"/partner"} className="text-sm font-medium text-lime-deep hover:text-lime transition">{isEn ? "Partners" : "Партнёрам"}</Link>
           <a href="#faq" className="text-sm text-ink-soft hover:text-lime-deep transition">FAQ</a>
         </nav>
         <div className="flex items-center gap-2 md:gap-3">
           <ContactLinks className="hidden md:inline-flex" />
           {isAuthed ? (
             <Link
-              href={"/dashboard" as any}
+              href={"/dashboard"}
               className="hidden md:inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition"
             >
               {t("landing.toDashboard")} <Icons.ArrowRight size={12} />
             </Link>
           ) : (
             <>
-              <Link href={"/login" as any} className="hidden md:inline-block text-sm text-ink-soft hover:text-ink transition px-2 py-1">
+              <Link href={"/login"} className="hidden md:inline-block text-sm text-ink-soft hover:text-ink transition px-2 py-1">
                 {t("landing.login")}
               </Link>
               <Link
-                href={"/register" as any}
+                href={"/register"}
                 className="hidden md:inline-flex rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition"
               >
                 {t("landing.start")}

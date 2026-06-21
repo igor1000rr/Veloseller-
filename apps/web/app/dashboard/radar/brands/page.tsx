@@ -31,7 +31,7 @@ export default async function RadarBrandsPage() {
     <div className="space-y-6 max-w-4xl">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <Link href={"/dashboard/radar" as any} className="text-xs font-mono uppercase tracking-wider text-ink-hush hover:text-ink transition mb-2 inline-block">
+          <Link href={"/dashboard/radar"} className="text-xs font-mono uppercase tracking-wider text-ink-hush hover:text-ink transition mb-2 inline-block">
             ← К списку сигналов
           </Link>
           <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">Бренды Radar</h1>

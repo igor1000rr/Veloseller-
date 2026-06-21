@@ -121,7 +121,7 @@ export default function AppHeader({
           </div>
         )}
         {planLabel && variant === "dashboard" && (
-          <Link href={"/billing" as any} onClick={() => setOpen(false)}
+          <Link href={"/billing"} onClick={() => setOpen(false)}
             className={`flex items-center justify-between py-3 px-3 mb-2 rounded-lg border ${planClass}`}>
             <span className="font-mono text-[11px] uppercase tracking-[0.18em] font-semibold">
               {t("nav.planShort", { plan: planLabel ?? "" })}
@@ -132,7 +132,7 @@ export default function AppHeader({
         {links.map((l: any) => (
           <Link
             key={l.href}
-            href={l.href as any}
+            href={l.href}
             onClick={() => setOpen(false)}
             className="flex items-center justify-between py-4 border-b border-line text-xl font-display text-ink hover:text-lime-deep transition"
           >
@@ -151,7 +151,7 @@ export default function AppHeader({
           </Link>
         ))}
         {isAdmin && variant === "dashboard" && (
-          <Link href={"/admin" as any} onClick={() => setOpen(false)}
+          <Link href={"/admin"} onClick={() => setOpen(false)}
             className="flex items-center justify-between py-4 border-b border-line text-xl font-display text-orange hover:opacity-80 transition">
             <span className="flex items-center gap-3">Admin
               <span className="font-mono text-[10px] text-orange uppercase tracking-[0.18em] font-semibold border border-orange/30 bg-orange/10 px-1.5 py-0.5 rounded">admin</span>
@@ -160,7 +160,7 @@ export default function AppHeader({
           </Link>
         )}
         {variant === "admin" && (
-          <Link href={"/dashboard" as any} onClick={() => setOpen(false)}
+          <Link href={"/dashboard"} onClick={() => setOpen(false)}
             className="flex items-center justify-between py-4 border-b border-line text-xl font-display text-ink hover:text-lime-deep transition">
             <span>{t("nav.toDashboard")}</span>
             <Icons.ArrowRight size={16} />
@@ -197,7 +197,7 @@ export default function AppHeader({
               return (
                 <Link
                   key={l.href}
-                  href={l.href as any}
+                  href={l.href}
                   className={`relative px-2.5 py-1.5 rounded-md transition ${
                     active
                       ? "text-ink bg-bg-soft"
@@ -231,7 +231,7 @@ export default function AppHeader({
 
           {planLabel && variant === "dashboard" && (
             <Link
-              href={"/billing" as any}
+              href={"/billing"}
               title={t("nav.currentPlan", { plan: planLabel ?? "" })}
               className={`hidden xl:inline-flex items-center gap-1.5 px-2 py-1 rounded-md border ${planClass} hover:opacity-80 transition`}
             >
@@ -244,7 +244,7 @@ export default function AppHeader({
 
           {isAdmin && variant === "dashboard" && (
             <Link
-              href={"/admin" as any}
+              href={"/admin"}
               className="hidden xl:inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-orange/30 bg-orange/10 text-orange hover:bg-orange/15 transition"
             >
               <span className="font-mono text-[10px] uppercase tracking-[0.15em] font-semibold">admin</span>
@@ -253,7 +253,7 @@ export default function AppHeader({
           )}
           {variant === "admin" && (
             <Link
-              href={"/dashboard" as any}
+              href={"/dashboard"}
               className="hidden xl:inline-flex items-center gap-1.5 px-2 py-1 rounded-md border border-line bg-paper text-ink-muted hover:text-ink hover:bg-bg-soft transition"
             >
               <span className="font-mono text-[10px] uppercase tracking-[0.15em]">{t("nav.toPersonal")}</span>

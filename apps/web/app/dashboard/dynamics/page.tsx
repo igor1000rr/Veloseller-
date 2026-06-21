@@ -82,7 +82,7 @@ export default async function DynamicsPage({ searchParams }: {
         <h1 className="font-display text-2xl md:text-3xl font-medium text-ink">{t("dynamics.empty.title")}</h1>
         <p className="mx-auto mt-3 max-w-xl text-ink-muted leading-relaxed">{t("dynamics.empty.text")}</p>
         <div className="mt-6 flex gap-3 justify-center flex-wrap">
-          <Link href={"/connections/new" as any} className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition">{t("dynamics.empty.btn")}</Link>
+          <Link href={"/connections/new"} className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition">{t("dynamics.empty.btn")}</Link>
         </div>
       </div>
     );
@@ -383,7 +383,7 @@ export default async function DynamicsPage({ searchParams }: {
                     {allLimited.map(t => (
                       <tr key={t.pid} className="hover:bg-bg-soft/40 transition">
                         <td className="px-4 py-2.5">
-                          <Link href={`/dashboard/skus/${t.pid}` as any} className="font-mono text-xs text-lime-deep hover:underline">{t.sku}</Link>
+                          <Link href={`/dashboard/skus/${t.pid}`} className="font-mono text-xs text-lime-deep hover:underline">{t.sku}</Link>
                         </td>
                         <td className="px-4 py-2.5 text-ink-soft text-[13px] max-w-xs truncate">{t.name || "—"}</td>
                         <td className="px-4 py-2.5 text-right font-mono tabular text-[13px] text-ink-muted">{t.previous.toFixed(2)}</td>
@@ -442,7 +442,7 @@ function TrendList({
             <li key={t.pid} className="flex items-center gap-3 py-1">
               <span className="font-mono text-[10px] text-ink-hush w-5">{i + 1}.</span>
               <div className="flex-1 min-w-0">
-                <Link href={`/dashboard/skus/${t.pid}` as any} className="font-mono text-xs text-ink hover:text-lime-deep transition truncate block">
+                <Link href={`/dashboard/skus/${t.pid}`} className="font-mono text-xs text-ink hover:text-lime-deep transition truncate block">
                   {t.sku}
                 </Link>
                 {t.name && <div className="text-[11px] text-ink-hush truncate">{t.name}</div>}

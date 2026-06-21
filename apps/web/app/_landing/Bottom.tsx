@@ -60,7 +60,7 @@ export default function LandingBottom({ isAuthed }: { isAuthed: boolean }) {
               </p>
               <div className="mt-7 md:mt-8 flex flex-wrap gap-3 md:gap-4">
                 <Link
-                  href={(isAuthed ? "/dashboard" : "/register") as any}
+                  href={(isAuthed ? "/dashboard" : "/register")}
                   className="inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-6 md:px-7 py-3.5 md:py-4 text-base font-semibold hover:bg-ink-soft transition shadow-[0_10px_30px_-10px_rgba(10,10,8,0.4)]"
                 >
                   {isAuthed ? t("landing.cta.open") : t("landing.pr.startFree")} <Icons.ArrowRight />

@@ -92,7 +92,7 @@ export function UnitEconomics({ priceRub, commissionPct, costRub, taxRate, produ
       <div className="flex items-start justify-between gap-3 mb-4">
         <p className="text-sm text-ink-muted">{L.sub}</p>
         <Link
-          href={"/dashboard/skus/cost-import" as any}
+          href={"/dashboard/skus/cost-import"}
           className="shrink-0 mt-0.5 text-xs font-mono uppercase tracking-wider text-lime-deep hover:underline whitespace-nowrap"
         >
           {isEn ? "Add cost in bulk →" : "Добавить массово →"}

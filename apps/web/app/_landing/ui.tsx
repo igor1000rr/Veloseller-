@@ -80,7 +80,7 @@ export function PricingCard({ name, price, highlight, perks, fromPrice, isAuthed
         ))}
       </ul>
       <Link
-        href={(isAuthed ? "/billing" : "/register") as any}
+        href={(isAuthed ? "/billing" : "/register")}
         className={`mt-7 md:mt-8 block rounded-lg px-4 py-3 text-center text-sm font-semibold transition ${
           highlight
             ? "bg-ink text-paper hover:bg-ink-soft"
@@ -100,7 +100,7 @@ export function FooterCol({ title, items }: { title: string; items: [string, str
       <ul className="mt-4 space-y-2.5 text-sm">
         {items.map(([href, label]) => (
           <li key={label}>
-            <Link href={href as any} className="text-ink-soft hover:text-lime-deep transition">{label}</Link>
+            <Link href={href} className="text-ink-soft hover:text-lime-deep transition">{label}</Link>
           </li>
         ))}
       </ul>

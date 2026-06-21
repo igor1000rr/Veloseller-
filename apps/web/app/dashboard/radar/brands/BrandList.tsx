@@ -134,7 +134,7 @@ function BrandRow({
   return (
     <div className={`flex items-center justify-between gap-3 px-4 py-3 ${!last ? "border-b border-line" : ""} ${muted ? "opacity-60" : ""} hover:bg-bg-soft/40 transition`}>
       <Link
-        href={`/dashboard/radar/brands/${brand.id}` as any}
+        href={`/dashboard/radar/brands/${brand.id}`}
         className="flex items-center gap-3 min-w-0 flex-1 group"
       >
         {/* line-through убран по правкам Александра 01.06.2026 —

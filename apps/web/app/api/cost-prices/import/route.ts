@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { requireUser } from "@/lib/auth";
+import { getWorkerConfig, callWorker, isAllowedUploadFile } from "@/lib/api";
 
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
@@ -16,9 +17,9 @@ export const maxDuration = 60;
  * products.cost_price. Возвращает {matched, totalRows, unmatched}.
  */
 export async function POST(req: NextRequest) {
-  const sb = await createSupabaseServerClient();
-  const { data: { user } } = await sb.auth.getUser();
-  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const auth = await requireUser();
+  if (auth instanceof NextResponse) return auth;
+  const { supabase: sb, user } = auth;
 
   // Парсинг файла дорогой — тот же лимит, что у загрузки прайса Radar.
   const limited = enforceRateLimit(req, RATE_LIMITS.EXPENSIVE, user.id);
@@ -37,6 +38,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       error: `Файл слишком большой: ${(file.size / 1024 / 1024).toFixed(1)}МБ > 50МБ`,
     }, { status: 413 });
+  }
+  if (!isAllowedUploadFile(file)) {
+    return NextResponse.json({ error: "Поддерживаются только файлы CSV или Excel (.csv, .xlsx, .xls)" }, { status: 400 });
   }
   if (!connectionId) {
     return NextResponse.json({ error: "Не выбран склад" }, { status: 400 });
@@ -59,9 +63,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Склад не найден" }, { status: 404 });
   }
 
-  const workerUrl = process.env.WORKER_URL || "http://127.0.0.1:8001";
-  const workerSecret = process.env.WORKER_SECRET;
-  if (!workerSecret) {
+  const worker = getWorkerConfig({ defaultUrl: "http://127.0.0.1:8001" });
+  if (!worker) {
     return NextResponse.json({ error: "Сервис временно недоступен" }, { status: 500 });
   }
 
@@ -73,26 +76,26 @@ export async function POST(req: NextRequest) {
   workerForm.append("cost_col", costCol);
   workerForm.append("file", new Blob([buffer]), file.name);
 
-  try {
-    const res = await fetch(`${workerUrl}/cost-prices/import`, {
-      method: "POST",
-      headers: { "X-Worker-Secret": workerSecret },
-      body: workerForm,
-      signal: AbortSignal.timeout(90_000),
-    });
-    const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
-    if (!res.ok) {
-      // FastAPI HTTPException → {detail}; наши прочие ошибки → {error}.
-      return NextResponse.json(
-        { error: body?.detail ?? body?.error ?? `HTTP ${res.status}` },
-        { status: res.status },
-      );
-    }
-    return NextResponse.json(body);
-  } catch (e: any) {
+  const result = await callWorker(worker, "/cost-prices/import", {
+    method: "POST",
+    body: workerForm,
+    timeoutMs: 90_000,
+  });
+  if (!result.ok) {
     return NextResponse.json(
-      { error: e?.name === "TimeoutError" ? "Превышено время обработки файла" : "Ошибка обработки файла" },
+      { error: result.kind === "timeout" ? "Превышено время обработки файла" : "Ошибка обработки файла" },
       { status: 504 },
     );
   }
+
+  const res = result.res;
+  const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+  if (!res.ok) {
+    // FastAPI HTTPException → {detail}; наши прочие ошибки → {error}.
+    return NextResponse.json(
+      { error: body?.detail ?? body?.error ?? `HTTP ${res.status}` },
+      { status: res.status },
+    );
+  }
+  return NextResponse.json(body);
 }

@@ -21,7 +21,7 @@ export default function DynamicsSearch({ initial }: { initial: string }) {
     else params.delete("q");
     const qs = params.toString();
     startTransition(() => {
-      router.push(`${pathname}${qs ? `?${qs}` : ""}` as any);
+      router.push(`${pathname}${qs ? `?${qs}` : ""}`);
     });
   }
 

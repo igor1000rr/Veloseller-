@@ -78,8 +78,8 @@ export default async function DashboardOverview({ searchParams }: {
           {t("dashboard.empty.text")}
         </p>
         <div className="mt-6 flex gap-3 justify-center flex-wrap">
-          <Link href={"/onboarding" as any} className="inline-flex items-center rounded-lg border border-line bg-bg-soft text-ink px-5 py-3 font-semibold hover:border-lime-deep/40 transition">{t("dashboard.empty.guideBtn")}</Link>
-          <Link href={"/connections/new" as any} className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition">{t("dashboard.empty.addBtn")}</Link>
+          <Link href={"/onboarding"} className="inline-flex items-center rounded-lg border border-line bg-bg-soft text-ink px-5 py-3 font-semibold hover:border-lime-deep/40 transition">{t("dashboard.empty.guideBtn")}</Link>
+          <Link href={"/connections/new"} className="inline-flex items-center rounded-lg bg-ink text-paper px-5 py-3 font-semibold hover:bg-ink-soft transition">{t("dashboard.empty.addBtn")}</Link>
         </div>
       </div>
     );
@@ -300,7 +300,7 @@ export default async function DashboardOverview({ searchParams }: {
       {/* ===== ПОЛОСА 3: 4 маленьких KPI ===== */}
       <div className="grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-4">
         <Kpi
-          href={"/dashboard/skus" as any}
+          href={"/dashboard/skus"}
           label={t("dashboard.kpi.totalSku.label")}
           tooltip={t("dashboard.kpi.totalSku.tip")}
           value={wm?.total_sku_count ?? "—"}
@@ -435,7 +435,7 @@ export default async function DashboardOverview({ searchParams }: {
         <div className="rounded-2xl border border-line bg-paper p-4 sm:p-6">
           <div className="flex items-center justify-between flex-wrap gap-3">
             <h2 className="font-display text-lg font-medium text-ink">{t("dashboard.alerts.title")}</h2>
-            <Link href={"/dashboard/alerts" as any} className="text-xs font-mono uppercase tracking-wider text-lime-deep hover:underline">
+            <Link href={"/dashboard/alerts"} className="text-xs font-mono uppercase tracking-wider text-lime-deep hover:underline">
               {t("dashboard.alerts.viewAll")}
             </Link>
           </div>
@@ -530,7 +530,7 @@ function ActionCard({ href, label, value, sub, tone, tooltip }: {
     </div>
   );
 
-  return href ? <Link href={href as any}>{inner}</Link> : inner;
+  return href ? <Link href={href}>{inner}</Link> : inner;
 }
 
 function Kpi({ href, label, value, tone, tooltip }: {
@@ -558,7 +558,7 @@ function Kpi({ href, label, value, tone, tooltip }: {
     </div>
   );
 
-  return href ? <Link href={href as any}>{inner}</Link> : inner;
+  return href ? <Link href={href}>{inner}</Link> : inner;
 }
 
 function VelocityCard({ label, value, sub, tone, tooltip }: { label: string; value: number; sub: string; tone: "fast" | "mid" | "slow"; tooltip?: string }) {

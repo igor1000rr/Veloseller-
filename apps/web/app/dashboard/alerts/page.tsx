@@ -185,7 +185,7 @@ export default async function ReportsPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <Link
-            href={"/dashboard/alerts/subscriptions" as any}
+            href={"/dashboard/alerts/subscriptions"}
             className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-line bg-paper text-sm text-ink-muted hover:text-ink hover:bg-bg-soft hover:border-lime-deep/40 transition min-h-[36px]"
           >
             <span aria-hidden="true">⚙</span>
@@ -236,7 +236,7 @@ function EmptyState({ subsCount }: { subsCount: number }) {
       </div>
       <div className="pt-2">
         <Link
-          href={"/dashboard/alerts/subscriptions" as any}
+          href={"/dashboard/alerts/subscriptions"}
           className="inline-flex items-center gap-2 px-4 py-2.5 rounded-lg bg-ink text-paper text-sm font-medium hover:bg-ink-soft transition min-h-[40px]"
         >
           {t("report.empty.openSettings")} <Icons.ArrowRight size={12} />

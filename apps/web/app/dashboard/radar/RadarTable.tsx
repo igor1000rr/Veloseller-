@@ -194,7 +194,7 @@ function BrandPicker({
     <div className="flex items-center gap-1.5">
       {brandFilter && current ? (
         <Link
-          href={buildHref(null) as any}
+          href={buildHref(null)}
           className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-lime-deep/40 bg-lime-soft/40 text-xs font-mono text-lime-deep hover:bg-lime-soft/60 transition"
         >
           {current.name}

@@ -78,7 +78,7 @@ export default function RegisterPage() {
             </button>
           </form>
           <div className="mt-5 text-sm text-center text-ink-muted">
-            {t("auth.register.haveAccount")}<Link href={"/login" as any} className="text-ink hover:text-lime-deep transition font-medium">{t("auth.login.submit")}</Link>
+            {t("auth.register.haveAccount")}<Link href={"/login"} className="text-ink hover:text-lime-deep transition font-medium">{t("auth.login.submit")}</Link>
           </div>
         </div>
         <Link href="/" className="mt-6 text-center text-sm text-ink-hush hover:text-ink transition inline-flex items-center gap-1 justify-center">
