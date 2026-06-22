@@ -5,10 +5,12 @@
 // Маппинг: uuid/text/date/timestamptz → string, int*/numeric → number, bool →
 // boolean, jsonb → Json, _text → string[], enum → public.Enums[...].
 // Insert: колонки с DEFAULT или NULLABLE — опциональны. Update: все опциональны.
-// Functions типизированы свободно (Args: Record<string, unknown>, Returns: unknown):
-// .rpc() остаётся рабочим, без жёсткой завязки на сигнатуры.
+// Functions: точные сигнатуры из pg_proc — Args по именам параметров (DEFAULT →
+// опционально), Returns по RETURNS TABLE/скаляру; триггеры — Returns: unknown.
+// Relationships заполнены из живых FK, вьюхи — в Views. RPC типизирован сквозно.
 //
-// Регенерация: см. README / MCP list_table_columns + pg_enum.
+// Регенерация: MCP execute_sql по information_schema/pg_enum/pg_proc + pg FK,
+// либо `supabase gen types --db-url` на VPS (CLI ходит в БД напрямую).
 
 export type Json =
   | string
@@ -249,33 +251,89 @@ export type Database = {
         Relationships: [];
       };
     };
-    // Явные ключи (НЕ индекс-сигнатура: она ломает вывод postgrest-js → схема
-    // вырождается в never). Args/Returns свободные — .rpc() не завязан на сигнатуры.
+    // Сигнатуры функций — из живой схемы (pg_proc), карта типов как у gen types.
+    // Args нул-аргументных функций — Record<PropertyKey, never>; триггеры —
+    // Returns: unknown. p_connection_id допускает null там, где вызовы шлют `?? null`.
     Functions: {
-      admin_auth_onboarding_health: { Args: Record<string, unknown>; Returns: unknown };
-      admin_connection_data_age: { Args: Record<string, unknown>; Returns: unknown };
-      bulk_update_cost_prices: { Args: Record<string, unknown>; Returns: unknown };
-      bulk_upsert_products: { Args: Record<string, unknown>; Returns: unknown };
-      create_default_notification_subscriptions: { Args: Record<string, unknown>; Returns: unknown };
-      enforce_sku_limit: { Args: Record<string, unknown>; Returns: unknown };
-      execute_sql: { Args: Record<string, unknown>; Returns: unknown };
-      get_concentration_product_ids: { Args: Record<string, unknown>; Returns: unknown };
-      get_dashboard_velocities: { Args: Record<string, unknown>; Returns: unknown };
-      get_skus_facets: { Args: Record<string, unknown>; Returns: unknown };
-      get_skus_filter_ranges: { Args: Record<string, unknown>; Returns: unknown };
-      get_skus_period_metrics: { Args: Record<string, unknown>; Returns: unknown };
-      get_sync_log_history: { Args: Record<string, unknown>; Returns: unknown };
-      get_warehouse_dashboard_metrics: { Args: Record<string, unknown>; Returns: unknown };
-      handle_new_user: { Args: Record<string, unknown>; Returns: unknown };
-      mark_recalc_done: { Args: Record<string, unknown>; Returns: unknown };
-      mark_recalc_error: { Args: Record<string, unknown>; Returns: unknown };
-      plan_sku_limit: { Args: Record<string, unknown>; Returns: unknown };
-      set_updated_at: { Args: Record<string, unknown>; Returns: unknown };
-      touch_radar_brands_updated_at: { Args: Record<string, unknown>; Returns: unknown };
-      trg_recalc_jobs_touch: { Args: Record<string, unknown>; Returns: unknown };
-      try_acquire_recalc_lock: { Args: Record<string, unknown>; Returns: unknown };
-      update_recalc_progress: { Args: Record<string, unknown>; Returns: unknown };
-      update_warehouses_limit_on_plan_change: { Args: Record<string, unknown>; Returns: unknown };
+      admin_auth_onboarding_health: {
+        Args: Record<PropertyKey, never>;
+        Returns: { trigger_present: boolean; orphan_count: number }[];
+      };
+      admin_connection_data_age: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          connection_id: string; seller_id: string; seller_email: string; connection_name: string;
+          marketplace: string; source: string; status: string; last_sync_at: string;
+          hours_since_last_sync: number; first_snapshot_at: string; last_snapshot_at: string;
+          days_of_history: number; snapshots_count: number; last_error: string;
+        }[];
+      };
+      bulk_update_cost_prices: {
+        Args: { p_seller_id: string; p_connection_id: string; p_costs: Json };
+        Returns: number;
+      };
+      bulk_upsert_products: { Args: { p_rows: Json }; Returns: undefined };
+      create_default_notification_subscriptions: { Args: Record<PropertyKey, never>; Returns: unknown };
+      enforce_sku_limit: { Args: Record<PropertyKey, never>; Returns: unknown };
+      execute_sql: { Args: { query: string; read_only?: boolean }; Returns: Json };
+      get_concentration_product_ids: {
+        Args: { p_seller_id: string; p_connection_id?: string | null; p_kind?: string };
+        Returns: { product_id: string }[];
+      };
+      get_dashboard_velocities: {
+        Args: { p_seller_id: string; p_connection_id?: string | null };
+        Returns: { product_id: string; adjusted_velocity: number; confidence_score: number }[];
+      };
+      get_skus_facets: {
+        Args: { p_seller_id: string; p_connection_id?: string | null };
+        Returns: { brands: string[]; categories: string[]; tags: string[] }[];
+      };
+      get_skus_filter_ranges: {
+        Args: { p_seller_id: string; p_connection_id?: string | null; p_period_days?: number };
+        Returns: {
+          stock_min: number; stock_max: number; oos_min: number; oos_max: number;
+          lost_min: number; lost_max: number; coverage_min: number; coverage_max: number;
+        }[];
+      };
+      get_skus_period_metrics: {
+        Args: {
+          p_seller_id: string; p_connection_id: string | null; p_period_start: string;
+          p_period_end: string; p_product_ids: string[];
+        };
+        Returns: {
+          product_id: string; velocity: number; in_stock_days: number; stockout_days: number;
+          sales_units: number; current_stock: number; current_price: number;
+          coverage_days: number; lost_revenue: number;
+        }[];
+      };
+      get_sync_log_history: {
+        Args: { p_seller_id: string; p_days?: number };
+        Returns: { sync_date: string; connection_id: string; snapshots_count: number; last_snapshot_time: string }[];
+      };
+      get_warehouse_dashboard_metrics: {
+        Args: { p_seller_id: string; p_connection_id: string; p_period_days?: number };
+        Returns: {
+          total_sku_count: number; active_sku_count: number; oos_sku_count: number;
+          inactive_sku_count: number; low_stock_sku_count: number; dead_inventory_sku_count: number;
+          frequently_oos_sku_count: number; total_inventory_value: number;
+          store_frozen_inventory_value: number; lost_revenue: number; potential_revenue: number;
+          warehouse_health_score: number; inventory_concentration_50: number;
+          demand_concentration_50: number; demand_pattern_distribution: Json;
+        }[];
+      };
+      handle_new_user: { Args: Record<PropertyKey, never>; Returns: unknown };
+      mark_recalc_done: { Args: { p_seller_id: string; p_result: Json }; Returns: undefined };
+      mark_recalc_error: { Args: { p_seller_id: string; p_error_text: string }; Returns: undefined };
+      plan_sku_limit: { Args: { p: string }; Returns: number };
+      set_updated_at: { Args: Record<PropertyKey, never>; Returns: unknown };
+      touch_radar_brands_updated_at: { Args: Record<PropertyKey, never>; Returns: unknown };
+      trg_recalc_jobs_touch: { Args: Record<PropertyKey, never>; Returns: unknown };
+      try_acquire_recalc_lock: {
+        Args: { p_seller_id: string; p_worker_id?: string | null; p_stale_after?: unknown };
+        Returns: boolean;
+      };
+      update_recalc_progress: { Args: { p_seller_id: string; p_progress: Json }; Returns: undefined };
+      update_warehouses_limit_on_plan_change: { Args: Record<PropertyKey, never>; Returns: unknown };
     };
     Enums: {
       alert_kind: "low_stock" | "critical_stock" | "dead_inventory" | "repeated_stockout" | "underestimated_sku";
