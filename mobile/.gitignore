@@ -1,0 +1,16 @@
+# Capacitor-обёртка Veloseller — нативные проекты генерятся локально (npm run add:*),
+# в репозиторий их не кладём (большие, платформо-специфичные, содержат локальные пути).
+# Если позже захотите версионировать нативку (для CI-сборки) — уберите эти строки.
+node_modules/
+android/
+ios/
+www/dist/
+.DS_Store
+*.log
+
+# Подписи/секреты сборки — НИКОГДА в git
+*.keystore
+*.jks
+key.properties
+GoogleService-Info.plist
+google-services.json
