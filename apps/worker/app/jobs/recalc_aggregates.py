@@ -138,42 +138,49 @@ def build_daily_aggregates(snapshots_rows, period_start, period_end, seller_tz):
             ))
         cur = cur + timedelta(days=1)
 
-    try:
-        from app.engine.recount import Snapshot as RcSnap, detect_recount_pairs
-        rc_snaps = [
-            RcSnap(
-                snapshot_id=r.get("snapshot_id", ""),
-                snapshot_time=datetime.fromisoformat(r["snapshot_time"].replace("Z", "+00:00")),
-                stock_quantity=int(r["stock_quantity"]),
-            )
-            for r in sorted(snapshots_rows, key=lambda x: x["snapshot_time"])
-        ]
-        recount_pairs = detect_recount_pairs(rc_snaps)
-        if recount_pairs:
-            recount_days = set()
-            for snap_a, snap_b in recount_pairs:
-                # Оба дня пары: при пересчёте через полночь компенсирующий день
-                # (snap_b) тоже нужно переклассифицировать, иначе он остаётся
-                # sales_like/replenishment_like и искажает скорость.
-                recount_days.add(snap_a.snapshot_time.astimezone(seller_tz).date())
-                recount_days.add(snap_b.snapshot_time.astimezone(seller_tz).date())
-            for i, a in enumerate(aggregates):
-                if a.day in recount_days and a.event_type != EventType.MISSING_DATA:
-                    aggregates[i] = DailyAggregate(
-                        day=a.day, availability=a.availability,
-                        end_of_day_stock=a.end_of_day_stock, price=a.price,
-                        event_type=EventType.RECOUNT_LIKE,
-                        delta_stock=a.delta_stock,
-                        excluded_from_confirmed_metrics=True,
-                    )
-                    for er in event_rows:
-                        if er["event_date"] == a.day.isoformat():
-                            er["event_type"] = EventType.RECOUNT_LIKE.value
-                            er["excluded_from_confirmed_metrics"] = True
-    except Exception:
-        # Раньше тут был молчаливый pass: любая ошибка детекции пересчётов
-        # отключала reclass для ВСЕХ SKU без следа (recount шёл как продажа/
-        # аномалия и искажал скорость + lost_revenue). Логируем, не глотаем.
-        logger.exception("recount detection failed in build_daily_aggregates")
+    # Recount-детекция ОТКЛЮЧЕНА (решение заказчика 22.06.2026): склад снимается
+    # раз в день — внутридневные компенсирующие пары (окно 12ч) зафиксировать
+    # нельзя, детектор давал бы ложные срабатывания (особенно на мелких SKU) и
+    # ошибочно исключал бы продажи. Логика и тесты сохранены в app/engine/recount.py;
+    # чтобы вернуть — поставить флаг в True (когда появятся несколько снэпшотов/день).
+    _RECOUNT_DETECTION_ENABLED = False
+    if _RECOUNT_DETECTION_ENABLED:
+        try:
+            from app.engine.recount import Snapshot as RcSnap, detect_recount_pairs
+            rc_snaps = [
+                RcSnap(
+                    snapshot_id=r.get("snapshot_id", ""),
+                    snapshot_time=datetime.fromisoformat(r["snapshot_time"].replace("Z", "+00:00")),
+                    stock_quantity=int(r["stock_quantity"]),
+                )
+                for r in sorted(snapshots_rows, key=lambda x: x["snapshot_time"])
+            ]
+            recount_pairs = detect_recount_pairs(rc_snaps)
+            if recount_pairs:
+                recount_days = set()
+                for snap_a, snap_b in recount_pairs:
+                    # Оба дня пары: при пересчёте через полночь компенсирующий день
+                    # (snap_b) тоже нужно переклассифицировать, иначе он остаётся
+                    # sales_like/replenishment_like и искажает скорость.
+                    recount_days.add(snap_a.snapshot_time.astimezone(seller_tz).date())
+                    recount_days.add(snap_b.snapshot_time.astimezone(seller_tz).date())
+                for i, a in enumerate(aggregates):
+                    if a.day in recount_days and a.event_type != EventType.MISSING_DATA:
+                        aggregates[i] = DailyAggregate(
+                            day=a.day, availability=a.availability,
+                            end_of_day_stock=a.end_of_day_stock, price=a.price,
+                            event_type=EventType.RECOUNT_LIKE,
+                            delta_stock=a.delta_stock,
+                            excluded_from_confirmed_metrics=True,
+                        )
+                        for er in event_rows:
+                            if er["event_date"] == a.day.isoformat():
+                                er["event_type"] = EventType.RECOUNT_LIKE.value
+                                er["excluded_from_confirmed_metrics"] = True
+        except Exception:
+            # Раньше тут был молчаливый pass: любая ошибка детекции пересчётов
+            # отключала reclass для ВСЕХ SKU без следа (recount шёл как продажа/
+            # аномалия и искажал скорость + lost_revenue). Логируем, не глотаем.
+            logger.exception("recount detection failed in build_daily_aggregates")
 
     return aggregates, event_rows

@@ -38,13 +38,16 @@ def classify_event(
     if delta_stock == 0:
         return EventType.NO_CHANGE, False
 
-    # Если это праздник — исключаем из расчёта медианы и anomaly-проверки.
-    # Сохраняем базовый тип события (продажа / пополнение) но помечаем
-    # excluded=True чтобы эти дни не смещали медиану продаж.
+    # Праздники: спрос в праздничные/предпраздничные дни — РЕАЛЬНЫЙ спрос, по
+    # умолчанию СЧИТАЕМ его (решение заказчика 22.06.2026), даже если по величине
+    # он попал бы в anomaly. Продажа в праздник → SALES_LIKE, excluded=False
+    # (минуя anomaly-проверку); пополнение → как обычно (не продажа, excluded).
+    # Ветку оставляем: на ней будущая галочка «Не учитывать праздничные дни»
+    # сможет вернуть exclude по выбору закупщика (сгладить спрос).
     if event_date is not None and is_holiday(event_date):
         if delta_stock > 0:
             return EventType.REPLENISHMENT_LIKE, True
-        return EventType.SALES_LIKE, True
+        return EventType.SALES_LIKE, False
 
     if delta_stock > 0:
         return EventType.REPLENISHMENT_LIKE, True

@@ -3,7 +3,7 @@
 - Price change detection → changelog
 - Price elasticity (нужно ≥7 in-stock days до/после)
 """
-from datetime import datetime, date, timedelta, timezone
+from datetime import datetime, date, timezone
 from unittest.mock import MagicMock, patch
 import pytest
 
@@ -85,6 +85,8 @@ def test_build_aggregates_replenishment_detected():
     assert aggregates[1].excluded_from_confirmed_metrics is True
 
 
+@pytest.mark.skip(reason="recount-детекция отключена 22.06.2026 (один снэпшот/день); "
+                         "вернуть вместе с флагом _RECOUNT_DETECTION_ENABLED")
 def test_build_aggregates_recount_detection():
     """Recount pair: drop -> recover в один день → день классифицируется как RECOUNT_LIKE."""
     tz = timezone.utc
@@ -99,6 +101,8 @@ def test_build_aggregates_recount_detection():
     assert day2.excluded_from_confirmed_metrics is True
 
 
+@pytest.mark.skip(reason="recount-детекция отключена 22.06.2026 (один снэпшот/день); "
+                         "вернуть вместе с флагом _RECOUNT_DETECTION_ENABLED")
 def test_build_aggregates_recount_event_rows_updated():
     """После recount detection event_rows тоже обновляются."""
     tz = timezone.utc

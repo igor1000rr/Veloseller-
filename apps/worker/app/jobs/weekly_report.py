@@ -11,12 +11,26 @@ from __future__ import annotations
 
 import io
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 from app.db import fetch_all, get_supabase
 
 logger = logging.getLogger("veloseller.weekly_report")
+
+# Человекочитаемые ярлыки demand_pattern (значение в БД — enum, его не трогаем).
+# "seasonal_candidate" → "Переменный спрос" (решение заказчика 22.06.2026): это не
+# настоящая сезонность, а средний разброс спроса, поэтому метка честнее.
+_DEMAND_PATTERN_LABELS = {
+    "stable": "Стабильный",
+    "unpredictable": "Непредсказуемый",
+    "seasonal_candidate": "Переменный спрос",
+    "insufficient_history": "Мало истории",
+}
+
+
+def _demand_pattern_label(value) -> str:
+    return _DEMAND_PATTERN_LABELS.get(value or "", value or "—")
 
 
 def _format_money(value, currency: str = "RUB") -> str:
@@ -97,7 +111,7 @@ def _build_top_losses_sheet(wb, top_losses: list[dict], currency: str) -> None:
             round(float(row.get("adjusted_velocity") or 0), 2),
             int(row.get("coverage_days") or 0),
             _format_money(row.get("lost_revenue"), currency),
-            row.get("demand_pattern") or "—",
+            _demand_pattern_label(row.get("demand_pattern")),
         ])
 
     _column_widths(ws, {"A": 22, "B": 40, "C": 22, "D": 16, "E": 22, "F": 18})
