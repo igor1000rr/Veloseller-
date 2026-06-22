@@ -79,6 +79,8 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (insertErr || !invoice) {
+    // Логируем причину БД-ошибки (раньше глоталось → 500 без следов в логах).
+    console.error("[robokassa-create] invoice insert failed:", insertErr?.message, { plan });
     return NextResponse.json({ error: "Не удалось создать заявку на оплату" }, { status: 500 });
   }
 
