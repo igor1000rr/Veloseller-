@@ -1,6 +1,7 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import Link from "next/link";
 import { HealthRadial, HourlyHeatmap } from "../AdminCharts";
+import { checkRobokassaConfig } from "@/lib/robokassa";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,13 @@ export default async function HealthPage() {
   const onboarding = (Array.isArray(onboardingHealth) ? onboardingHealth[0] : onboardingHealth) as { trigger_present?: boolean; orphan_count?: number } | null | undefined;
   const onboardingOk = !!onboarding?.trigger_present && Number(onboarding?.orphan_count ?? 0) === 0;
 
+  // Статус платёжки (Robokassa) — читаем env прямо на сервере. Пароли НЕ
+  // показываем, только: настроена ли, режим (тест/бой) и логин магазина (он
+  // и так публичный — уходит в URL оплаты).
+  const rk = checkRobokassaConfig();
+  const rkTest = process.env.ROBOKASSA_TEST_MODE === "1";
+  const rkLogin = process.env.ROBOKASSA_MERCHANT_LOGIN || "—";
+
   // Stale connections: 24h+ без sync (или sync вообще не было)
   const connAge = (connectionsAge ?? []) as any[];
   const staleConnections = connAge.filter(c =>
@@ -92,6 +100,22 @@ export default async function HealthPage() {
               {onboarding?.trigger_present ? "" : "триггер on_auth_user_created пропал · "}
               сирот без sellers: {Number(onboarding?.orphan_count ?? 0)} · авто-хил поднимет ≤15 мин
             </span>
+          )}
+        </div>
+      </div>
+
+      <div className={`rounded-xl border px-4 py-3 flex items-center justify-between gap-3 ${rk.ok ? "border-lime-deep/30 bg-lime-soft" : "border-rose/40 bg-rose/10"}`}>
+        <div className="flex items-center gap-2.5">
+          <span className={`size-1.5 rounded-full ${rk.ok ? "bg-lime-deep" : "bg-rose animate-pulse"}`} />
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush font-semibold">Платёжка · Robokassa</span>
+        </div>
+        <div className="font-mono text-[11px]">
+          {rk.ok ? (
+            <span className={rkTest ? "text-orange" : "text-lime-deep"}>
+              настроена · {rkTest ? "⚠ ТЕСТОВЫЙ режим" : "боевой режим"} · магазин {rkLogin}
+            </span>
+          ) : (
+            <span className="text-rose">не настроена: {rk.error}</span>
           )}
         </div>
       </div>
