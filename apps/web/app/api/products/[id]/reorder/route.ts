@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/auth";
+import type { TablesUpdate } from "@/lib/database.types";
 
 /**
  * PATCH /api/products/[id]/reorder
@@ -19,7 +20,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (limited) return limited;
 
   const body = await req.json().catch(() => ({}));
-  const update: Record<string, number | null> = {};
+  const update: TablesUpdate<"products"> = {};
   for (const k of ["lead_time_days", "safety_days"] as const) {
     if (k in body) {
       const v = body[k];

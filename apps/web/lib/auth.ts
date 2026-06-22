@@ -13,6 +13,7 @@
  */
 import { NextResponse } from "next/server";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
+import type { Database } from "@/lib/database.types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /** Список админских e-mail из ENV (нижний регистр, без пустых). */
@@ -25,7 +26,7 @@ export function isAdminEmail(email: string | null | undefined): boolean {
 }
 
 /** Аутентифицированный пользователь + готовый серверный клиент. */
-export type AuthContext = { supabase: SupabaseClient; user: User };
+export type AuthContext = { supabase: SupabaseClient<Database>; user: User };
 
 /**
  * Generic-хелпер ответа об ошибке: подробность пишем в console.error,

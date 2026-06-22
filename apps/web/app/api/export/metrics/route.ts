@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireUser, jsonError } from "@/lib/auth";
 import { getSelectedWarehouse } from "@/lib/warehouse";
+import type { Enums } from "@/lib/database.types";
 
 export const dynamic = "force-dynamic";
 
@@ -239,7 +240,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (segmentFilter) {
-      query = query.eq("tvelo_metrics.inventory_segment", segmentFilter);
+      query = query.eq("tvelo_metrics.inventory_segment", segmentFilter as Enums<"inventory_segment">);
     }
 
     if (search) {

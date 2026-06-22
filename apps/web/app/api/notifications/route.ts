@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/auth";
+import type { TablesUpdate } from "@/lib/database.types";
 
 /**
  * POST /api/notifications — обновляет seller profile.
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
   if (limited) return limited;
 
   const body = await req.json().catch(() => ({}));
-  const update: Record<string, unknown> = {};
+  const update: TablesUpdate<"sellers"> = {};
 
   // display_name: string ≤200
   if ("display_name" in body) {

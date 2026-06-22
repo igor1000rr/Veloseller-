@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import BrandList from "./BrandList";
+import BrandList, { type Brand } from "./BrandList";
 import AddBrandForm from "./AddBrandForm";
 
 export const dynamic = "force-dynamic";
@@ -43,7 +43,7 @@ export default async function RadarBrandsPage() {
 
       <AddBrandForm limitReached={approvedCount >= limit} />
       <BrandList
-        brands={brands ?? []}
+        brands={(brands ?? []) as Brand[]}
         approvedCount={approvedCount}
         brandsLimit={limit}
       />

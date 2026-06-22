@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/auth";
+import type { Enums } from "@/lib/database.types";
 
 // Разрешённые типы alert'ов (синхронизировано с engine/alerts.py)
 const ALLOWED_KINDS = new Set([
@@ -36,7 +37,7 @@ export async function POST(req: NextRequest) {
     .is("acknowledged_at", null);
 
   if (body.kind) {
-    query = query.eq("kind", body.kind);
+    query = query.eq("kind", body.kind as Enums<"alert_kind">);
   }
 
   const { error, count } = await query;

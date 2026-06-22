@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { encrypt, isEncryptionConfigured } from "@/lib/crypto";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/auth";
+import type { Json, Enums } from "@/lib/database.types";
 
 /**
  * POST /api/connections — создание склада (data_connection).
@@ -43,7 +44,7 @@ const MAX_CONFIG_BYTES = 10 * 1024;
 const MAX_NAME_LENGTH = 200;
 
 /** Выводим source+marketplace из warehouse_kind для записи в enum-колонки. */
-function deriveSourceAndMarketplace(kind: string): { source: string; marketplace: string | null } {
+function deriveSourceAndMarketplace(kind: string): { source: Enums<"source_type">; marketplace: Enums<"marketplace_kind"> | null } {
   switch (kind) {
     case "ozon_fbo":
     case "ozon_fbs":
@@ -228,9 +229,9 @@ export async function POST(req: NextRequest) {
       seller_id: user.id,
       source: derivedSource,
       marketplace: derivedMarketplace,
-      warehouse_kind: kind,
+      warehouse_kind: kind as Enums<"warehouse_kind">,
       name: name.trim(),
-      config: encryptedConfig,
+      config: encryptedConfig as Json,
     })
     .select("id")
     .single();

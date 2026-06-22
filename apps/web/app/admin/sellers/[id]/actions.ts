@@ -9,6 +9,7 @@ import {
   RADAR_BRANDS_LIMITS,
   type RadarPlan,
 } from "@/lib/robokassa";
+import type { Json, TablesUpdate } from "@/lib/database.types";
 
 export type ActionResult = { ok: true; link?: string } | { ok: false; error: string };
 
@@ -26,7 +27,7 @@ async function logAdminAction(
   adminEmail: string,
   action: string,
   targetSellerId: string | null,
-  details: Record<string, unknown>,
+  details: Json,
 ) {
   const admin = createSupabaseAdminClient();
   await admin.from("admin_audit_log").insert({
@@ -59,7 +60,7 @@ export async function adminSaveBilling(formData: FormData): Promise<ActionResult
     const { data: current } = await admin.from("sellers")
       .select("subscription_expires_at").eq("id", sellerId).maybeSingle();
 
-    const patch: Record<string, unknown> = {
+    const patch: TablesUpdate<"sellers"> = {
       plan,
       plan_warehouses_limit: warehousesLimit,
       plan_sku_per_warehouse_limit: skuLimit,
@@ -121,7 +122,7 @@ export async function adminSaveRadar(formData: FormData): Promise<ActionResult> 
     if (!(RADAR_STORED as readonly string[]).includes(radarPlan)) return { ok: false, error: "invalid radar plan" };
 
     const admin = createSupabaseAdminClient();
-    const patch: Record<string, unknown> = { radar_plan: radarPlan, updated_at: new Date().toISOString() };
+    const patch: TablesUpdate<"sellers"> = { radar_plan: radarPlan, updated_at: new Date().toISOString() };
 
     if (radarPlan === "none") {
       patch.radar_brands_limit = 0;

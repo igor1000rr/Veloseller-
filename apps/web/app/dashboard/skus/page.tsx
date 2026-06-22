@@ -2,6 +2,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { Icons } from "../../_components/Icons";
 import { getSelectedWarehouse, warehouseKindLabel } from "@/lib/warehouse";
+import type { Enums } from "@/lib/database.types";
 import { getPreHolidayWindow } from "@/lib/holidays";
 import { SkusFilters, type FilterRanges } from "./SkusFilters";
 import { SearchInput } from "./SearchInput";
@@ -277,7 +278,7 @@ export default async function SkusPage({ searchParams }: {
   }
 
   if (segmentFilter) {
-    productsQuery = productsQuery.eq("tvelo_metrics.inventory_segment", segmentFilter);
+    productsQuery = productsQuery.eq("tvelo_metrics.inventory_segment", segmentFilter as Enums<"inventory_segment">);
   }
 
   if (search) {

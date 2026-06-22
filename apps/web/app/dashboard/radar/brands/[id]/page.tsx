@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
-import BrandQueriesPanel from "./BrandQueriesPanel";
+import BrandQueriesPanel, { type Query } from "./BrandQueriesPanel";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -143,7 +143,7 @@ export default async function BrandDetailPage({
       )}
 
       {/* Таблица запросов с per-фраза sparkline */}
-      <BrandQueriesPanel queries={queries} perQueryHistory={perQueryHistory} />
+      <BrandQueriesPanel queries={queries as Query[]} perQueryHistory={perQueryHistory} />
     </div>
   );
 }

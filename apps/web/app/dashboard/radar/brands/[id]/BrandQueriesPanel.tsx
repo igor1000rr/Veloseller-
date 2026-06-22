@@ -7,7 +7,7 @@ import {
   actionUnarchiveQuery,
 } from "../../actions";
 
-type Query = {
+export type Query = {
   id: string;
   brand_id: string;
   brand_name?: string;

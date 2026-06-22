@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import type { TablesUpdate } from "@/lib/database.types";
 import {
   verifyResultSignature,
   isVeloseLLerPlan,
@@ -104,7 +105,7 @@ async function handle(req: NextRequest): Promise<Response> {
   // «Конструктор» (Александр 04.06.2026): лимиты зашиты в кодировку плана.
   const customParams = parseCustomPlanId(invoice.plan);
 
-  let sellerUpdate: Record<string, unknown> | null = null;
+  let sellerUpdate: TablesUpdate<"sellers"> | null = null;
   if (productKind === "radar" && isRadarPlan(invoice.plan)) {
     // Radar подписка — radar_* поля sellers. Префикс 'radar_' в биллинге,
     // в sellers.radar_plan — без префикса.

@@ -115,11 +115,11 @@ export function planLabelOf(plan: string): string {
   return custom ? customPlanLabel(custom) : plan;
 }
 
-export function isVeloseLLerPlan(plan: Plan): plan is VeloseLLerPlan {
+export function isVeloseLLerPlan(plan: string): plan is VeloseLLerPlan {
   return plan === "starter" || plan === "growth" || plan === "pro";
 }
 
-export function isRadarPlan(plan: Plan): plan is RadarPlan {
+export function isRadarPlan(plan: string): plan is RadarPlan {
   return plan.startsWith("radar_");
 }
 

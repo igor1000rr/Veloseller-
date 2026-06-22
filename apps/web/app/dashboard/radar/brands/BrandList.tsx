@@ -3,7 +3,7 @@ import { useTransition } from "react";
 import Link from "next/link";
 import { actionApproveBrand, actionExcludeBrand, actionDeleteBrand } from "../actions";
 
-type Brand = {
+export type Brand = {
   id: string;
   name: string;
   status: "approved" | "excluded";

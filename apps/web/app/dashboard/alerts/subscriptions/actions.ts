@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { Json } from "@/lib/database.types";
 
 /**
  * Server actions для управления подписками на отчёты.
@@ -48,7 +49,7 @@ export async function upsertSubscription(
   kind: NotificationKind,
   channel: NotificationChannel,
   enabled: boolean,
-  params: Record<string, unknown>,
+  params: Json,
   frequency: NotificationFrequency = "weekly",
 ): Promise<ActionResult> {
   try {
