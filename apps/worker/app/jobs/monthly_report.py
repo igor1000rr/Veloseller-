@@ -141,111 +141,126 @@ def _fetch_store_metric_for_date(sb, seller_id: str, target_date: date) -> Optio
         return None
 
 
-def _fetch_top_lost_revenue(sb, seller_id: str, limit: int = 10) -> list[dict]:
-    """TOP-N SKU по потерянной выручке (TVelo × OOS × Price) за последний месяц.
+def _fetch_period_skus(sb, seller_id: str, period_start: date, period_end: date) -> dict[str, dict]:
+    """Метрики ПО SKU строго за период [period_start, period_end] через RPC
+    get_skus_period_metrics (считает из снэпшотов/событий, НЕ из текущего
+    tvelo_metrics) — поэтому данные относятся именно к отчётному месяцу.
 
-    Берём текущие tvelo_metrics (они уже считаются за 30-дневное окно).
+    Скорость = продажи за период / дни в наличии (помесячная скорость).
+    Возвращает {product_id: {sku, product_name, velocity, stockout_days,
+    current_stock, current_price, coverage_days, lost_revenue}}.
     """
     try:
-        res = (
-            sb.table("tvelo_metrics")
-            .select("adjusted_velocity,stockout_days,current_price,products!inner(sku,product_name,seller_id)")
-            .eq("products.seller_id", seller_id)
-            .gt("stockout_days", 0)
-            .gt("adjusted_velocity", 0)
-            .limit(500)  # 500 чтобы пост-сортировка точная
+        prod_res = (
+            sb.table("products")
+            .select("product_id,sku,product_name")
+            .eq("seller_id", seller_id)
             .execute()
         )
-        rows = res.data or []
-        for r in rows:
-            r["_lost"] = (
-                float(r.get("adjusted_velocity") or 0)
-                * float(r.get("stockout_days") or 0)
-                * float(r.get("current_price") or 0)
-            )
-        rows.sort(key=lambda r: r["_lost"], reverse=True)
-        return [r for r in rows[:limit] if r["_lost"] > 0]
+        products = prod_res.data or []
     except Exception:
-        logger.exception("top lost_revenue failed seller=%s", seller_id)
-        return []
-
-
-def _fetch_top_frozen(sb, seller_id: str, limit: int = 10) -> list[dict]:
-    """TOP-N SKU по замороженным деньгам (current_stock × current_price) среди
-    тех у кого coverage > 180 дней.
-    """
-    try:
-        res = (
-            sb.table("tvelo_metrics")
-            .select("current_stock,current_price,coverage_days,products!inner(sku,product_name,seller_id)")
-            .eq("products.seller_id", seller_id)
-            .eq("inventory_segment", "dead_inventory_risk")
-            .gt("current_stock", 0)
-            .limit(500)
-            .execute()
-        )
-        rows = res.data or []
-        for r in rows:
-            r["_frozen"] = float(r.get("current_stock") or 0) * float(r.get("current_price") or 0)
-        rows.sort(key=lambda r: r["_frozen"], reverse=True)
-        return [r for r in rows[:limit] if r["_frozen"] > 0]
-    except Exception:
-        logger.exception("top frozen failed seller=%s", seller_id)
-        return []
-
-
-def _fetch_velocity_movers(sb, seller_id: str, limit: int = 5) -> tuple[list[dict], list[dict]]:
-    """ТОП роста и ТОП падения TVelo (текущий vs медиана_30д).
-
-    Возвращает (top_growth, top_decline).
-    Берём только SKU где обе скорости > 0 чтобы дельты были осмысленными.
-    """
-    try:
-        res = (
-            sb.table("tvelo_metrics")
-            .select("adjusted_velocity,median_30d_velocity,products!inner(sku,product_name,seller_id)")
-            .eq("products.seller_id", seller_id)
-            .gt("adjusted_velocity", 0)
-            .gt("median_30d_velocity", 0)
-            .limit(500)
-            .execute()
-        )
-        rows = res.data or []
-        for r in rows:
-            adj = float(r.get("adjusted_velocity") or 0)
-            med = float(r.get("median_30d_velocity") or 0)
-            r["_delta_pct"] = ((adj - med) / med * 100) if med > 0 else 0
-        rows.sort(key=lambda r: r["_delta_pct"], reverse=True)
-        growth = rows[:limit]
-        decline = sorted(rows, key=lambda r: r["_delta_pct"])[:limit]
-        return growth, decline
-    except Exception:
-        logger.exception("velocity movers failed seller=%s", seller_id)
-        return [], []
-
-
-def _fetch_segment_distribution(sb, seller_id: str) -> dict[str, dict[str, float]]:
-    """Сегментация склада: {segment: {count, value}}.
-
-    value = сумма current_stock × current_price по сегменту.
-    """
-    try:
-        res = (
-            sb.table("tvelo_metrics")
-            .select("inventory_segment,current_stock,current_price,products!inner(seller_id)")
-            .eq("products.seller_id", seller_id)
-            .limit(5000)
-            .execute()
-        )
-        rows = res.data or []
-    except Exception:
-        logger.exception("segment distribution failed seller=%s", seller_id)
+        logger.exception("period skus: продукты не получены seller=%s", seller_id)
         return {}
-
-    result: dict[str, dict[str, float]] = {}
+    if not products:
+        return {}
+    names = {p["product_id"]: p for p in products}
+    try:
+        res = sb.rpc("get_skus_period_metrics", {
+            "p_seller_id": seller_id,
+            "p_connection_id": None,  # весь магазин (все склады)
+            "p_period_start": period_start.isoformat(),
+            "p_period_end": period_end.isoformat(),
+            "p_product_ids": list(names.keys()),
+        }).execute()
+        rows = res.data or []
+    except Exception:
+        logger.exception("period skus RPC failed seller=%s", seller_id)
+        return {}
+    out: dict[str, dict] = {}
     for r in rows:
-        seg = r.get("inventory_segment") or "insufficient_data"
-        value = float(r.get("current_stock") or 0) * float(r.get("current_price") or 0)
+        pid = r.get("product_id")
+        if pid is None:
+            continue
+        meta = names.get(pid, {})
+        out[pid] = {
+            "sku": meta.get("sku"),
+            "product_name": meta.get("product_name"),
+            "velocity": float(r.get("velocity") or 0),
+            "stockout_days": int(r.get("stockout_days") or 0),
+            "current_stock": int(r.get("current_stock") or 0),
+            "current_price": float(r.get("current_price") or 0),
+            "coverage_days": float(r["coverage_days"]) if r.get("coverage_days") is not None else None,
+            "lost_revenue": float(r.get("lost_revenue") or 0),
+        }
+    return out
+
+
+def _top_lost_from_period(period_skus: dict[str, dict], limit: int = 10) -> list[dict]:
+    """ТОП-N SKU по потерянной выручке ЗА ПЕРИОД (RPC уже посчитал lost_revenue)."""
+    rows = []
+    for m in period_skus.values():
+        lost = m.get("lost_revenue") or 0
+        if lost > 0:
+            rows.append({"products": {"sku": m["sku"], "product_name": m["product_name"]}, "_lost": lost})
+    rows.sort(key=lambda r: r["_lost"], reverse=True)
+    return rows[:limit]
+
+
+def _top_frozen_from_period(period_skus: dict[str, dict], limit: int = 10) -> list[dict]:
+    """ТОП-N SKU по замороженным деньгам (current_stock × current_price на конец
+    периода) среди тех, у кого coverage > 180 дней."""
+    rows = []
+    for m in period_skus.values():
+        cov = m.get("coverage_days")
+        frozen = (m.get("current_stock") or 0) * (m.get("current_price") or 0)
+        if cov is not None and cov > 180 and frozen > 0:
+            rows.append({"products": {"sku": m["sku"], "product_name": m["product_name"]}, "_frozen": frozen})
+    rows.sort(key=lambda r: r["_frozen"], reverse=True)
+    return rows[:limit]
+
+
+def _movers_from_periods(
+    period_now: dict[str, dict], period_prev: dict[str, dict], limit: int = 5,
+) -> tuple[list[dict], list[dict]]:
+    """ТОП роста/падения скорости месяц-к-месяцу: текущий отчётный месяц vs
+    предыдущий. Только SKU, где скорость > 0 в ОБОИХ месяцах (иначе дельта без
+    смысла). median_30d_velocity здесь = скорость прошлого месяца (колонка
+    «поз. мес.»), adjusted_velocity = скорость текущего месяца."""
+    rows = []
+    for pid, m in period_now.items():
+        v_now = m.get("velocity") or 0
+        prev = period_prev.get(pid)
+        v_prev = (prev.get("velocity") or 0) if prev else 0
+        if v_now > 0 and v_prev > 0:
+            rows.append({
+                "products": {"sku": m["sku"], "product_name": m["product_name"]},
+                "median_30d_velocity": v_prev,
+                "adjusted_velocity": v_now,
+                "_delta_pct": (v_now - v_prev) / v_prev * 100,
+            })
+    growth = sorted(rows, key=lambda r: r["_delta_pct"], reverse=True)[:limit]
+    decline = sorted(rows, key=lambda r: r["_delta_pct"])[:limit]
+    return growth, decline
+
+
+def _segments_from_period(period_skus: dict[str, dict]) -> dict[str, dict[str, float]]:
+    """Сегментация склада за период по coverage_days (как inventory_segment в
+    движке): fast<14, stable≤60, slow≤180, dead>180, иначе insufficient_data.
+    value = сумма current_stock × current_price по сегменту."""
+    result: dict[str, dict[str, float]] = {}
+    for m in period_skus.values():
+        cov = m.get("coverage_days")
+        if cov is None:
+            seg = "insufficient_data"
+        elif cov < 14:
+            seg = "fast_movers"
+        elif cov <= 60:
+            seg = "stable"
+        elif cov <= 180:
+            seg = "slow_movers"
+        else:
+            seg = "dead_inventory_risk"
+        value = (m.get("current_stock") or 0) * (m.get("current_price") or 0)
         if seg not in result:
             result[seg] = {"count": 0, "value": 0.0}
         result[seg]["count"] += 1
@@ -546,7 +561,7 @@ def _build_pdf(seller_name: str, period_label: str, data: dict, currency: str) -
 
     if growth:
         story.append(Paragraph("<b>ТОП роста спроса</b>", body_style))
-        rows = [["SKU", "Название", "TVelo медиана 30д", "TVelo текущий", "Δ%"]]
+        rows = [["SKU", "Название", "Скорость (пред. мес.)", "Скорость (тек. мес.)", "Δ%"]]
         for r in growth:
             p = r.get("products") or {}
             if isinstance(p, list):
@@ -565,7 +580,7 @@ def _build_pdf(seller_name: str, period_label: str, data: dict, currency: str) -
 
     if decline:
         story.append(Paragraph("<b>ТОП падения спроса</b>", body_style))
-        rows = [["SKU", "Название", "TVelo медиана 30д", "TVelo текущий", "Δ%"]]
+        rows = [["SKU", "Название", "Скорость (пред. мес.)", "Скорость (тек. мес.)", "Δ%"]]
         for r in decline:
             p = r.get("products") or {}
             if isinstance(p, list):
@@ -754,7 +769,7 @@ def dispatch_monthly_reports() -> None:
 
         prev_start, prev_end = _previous_month_period(today)
         period_label = _month_label(prev_start)
-        _, two_back_end = _two_months_back(today)
+        two_back_start, two_back_end = _two_months_back(today)
 
         logger.info(
             "dispatch_monthly_reports start: period=%s..%s label=%s",
@@ -804,17 +819,22 @@ def dispatch_monthly_reports() -> None:
                 skipped += 1
                 continue
 
+            # SKU-метрики СТРОГО за отчётный (прошлый) месяц и за позапрошлый —
+            # из снэпшотов через RPC, не из текущего tvelo_metrics. Так топ-листы,
+            # сегменты и MoM-динамика относятся именно к месяцу отчёта.
+            period_prev = _fetch_period_skus(sb, seller_id, prev_start, prev_end)
+            period_two_back = _fetch_period_skus(sb, seller_id, two_back_start, two_back_end)
+            growth, decline = _movers_from_periods(period_prev, period_two_back, limit=5)
             data = {
                 "current_metric": current_metric,
                 "previous_metric": previous_metric,
-                "top_lost": _fetch_top_lost_revenue(sb, seller_id, limit=10),
-                "top_frozen": _fetch_top_frozen(sb, seller_id, limit=10),
-                "segments": _fetch_segment_distribution(sb, seller_id),
+                "top_lost": _top_lost_from_period(period_prev, limit=10),
+                "top_frozen": _top_frozen_from_period(period_prev, limit=10),
+                "segments": _segments_from_period(period_prev),
                 "data_quality": _fetch_data_quality(sb, seller_id, prev_start, prev_end),
+                "growth": growth,
+                "decline": decline,
             }
-            growth, decline = _fetch_velocity_movers(sb, seller_id, limit=5)
-            data["growth"] = growth
-            data["decline"] = decline
 
             # Строим PDF
             try:
