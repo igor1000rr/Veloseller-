@@ -32,7 +32,7 @@ function buildCsp(nonce: string): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
-    `connect-src 'self' ${sb.https} ${sb.wss} https://*.sentry.io https://*.ingest.sentry.io https://mc.yandex.ru https://mc.yandex.com`,
+    `connect-src 'self' ${sb.https} ${sb.wss} https://*.sentry.io https://*.ingest.sentry.io https://mc.yandex.ru https://mc.yandex.com wss://mc.yandex.ru wss://mc.yandex.com`,
     "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
     "form-action 'self' https://auth.robokassa.ru",
   ].join("; ");
@@ -51,7 +51,11 @@ export async function middleware(request: NextRequest) {
   requestHeaders.set("content-security-policy", csp);
 
   // Применяет CSP/no-cache/Vary к любому ответу, который мы отдаём.
-  const cspResponseHeader = "content-security-policy-report-only"; // флип → "content-security-policy"
+  // ENFORCE: проверено в Report-Only на проде — единственное нарушение (вебвизор
+  // wss://mc.yandex) закрыто хостами выше; nonce Next проставляет своим скриптам
+  // (белый экран исключён); JSON-LD как data-block не триггерит script-src.
+  // Откат при нужде: вернуть "content-security-policy-report-only".
+  const cspResponseHeader = "content-security-policy";
 
   let response = NextResponse.next({ request: { headers: requestHeaders } });
 
