@@ -1,7 +1,8 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Политика конфиденциальности — Veloseller",
+  // title.template из layout добавит « — Veloseller», поэтому суффикс тут не дублируем
+  title: "Политика конфиденциальности",
   description: "Как Veloseller собирает, использует и защищает персональные данные (152-ФЗ).",
 };
 

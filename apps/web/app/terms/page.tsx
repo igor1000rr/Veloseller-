@@ -1,7 +1,8 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Условия использования — Veloseller",
+  // title.template из layout добавит « — Veloseller», поэтому суффикс тут не дублируем
+  title: "Условия использования",
   description: "Условия использования сервиса Veloseller.",
 };
 
