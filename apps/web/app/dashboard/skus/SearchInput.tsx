@@ -18,9 +18,13 @@ export function SearchInput() {
 
   const [value, setValue] = useState(sp.get("q") ?? "");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusedRef = useRef(false);
 
-  // Синхронизация при back/forward или внешнем сбросе.
+  // Синхронизация при back/forward или внешнем сбросе. Пока инпут в фокусе
+  // (юзер печатает) НЕ перетираем локальное значение эхом из URL — иначе
+  // debounced router.replace гонится с вводом и теряет символы.
   useEffect(() => {
+    if (focusedRef.current) return;
     setValue(sp.get("q") ?? "");
   }, [sp]);
 
@@ -46,6 +50,8 @@ export function SearchInput() {
         type="text"
         value={value}
         onChange={e => onChange(e.target.value)}
+        onFocus={() => { focusedRef.current = true; }}
+        onBlur={() => { focusedRef.current = false; }}
         placeholder={t("sku.search.placeholder")}
         className="w-full px-3 py-2 pl-9 border border-line rounded-lg text-sm bg-paper focus:outline-none focus:border-lime-deep transition min-h-[40px]"
       />
