@@ -6,6 +6,9 @@ import FreshDataGuard from "../_components/FreshDataGuard";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+// Приватный раздел — noindex (defense-in-depth к robots.txt: robots запрещает
+// краул, но URL может попасть в индекс по бэклинку; noindex закрывает и это).
+export const metadata = { robots: { index: false, follow: false } };
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
   const supabase = await createSupabaseServerClient();

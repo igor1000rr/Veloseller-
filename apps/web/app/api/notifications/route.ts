@@ -36,13 +36,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "timezone должен быть валидным IANA timezone" }, { status: 400 });
     }
   }
-  // telegram_chat_id: string или null (можно отвязать)
+  // telegram_chat_id: ЧИСЛОВОЙ id (может быть отрицательным для групп) или null.
+  // Валидируем формат: иначе опечатка/чужой id молча сохранится и отчёты (с бизнес-
+  // данными) уйдут не туда. Предпочтительный путь привязки — подписанный deep-link.
   if ("telegram_chat_id" in body) {
     const v = body.telegram_chat_id;
-    if (v === null) update.telegram_chat_id = null;
-    else if (typeof v === "string" && v.length <= 64) update.telegram_chat_id = v;
-    else if (typeof v === "number") update.telegram_chat_id = String(v);
-    else return NextResponse.json({ error: "telegram_chat_id: строка/число/null" }, { status: 400 });
+    if (v === null) {
+      update.telegram_chat_id = null;
+    } else {
+      const s = typeof v === "number" ? String(v) : v;
+      if (typeof s !== "string" || !/^-?\d{1,32}$/.test(s)) {
+        return NextResponse.json({ error: "telegram_chat_id: числовой id или null" }, { status: 400 });
+      }
+      update.telegram_chat_id = s;
+    }
   }
   // notify_email, notify_telegram: boolean
   for (const k of ["notify_email", "notify_telegram"] as const) {

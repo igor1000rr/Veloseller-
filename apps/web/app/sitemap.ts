@@ -1,64 +1,20 @@
 import type { MetadataRoute } from 'next';
 import { posts } from '@/lib/news/posts';
-
-const SITE_URL = 'https://veloseller.ru';
+import { SITE_URL, APP_PROMO_ENABLED } from '@/lib/features';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const now = new Date();
 
-  return [
-    // Главная и публичные страницы
-    {
-      url: SITE_URL,
-      lastModified: now,
-      changeFrequency: 'weekly',
-      priority: 1.0,
-    },
-    {
-      url: `${SITE_URL}/news`,
-      lastModified: now,
-      changeFrequency: 'weekly',
-      priority: 0.8,
-    },
-    // Auth-страницы — публичные, но низкий приоритет
-    {
-      url: `${SITE_URL}/login`,
-      lastModified: now,
-      changeFrequency: 'yearly',
-      priority: 0.3,
-    },
-    {
-      url: `${SITE_URL}/register`,
-      lastModified: now,
-      changeFrequency: 'yearly',
-      priority: 0.4,
-    },
-    {
-      url: `${SITE_URL}/forgot-password`,
-      lastModified: now,
-      changeFrequency: 'yearly',
-      priority: 0.2,
-    },
-    // Правовые страницы
-    {
-      url: `${SITE_URL}/privacy`,
-      lastModified: now,
-      changeFrequency: 'yearly',
-      priority: 0.3,
-    },
-    {
-      url: `${SITE_URL}/terms`,
-      lastModified: now,
-      changeFrequency: 'yearly',
-      priority: 0.3,
-    },
-    // Партнёрская программа — публичная маркетинговая страница
-    {
-      url: `${SITE_URL}/partner`,
-      lastModified: now,
-      changeFrequency: 'monthly',
-      priority: 0.6,
-    },
+  // Только публичные, индексируемые страницы. Auth-страницы (login/register/
+  // forgot-password) — noindex, поэтому в sitemap их НЕ кладём (иначе в GSC
+  // «Submitted URL marked noindex» + трата краул-бюджета). Хост — из SITE_URL
+  // (на .com будет свой домен, а не хардкод veloseller.ru).
+  const entries: MetadataRoute.Sitemap = [
+    { url: SITE_URL, lastModified: now, changeFrequency: 'weekly', priority: 1.0 },
+    { url: `${SITE_URL}/news`, lastModified: now, changeFrequency: 'weekly', priority: 0.8 },
+    { url: `${SITE_URL}/partner`, lastModified: now, changeFrequency: 'monthly', priority: 0.6 },
+    { url: `${SITE_URL}/privacy`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
+    { url: `${SITE_URL}/terms`, lastModified: now, changeFrequency: 'yearly', priority: 0.3 },
     // Гайды — каждый отдельной записью
     ...posts.map((post) => ({
       url: `${SITE_URL}/news/${post.slug}`,
@@ -67,4 +23,11 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.7,
     })),
   ];
+
+  // /apps — публичная промо-страница, но только когда включён флаг (иначе она 404).
+  if (APP_PROMO_ENABLED) {
+    entries.push({ url: `${SITE_URL}/apps`, lastModified: now, changeFrequency: 'monthly', priority: 0.5 });
+  }
+
+  return entries;
 }

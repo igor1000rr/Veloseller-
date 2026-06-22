@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     title: "Партнёрская программа Veloseller — 20% пожизненно",
     description:
       "Приводите селлеров Wildberries и Ozon в Veloseller и получайте 20% с их платежей пожизненно. Для агентств, консультантов и сервисов.",
-    url: "https://veloseller.ru/partner",
+    url: "/partner",
     type: "website",
   },
 };

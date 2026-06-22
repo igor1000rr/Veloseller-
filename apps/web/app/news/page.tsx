@@ -3,8 +3,7 @@ import type { Metadata } from 'next';
 import { Icons } from '@/app/_components/Icons';
 import { posts } from '@/lib/news/posts';
 import { CATEGORY_LABELS, CATEGORY_COLORS } from '@/lib/news/types';
-
-const SITE_URL = 'https://veloseller.ru';
+import { SITE_URL } from '@/lib/features';
 
 // Title уйдёт через title.template из layout: "Новости и гайды — Veloseller"
 export const metadata: Metadata = {

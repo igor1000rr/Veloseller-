@@ -107,6 +107,8 @@ export const landingJsonLd = {
           name: p.name,
           price: String(p.price),
           priceCurrency: LD.priceCurrency,
+          availability: "https://schema.org/InStock",
+          url: `${SITE_URL}/billing`,
           description: p.features[0],
         })),
       },

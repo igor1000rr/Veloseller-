@@ -5,11 +5,13 @@ from __future__ import annotations
 import html
 import logging
 import os
+import time
 import httpx
 
 logger = logging.getLogger("veloseller.telegram")
 
 API_BASE = "https://api.telegram.org/bot"
+_MAX_429_RETRIES = 3
 
 
 def _app_url() -> str:
@@ -17,23 +19,62 @@ def _app_url() -> str:
     return raw.split(",")[0].strip().rstrip("/")
 
 
-def send_message(chat_id: str, text: str, *, parse_mode: str = "HTML") -> bool:
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token or not chat_id:
-        return False
+def _retry_after_seconds(r: httpx.Response) -> float:
+    """Сколько ждать при 429 — из тела (parameters.retry_after) или Retry-After."""
     try:
-        r = httpx.post(
-            f"{API_BASE}{token}/sendMessage",
-            json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode, "disable_web_page_preview": True},
-            timeout=15.0,
-        )
-        if r.status_code != 200:
-            logger.warning("Telegram API %s: %s", r.status_code, r.text[:200])
-            return False
-        return True
-    except Exception as e:
-        logger.exception("Telegram send error: %s", e)
+        ra = (r.json().get("parameters") or {}).get("retry_after")
+        if ra:
+            return min(float(ra), 30.0)
+    except Exception:
+        pass
+    hdr = r.headers.get("retry-after")
+    if hdr:
+        try:
+            return min(float(hdr), 30.0)
+        except ValueError:
+            pass
+    return 1.0
+
+
+def _post_telegram(method: str, **kwargs) -> httpx.Response | None:
+    """POST к Bot API с обработкой rate-limit: на 429 ждём Retry-After и
+    повторяем (до _MAX_429_RETRIES). Раньше 429 не обрабатывался — при рассылках
+    на много чатов сообщения молча терялись. Возвращает Response (любого статуса)
+    или None при сетевой ошибке/отсутствии токена."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if not token:
+        return None
+    url = f"{API_BASE}{token}/{method}"
+    r: httpx.Response | None = None
+    for attempt in range(_MAX_429_RETRIES + 1):
+        try:
+            r = httpx.post(url, **kwargs)
+        except Exception as e:
+            logger.exception("Telegram %s network error: %s", method, e)
+            return None
+        if r.status_code == 429 and attempt < _MAX_429_RETRIES:
+            wait = _retry_after_seconds(r)
+            logger.warning("Telegram 429 на %s — повтор через %.1fс (попытка %d)", method, wait, attempt + 1)
+            time.sleep(wait)
+            continue
+        return r
+    return r
+
+
+def send_message(chat_id: str, text: str, *, parse_mode: str = "HTML") -> bool:
+    if not os.getenv("TELEGRAM_BOT_TOKEN") or not chat_id:
         return False
+    r = _post_telegram(
+        "sendMessage",
+        json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode, "disable_web_page_preview": True},
+        timeout=15.0,
+    )
+    if r is None:
+        return False
+    if r.status_code != 200:
+        logger.warning("Telegram API %s: %s", r.status_code, r.text[:200])
+        return False
+    return True
 
 
 def send_document(
@@ -44,30 +85,22 @@ def send_document(
     parse_mode: str = "HTML",
 ) -> bool:
     """Шлёт файл в telegram через Bot API sendDocument."""
-    token = os.getenv("TELEGRAM_BOT_TOKEN")
-    if not token or not chat_id:
+    if not os.getenv("TELEGRAM_BOT_TOKEN") or not chat_id:
         return False
-    try:
-        files = {
-            "document": (filename, file_bytes, "application/octet-stream"),
-        }
-        data = {"chat_id": chat_id}
-        if caption:
-            data["caption"] = caption
-            data["parse_mode"] = parse_mode
-        r = httpx.post(
-            f"{API_BASE}{token}/sendDocument",
-            data=data,
-            files=files,
-            timeout=60.0,
-        )
-        if r.status_code != 200:
-            logger.warning("Telegram sendDocument %s: %s", r.status_code, r.text[:200])
-            return False
-        return True
-    except Exception as e:
-        logger.exception("Telegram sendDocument error: %s", e)
+    files = {
+        "document": (filename, file_bytes, "application/octet-stream"),
+    }
+    data = {"chat_id": chat_id}
+    if caption:
+        data["caption"] = caption
+        data["parse_mode"] = parse_mode
+    r = _post_telegram("sendDocument", data=data, files=files, timeout=60.0)
+    if r is None:
         return False
+    if r.status_code != 200:
+        logger.warning("Telegram sendDocument %s: %s", r.status_code, r.text[:200])
+        return False
+    return True
 
 
 def format_alerts_digest(alerts: list[dict]) -> str:

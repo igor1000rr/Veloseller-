@@ -5,8 +5,7 @@ import { Icons } from '@/app/_components/Icons';
 import { posts } from '@/lib/news/posts';
 import { CATEGORY_LABELS, CATEGORY_COLORS } from '@/lib/news/types';
 import { renderMarkdown } from '@/lib/news/render';
-
-const SITE_URL = 'https://veloseller.ru';
+import { SITE_URL } from '@/lib/features';
 
 type Props = { params: Promise<{ slug: string }> };
 

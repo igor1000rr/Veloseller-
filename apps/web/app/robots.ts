@@ -1,4 +1,5 @@
 import type { MetadataRoute } from 'next';
+import { SITE_URL } from '@/lib/features';
 
 export default function robots(): MetadataRoute.Robots {
   return {
@@ -16,6 +17,6 @@ export default function robots(): MetadataRoute.Robots {
         '/auth/',
       ],
     },
-    sitemap: 'https://veloseller.ru/sitemap.xml',
+    sitemap: `${SITE_URL}/sitemap.xml`,
   };
 }

@@ -24,7 +24,7 @@ export const metadata: Metadata = {
     title: "Мобильное приложение Veloseller — iOS и Android",
     description:
       "Дашборд остатков, push о дозаказе, склады WB и Ozon, прогноз нехватки — на телефоне.",
-    url: "https://veloseller.ru/apps",
+    url: "/apps",
     type: "website",
   },
 };
