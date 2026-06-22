@@ -8,9 +8,9 @@ export const metadata = {
 
 const LAST_UPDATED = "22 июня 2026";
 const COMPANY = "Veloseller";
-// БАГ 52 fix: домен veloseller.ru (не .com — .com не зарегистрирован)
-const SUPPORT_EMAIL = "support@veloseller.ru";
-const LEGAL_EMAIL = "legal@veloseller.ru";
+// Единый публичный контакт (совпадает с разметкой на главной)
+const SUPPORT_EMAIL = "info@proaim.ru";
+const LEGAL_EMAIL = "info@proaim.ru";
 export default function TermsPage() {
   return (
     <div className="min-h-screen bg-paper text-ink">

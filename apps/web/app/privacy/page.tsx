@@ -8,8 +8,8 @@ export const metadata = {
 
 const LAST_UPDATED = "22 июня 2026";
 const COMPANY = "Veloseller";
-const CONTACT_EMAIL = "privacy@veloseller.ru";
-const DPO_EMAIL = "dpo@veloseller.ru";
+const CONTACT_EMAIL = "info@proaim.ru";
+const DPO_EMAIL = "info@proaim.ru";
 
 // ⚠️ РЕКВИЗИТЫ ОПЕРАТОРА ПДн. 152-ФЗ (ст. 18.1) требует указывать наименование и
 // адрес оператора. Подставьте реальные данные ИП/ООО — это юридически значимо.
