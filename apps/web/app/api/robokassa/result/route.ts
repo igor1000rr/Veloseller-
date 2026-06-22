@@ -60,6 +60,7 @@ async function handle(req: NextRequest): Promise<Response> {
   }
 
   if (!outSum || !invId || !signatureValue) {
+    console.warn("[robokassa-result] missing params", { hasOutSum: !!outSum, hasInvId: !!invId, hasSig: !!signatureValue });
     return new Response("FAIL: missing params", { status: 400 });
   }
 
@@ -72,6 +73,7 @@ async function handle(req: NextRequest): Promise<Response> {
   }
 
   if (!verifyResultSignature({ outSum, invId, signatureValue })) {
+    console.warn("[robokassa-result] bad signature", { invId, isTest, serverIsTest });
     return new Response("FAIL: bad signature", { status: 400 });
   }
 
@@ -83,11 +85,13 @@ async function handle(req: NextRequest): Promise<Response> {
     .maybeSingle();
 
   if (getErr || !invoice) {
+    console.warn("[robokassa-result] invoice not found", { invId, err: getErr?.message });
     return new Response("FAIL: invoice not found", { status: 404 });
   }
 
   const expectedSum = Number(invoice.amount).toFixed(2);
   if (expectedSum !== outSum) {
+    console.warn("[robokassa-result] amount mismatch", { invId, expectedSum, outSum });
     return new Response("FAIL: amount mismatch", { status: 400 });
   }
 
@@ -171,6 +175,7 @@ async function handle(req: NextRequest): Promise<Response> {
     return new Response("FAIL: db update failed", { status: 500 });
   }
 
+  console.log("[robokassa-result] paid + activated", { invId, plan: invoice.plan, productKind, isTest });
   return new Response(`OK${invId}`, {
     headers: { "Content-Type": "text/plain" },
   });

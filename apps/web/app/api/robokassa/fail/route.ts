@@ -1,12 +1,18 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { SITE_URL } from "@/lib/features";
 
 /**
  * Fail URL — куда Robokassa редиректит юзера при отказе от оплаты.
+ * Редирект от SITE_URL (за nginx req.url внутренний — см. success/route.ts).
  */
-export async function GET(req: NextRequest) {
-  return NextResponse.redirect(new URL("/billing?canceled=1", req.url));
+function toBilling() {
+  return NextResponse.redirect(new URL("/billing?canceled=1", SITE_URL), 303);
 }
 
-export async function POST(req: NextRequest) {
-  return NextResponse.redirect(new URL("/billing?canceled=1", req.url));
+export async function GET() {
+  return toBilling();
+}
+
+export async function POST() {
+  return toBilling();
 }
