@@ -1,0 +1,62 @@
+name: Mobile Android Build
+
+# Собирает Android-приложение (Capacitor-обёртка → veloseller.ru) прямо в CI:
+# генерит нативный проект (cap add android), компилит debug-APK и кладёт его
+# в артефакты — APK можно скачать со страницы запуска и поставить на телефон.
+# Локальный Android Studio не нужен.
+#
+# Триггеры: вручную (workflow_dispatch) или при изменениях в mobile/.
+# Не пересекается с web/worker CI — отдельный workflow, своя очередь.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - ".github/workflows/mobile-android.yml"
+
+concurrency:
+  group: mobile-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Capacitor 6 требует JDK 17 (AGP 8.2).
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Capacitor deps
+        working-directory: mobile
+        run: npm install --no-audit --no-fund
+
+      - name: Generate Android project (Capacitor)
+        working-directory: mobile
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Build debug APK
+        working-directory: mobile/android
+        run: ./gradlew assembleDebug --no-daemon -x lint
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: veloseller-android-debug-apk
+          path: mobile/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
