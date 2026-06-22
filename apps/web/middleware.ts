@@ -1,8 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-// Хост self-hosted Supabase для connect-src (зеркалит next.config). При битом
-// URL — дефолт *.supabase.co.
+// Хост self-hosted Supabase для connect-src. При битом URL — дефолт *.supabase.co.
 function supabaseCspHosts() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   try {
@@ -16,46 +15,67 @@ function supabaseCspHosts() {
   return { https: "https://*.supabase.co", wss: "wss://*.supabase.co" };
 }
 
-// Строгий CSP с per-request nonce. strict-dynamic: современные браузеры доверяют
-// только nonce'ированному загрузчику и тому, что он подгрузит (Next-чанки,
-// Яндекс.Метрика), игнорируя host-allowlist и 'unsafe-inline'; старые браузеры —
-// fallback на 'unsafe-inline'/https:. style-src оставляем 'unsafe-inline'
-// (Tailwind/Next inline-стили; XSS-риск стилей низкий).
-function buildCsp(nonce: string): string {
-  const sb = supabaseCspHosts();
+// Общие директивы (одинаковы для строгого и мягкого CSP).
+function commonCsp(sb: { https: string; wss: string }): string[] {
   return [
     "default-src 'self'",
     "base-uri 'self'",
     "object-src 'none'",
     "frame-ancestors 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https: 'unsafe-inline'`,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
     `connect-src 'self' ${sb.https} ${sb.wss} https://*.sentry.io https://*.ingest.sentry.io https://mc.yandex.ru https://mc.yandex.com wss://mc.yandex.ru wss://mc.yandex.com`,
     "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
     "form-action 'self' https://auth.robokassa.ru",
-  ].join("; ");
+  ];
 }
 
 export async function middleware(request: NextRequest) {
-  // Per-request nonce для строгого CSP. Кладём enforcing-CSP в ЗАПРОС-заголовки —
-  // так Next проставляет nonce своим инлайн-скриптам и <Script> (Метрика). В ОТВЕТ
-  // пока шлём Report-Only: ничего не блокируется, но нарушения видны в консоли.
-  // ФЛИП НА ENFORCE: поменять имя response-заголовка на "Content-Security-Policy"
-  // (см. ниже) — после проверки, что в консоли нет нарушений от своих скриптов.
-  const nonce = btoa(crypto.randomUUID());
-  const csp = buildCsp(nonce);
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set("x-nonce", nonce);
-  requestHeaders.set("content-security-policy", csp);
+  const path = request.nextUrl.pathname;
 
-  // Применяет CSP/no-cache/Vary к любому ответу, который мы отдаём.
-  // ENFORCE: проверено в Report-Only на проде — единственное нарушение (вебвизор
-  // wss://mc.yandex) закрыто хостами выше; nonce Next проставляет своим скриптам
-  // (белый экран исключён); JSON-LD как data-block не триггерит script-src.
-  // Откат при нужде: вернуть "content-security-policy-report-only".
-  const cspResponseHeader = "content-security-policy";
+  // Приватные (динамические) app-разделы — там данные юзера и Next рендерит
+  // per-request, поэтому работает СТРОГИЙ nonce-CSP (script-src strict-dynamic).
+  const isPrivate = path.startsWith("/dashboard")
+    || path.startsWith("/connections")
+    || path.startsWith("/onboarding")
+    || path.startsWith("/admin")
+    || path.startsWith("/billing")
+    || path.startsWith("/account");
+
+  // CSP раздельный:
+  //  - приватные app-роуты → строгий nonce + strict-dynamic (enforce). nonce
+  //    кладём в request → Next проставляет его своим скриптам.
+  //  - публичные/статика (лендинг, блог, auth — prerender/SSG) → БЕЗ nonce, иначе
+  //    per-request nonce не совпал бы с вшитым при сборке и заблокировал бы скрипты
+  //    статических страниц. Мягкий enforce с 'unsafe-inline' (страницы публичные,
+  //    без данных юзера). object-src/base-uri/frame-ancestors/connect/form-action
+  //    защищают и здесь.
+  const sb = supabaseCspHosts();
+  const common = commonCsp(sb);
+  let nonce: string | null = null;
+  let csp: string;
+  if (isPrivate) {
+    nonce = btoa(crypto.randomUUID());
+    csp = [
+      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https: 'unsafe-inline'`,
+      ...common,
+    ].join("; ");
+  } else {
+    csp = [
+      "script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.sentry.io https://mc.yandex.ru",
+      ...common,
+    ].join("; ");
+  }
+
+  const requestHeaders = new Headers(request.headers);
+  if (nonce) {
+    // Только для app-роутов: nonce в request → Next нонсит свои скрипты, страница
+    // становится динамической (это ок, там и так per-request). Публичным НЕ ставим —
+    // чтобы они остались prerender/SSG и не ломались.
+    requestHeaders.set("x-nonce", nonce);
+    requestHeaders.set("content-security-policy", csp);
+  }
 
   let response = NextResponse.next({ request: { headers: requestHeaders } });
 
@@ -79,31 +99,21 @@ export async function middleware(request: NextRequest) {
   );
 
   const { data: { user } } = await supabase.auth.getUser();
-  const path = request.nextUrl.pathname;
-
-  // Защита приватных разделов
-  const isPrivate = path.startsWith("/dashboard")
-    || path.startsWith("/connections")
-    || path.startsWith("/onboarding")
-    || path.startsWith("/admin")
-    || path.startsWith("/billing")
-    || path.startsWith("/account");
 
   if (isPrivate && !user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("redirect", path);
     const redirect = NextResponse.redirect(url);
-    redirect.headers.set(cspResponseHeader, csp);
+    redirect.headers.set("content-security-policy", csp);
     return redirect;
   }
 
-  // Залогиненного на /login/register сразу в dashboard
   if (user && (path === "/login" || path === "/register")) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     const redirect = NextResponse.redirect(url);
-    redirect.headers.set(cspResponseHeader, csp);
+    redirect.headers.set("content-security-policy", csp);
     return redirect;
   }
 
@@ -115,7 +125,7 @@ export async function middleware(request: NextRequest) {
     response.headers.set("Vary", "Cookie, Accept-Encoding");
   }
 
-  response.headers.set(cspResponseHeader, csp);
+  response.headers.set("content-security-policy", csp);
   return response;
 }
 
