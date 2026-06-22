@@ -5,9 +5,10 @@
  * Не требуют браузера, работают только с HTTP.
  *
  * Запуск:
- *   E2E_BASE_URL=https://veloseller.com npm run test:e2e
+ *   E2E_BASE_URL=https://veloseller.ru npm run test:e2e
  *
- * Без E2E_BASE_URL тесты пропускаются (в CI не запускаются).
+ * Без E2E_BASE_URL тесты пропускаются (в обычном CI не запускаются; гоняются
+ * отдельным job'ом после деплоя — см. .github/workflows/deploy.yml).
  */
 import { describe, it, expect } from "vitest";
 
@@ -46,6 +47,11 @@ describeOrSkip("E2E smoke (против " + BASE + ")", () => {
     expect([200, 304]).toContain(r.status);
   });
 
+  it("/news (SEO-индекс) отвечает 200", async () => {
+    const r = await fetch(`${BASE}/news`);
+    expect(r.status).toBe(200);
+  });
+
   it("/dashboard без auth редиректит на /login", async () => {
     const r = await fetch(`${BASE}/dashboard`, { redirect: "manual" });
     expect([302, 307]).toContain(r.status);
@@ -61,24 +67,57 @@ describeOrSkip("E2E smoke (против " + BASE + ")", () => {
     expect(body).toHaveProperty("checks");
   });
 
-  it("/api/account/export без auth = 401", async () => {
-    const r = await fetch(`${BASE}/api/account/export`);
+  // ── auth-gap: чувствительные API без сессии = 401 ───────────────────────────
+  it.each([
+    ["/api/account/export", "GET"],
+    ["/api/account/delete", "DELETE"],
+    ["/api/connections", "GET"],
+    ["/api/notifications", "GET"],
+  ])("%s без auth = 401", async (path, method) => {
+    const r = await fetch(`${BASE}${path}`, { method, redirect: "manual" });
     expect(r.status).toBe(401);
   });
 
-  it("/api/account/delete без auth = 401", async () => {
-    const r = await fetch(`${BASE}/api/account/delete`, { method: "DELETE" });
-    expect(r.status).toBe(401);
+  // ── CSP: раздельный enforce (валидирует middleware.ts) ──────────────────────
+  it("CSP на публичной странице — enforce, мягкий, без nonce", async () => {
+    const r = await fetch(`${BASE}/news`, { redirect: "manual" });
+    const csp = r.headers.get("content-security-policy");
+    expect(csp).toBeTruthy();                                  // enforce…
+    expect(r.headers.get("content-security-policy-report-only")).toBeNull(); // …не report-only
+    expect(csp).toContain("'unsafe-inline'");                  // статика: inline разрешён
+    expect(csp).not.toContain("'nonce-");                      // без nonce (prerender)
+    expect(csp).toContain("object-src 'none'");
+    expect(csp).toContain("frame-ancestors 'self'");
+    expect(csp).toContain("form-action 'self' https://auth.robokassa.ru");
   });
 
-  it("security headers (HTTPS-only)", async () => {
-    if (!BASE!.startsWith("https://")) return;
-    const r = await fetch(BASE!);
-    // Hint: эти хедеры должен выставлять nginx (см. nginx-secure.conf)
-    const xfo = r.headers.get("x-frame-options");
-    const xcto = r.headers.get("x-content-type-options");
-    // Не обязательные — но желательные. Просто логируем.
-    console.log("  X-Frame-Options:", xfo || "(missing)");
-    console.log("  X-Content-Type-Options:", xcto || "(missing)");
+  it("CSP на app-роуте — строгий nonce + strict-dynamic", async () => {
+    // /dashboard без auth → 307 на /login, но строгий CSP-заголовок уже стоит
+    const r = await fetch(`${BASE}/dashboard`, { redirect: "manual" });
+    const csp = r.headers.get("content-security-policy");
+    expect(csp).toBeTruthy();
+    expect(csp).toContain("'strict-dynamic'");
+    expect(csp).toMatch(/'nonce-[A-Za-z0-9+/=]+'/);            // per-request nonce
+  });
+
+  it("nonce на app-роуте уникален на каждый запрос", async () => {
+    const grab = async () =>
+      (await fetch(`${BASE}/dashboard`, { redirect: "manual" }))
+        .headers.get("content-security-policy")
+        ?.match(/'nonce-([A-Za-z0-9+/=]+)'/)?.[1];
+    const [a, b] = await Promise.all([grab(), grab()]);
+    expect(a).toBeTruthy();
+    expect(a).not.toBe(b);
+  });
+
+  // ── security-заголовки (реальные ассерты) ───────────────────────────────────
+  it("security headers выставлены", async () => {
+    const r = await fetch(BASE!, { redirect: "manual" });
+    expect(r.headers.get("x-content-type-options")).toBe("nosniff");
+    expect((r.headers.get("x-frame-options") || "").toUpperCase()).toBe("SAMEORIGIN");
+    expect(r.headers.get("referrer-policy")).toBeTruthy();
+    if (BASE!.startsWith("https://")) {
+      expect(r.headers.get("strict-transport-security") || "").toContain("max-age=");
+    }
   });
 });

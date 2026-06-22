@@ -127,3 +127,21 @@ jobs:
           echo "  ✅ Location=$location (не evil.com)"
 
           echo "✅ Все external smoke tests прошли"
+
+  # Богатый E2E-смоук против прода ПОСЛЕ деплоя (на Actions-раннере, не на VPS):
+  # раздельный CSP (nonce на app / мягкий на статике), security-заголовки,
+  # auth-гейты 401, уникальность nonce. Ловит регрессии того, что настроено в
+  # middleware/nginx/next.config. Падение job'а = регрессия (deploy уже прошёл).
+  e2e:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --legacy-peer-deps
+      - name: E2E smoke против прода
+        env:
+          E2E_BASE_URL: https://veloseller.ru
+        run: npm run test:e2e -w @veloseller/web
