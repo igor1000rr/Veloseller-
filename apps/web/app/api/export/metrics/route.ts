@@ -244,8 +244,10 @@ export async function GET(req: NextRequest) {
     }
 
     if (search) {
-      const escaped = search.replace(/[%_]/g, "\\$&");
-      query = query.or(`sku.ilike.%${escaped}%,product_name.ilike.%${escaped}%`);
+      // PostgREST .or(): значение в кавычках — иначе ',' '(' ')' в q ломают
+      // структуру фильтра. Экранируем " и \ внутри (см. skus/page.tsx).
+      const escaped = search.replace(/["\\]/g, "\\$&");
+      query = query.or(`sku.ilike."%${escaped}%",product_name.ilike."%${escaped}%"`);
     }
     if (stockMin !== null) query = query.gte("tvelo_metrics.current_stock", stockMin);
     if (stockMax !== null) query = query.lte("tvelo_metrics.current_stock", stockMax);

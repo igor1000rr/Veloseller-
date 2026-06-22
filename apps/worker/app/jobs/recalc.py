@@ -340,8 +340,8 @@ def recalc_seller(seller_id, period_days=30, progress=None):
 
             pre_period_history = _extract_pre_period_sales_deltas(rows, period_start, seller_tz)
             aggregates, event_rows = build_daily_aggregates(rows, period_start, period_end, seller_tz)
-            current_stock = int(rows[-1]["stock_quantity"])
-            current_price = float(rows[-1]["price"])
+            current_stock = int(rows[-1]["stock_quantity"] or 0)
+            current_price = float(rows[-1]["price"] or 0)
 
             history_arg = pre_period_history if pre_period_history else None
             metric = compute_metrics_for_sku(
@@ -668,8 +668,8 @@ def recalc_seller_asof(seller_id, as_of, period_days=30):
                 continue
             pre_period_history = _extract_pre_period_sales_deltas(rows, period_start, seller_tz)
             aggregates, _event_rows = build_daily_aggregates(rows, period_start, period_end, seller_tz)
-            current_stock = int(rows[-1]["stock_quantity"])
-            current_price = float(rows[-1]["price"])
+            current_stock = int(rows[-1]["stock_quantity"] or 0)
+            current_price = float(rows[-1]["price"] or 0)
             history_arg = pre_period_history if pre_period_history else None
             metric = compute_metrics_for_sku(
                 product_id=pid, period_start=period_start, period_end=period_end,
@@ -681,6 +681,7 @@ def recalc_seller_asof(seller_id, as_of, period_days=30):
                 velocities_for_median.append(metric.adjusted_velocity)
         except Exception as e:
             failed += 1
+            logger.warning("backfill: SKU пропущен pid=%s: %s", pid, e)
             continue
 
     median_store_velocity = _median(velocities_for_median) if velocities_for_median else 0.0

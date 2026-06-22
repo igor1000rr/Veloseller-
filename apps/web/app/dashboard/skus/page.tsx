@@ -282,8 +282,11 @@ export default async function SkusPage({ searchParams }: {
   }
 
   if (search) {
-    const escaped = search.replace(/[%_]/g, (c) => "\\" + c);
-    productsQuery = productsQuery.or(`sku.ilike.%${escaped}%,product_name.ilike.%${escaped}%`);
+    // PostgREST .or(): значение в кавычках, иначе ',' '(' ')' в q ломают структуру
+    // фильтра. Кавычки + экранирование " и \ нейтрализуют это (seller_id-AND и RLS
+    // запрос всё равно не пробивает, но убираем порчу выборки и 500).
+    const escaped = search.replace(/["\\]/g, (c) => "\\" + c);
+    productsQuery = productsQuery.or(`sku.ilike."%${escaped}%",product_name.ilike."%${escaped}%"`);
   }
   if (brandFilter) productsQuery = productsQuery.eq("brand", brandFilter);
   if (categoryFilter) productsQuery = productsQuery.eq("category", categoryFilter);

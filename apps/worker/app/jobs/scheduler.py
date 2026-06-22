@@ -29,7 +29,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
-from app.config import settings
 from app.db import execute_minimal, fetch_all, get_supabase
 from app.jobs.recalc import recalc_all_sellers
 from app.schemas import SourceType
@@ -83,6 +82,20 @@ def _run_connection_sync(sb, conn) -> None:
     для ночного sync-active и для retry-transient-errors — чтобы логика
     ветвления по источнику/складу жила в одном месте.
     """
+    # Аудит 22.06: крон-пути звали синк БЕЗ sync-лока, который держат ручные
+    # HTTP-обработчики (main._try_acquire_sync_lock). При совпадении ручного и
+    # кронового синка одного склада возможны дубли снапшотов (в inventory_snapshots
+    # нет уникального индекса). Берём тот же атомарный лок: флип status→'syncing'
+    # с условием .neq('syncing'). Не взяли — склад уже синкается, пропускаем
+    # (подхватим в следующий проход); зависший 'syncing' сбрасывает watchdog.
+    lock = (sb.table("data_connections")
+            .update({"status": "syncing", "last_error": None})
+            .eq("id", conn["id"])
+            .neq("status", "syncing")
+            .execute())
+    if not lock.data:
+        logger.info("sync пропущен — склад уже синкается", extra={"connection_id": conn["id"]})
+        return
     from app.crypto import decrypt_if_encrypted
     cfg = conn.get("config") or {}
     if conn["source"] == "google_sheet":

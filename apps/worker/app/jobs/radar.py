@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from app.db import fetch_all, get_supabase
@@ -70,11 +70,18 @@ def _seller_eligible_for_radar(seller_row: dict) -> bool:
     active_until = seller_row.get("radar_active_until")
     if active_until:
         try:
-            until = datetime.fromisoformat(active_until.replace("Z", "+00:00"))
+            if isinstance(active_until, str):
+                until = datetime.fromisoformat(active_until.replace("Z", "+00:00"))
+            else:
+                until = active_until  # драйвер уже вернул datetime
+            if until.tzinfo is None:
+                until = until.replace(tzinfo=timezone.utc)
             if until < datetime.now(timezone.utc):
                 return False
         except Exception:
-            pass
+            # fail-closed: непарсимая дата ⇒ считаем доступ истёкшим (платная фича).
+            logger.warning("radar: неразборчивый radar_active_until=%r — считаю истёкшим", active_until)
+            return False
     return True
 
 
