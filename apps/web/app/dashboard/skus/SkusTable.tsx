@@ -56,9 +56,19 @@ export function SkusTable({
             <Th col="name">{t("sku.col.name")}</Th>
             <Th col="stock" align="right">{t("sku.col.stock")}</Th>
             <Th col="price" align="right">{t("sku.col.price")}</Th>
-            <Th col="tvelo" align="right">{t("sku.col.tvelo")}</Th>
+            <Th col="tvelo" align="right">
+              <span className="inline-flex items-center">
+                {t("sku.col.tvelo")}
+                <InfoTooltip text={t("sku.col.tveloTip")} />
+              </span>
+            </Th>
             <Th col="trend" align="center">{t("sku.col.trend")}</Th>
-            <Th col="coverage" align="right">{t("sku.col.coverage")}</Th>
+            <Th col="coverage" align="right">
+              <span className="inline-flex items-center">
+                {t("sku.col.coverage")}
+                <InfoTooltip text={t("sku.col.coverageTip")} />
+              </span>
+            </Th>
             {/* Александр 11.06.2026: «Дней без наличия (Nд)» → «OOS» + тултип (узкие строки) */}
             <Th col="oos" align="right">
               <span className="inline-flex items-center">
@@ -79,14 +89,24 @@ export function SkusTable({
                 <InfoTooltip text={t("sku.list.confTip")} />
               </span>
             </Th>
-            <Th col="health" align="right">{t("sku.col.health")}</Th>
+            <Th col="health" align="right">
+              <span className="inline-flex items-center">
+                {t("sku.col.health")}
+                <InfoTooltip text={t("sku.col.healthTip")} />
+              </span>
+            </Th>
             <Th col="lost_revenue" align="right">
               <span className="inline-flex items-center">
                 {t("sku.col.lostRevenue")}
                 <InfoTooltip text={t("sku.list.lostTip")} />
               </span>
             </Th>
-            <Th col="notes">{t("sku.col.notes")}</Th>
+            <Th col="notes">
+              <span className="inline-flex items-center">
+                {t("sku.col.notes")}
+                <InfoTooltip text={t("sku.col.notesTip")} />
+              </span>
+            </Th>
           </tr>
         </thead>
         <tbody className="divide-y divide-line">

@@ -222,6 +222,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
             label={t("sku.detail.kpi.tvelo")}
             value={tvelo.toFixed(2)}
             sub={adjVsMedian || t("sku.detail.unit.perDay")}
+            tip={t("sku.detail.kpi.tveloTip")}
           />
           <Kpi
             label={t("sku.detail.kpi.coverage")}
@@ -245,6 +246,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
             value={lostRevenue > 0 ? Math.round(lostRevenue).toLocaleString("ru-RU") : "0"}
             sub={lostRevenue > 0 ? t("sku.detail.kpi.lostSub", { units: lostUnits }) : t("sku.detail.kpi.lostNone")}
             tone={lostRevenue > 0 ? "danger" : undefined}
+            tip={t("sku.detail.kpi.lostTip")}
           />
           <Kpi
             label={t("sku.detail.kpi.reorder")}
@@ -382,11 +384,12 @@ const TYPE_STYLES: Record<string, string> = {
   price_change:       "text-rose bg-rose/10 border-rose/30",
 };
 
-function Kpi({ label, value, sub, tone }: {
+function Kpi({ label, value, sub, tone, tip }: {
   label: string;
   value: string | number;
   sub?: string;
   tone?: "warn" | "danger" | "accent";
+  tip?: string;
 }) {
   const valueColor =
     tone === "warn"   ? "text-orange" :
@@ -395,7 +398,7 @@ function Kpi({ label, value, sub, tone }: {
                         "text-ink";
   return (
     <div className="rounded-xl border border-line bg-paper p-3 sm:p-4">
-      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush">{label}</div>
+      <div className="font-mono text-[10px] uppercase tracking-[0.18em] text-ink-hush inline-flex items-center">{label}{tip && <InfoTooltip text={tip} />}</div>
       <div className={`mt-1 font-display text-lg sm:text-xl md:text-2xl tabular font-medium break-words ${valueColor}`}>{value}</div>
       {sub && <div className="text-xs text-ink-hush mt-0.5 font-mono truncate">{sub}</div>}
     </div>

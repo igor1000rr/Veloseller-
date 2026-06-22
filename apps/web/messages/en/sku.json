@@ -107,6 +107,10 @@
   "sku.col.oosTip": "Days out of stock during the period ({n}d)",
   "sku.col.brand": "Brand",
   "sku.col.reorderDays": "Reorder ({n}d)",
+  "sku.col.tveloTip": "True sales velocity accounting for out-of-stock days. Shows the average units sold per day.",
+  "sku.col.coverageTip": "How many days the current stock will last at the current sales velocity.\nFormula: Stock / TVelo sales velocity",
+  "sku.col.healthTip": "Composite assessment of the item based on sales, stock availability and data quality.",
+  "sku.col.notesTip": "Your comments and notes for the item. Exported together with the Excel report.",
 
   "sku.filters.period": "Period",
 
@@ -149,7 +153,7 @@
   "sku.list.salesTip": "Actual sales for the period. Sales on restock or anomalous-data days are not counted; average TVelo is used on those days.",
   "sku.list.salesTitle": "Actual sales for the period",
   "sku.list.confTip": "Data confidence for the selected period. The more days available for the calculation, the higher the quality of the information. Factor this in before acting.",
-  "sku.list.lostTip": "Revenue lost due to the item being out of stock.",
+  "sku.list.lostTip": "Revenue lost because the item was out of stock.\nFormula: TVelo velocity × Price × OOS days",
   "sku.list.underestimated": "underestimated",
   "sku.daysShort": "{n} d",
   "sku.list.unitsParen": "({n} units)",
@@ -174,6 +178,8 @@
   "sku.detail.kpi.lost": "Lost revenue",
   "sku.detail.kpi.lostSub": "{units} units × TVelo × OOS × price",
   "sku.detail.kpi.lostNone": "never went out of stock",
+  "sku.detail.kpi.tveloTip": "True sales velocity accounting for out-of-stock days. Shows the average units sold per day.",
+  "sku.detail.kpi.lostTip": "Revenue lost because the item was out of stock over the selected period.\nFormula: TVelo velocity × Price × OOS days",
   "sku.detail.kpi.reorder": "Recommended reorder",
   "sku.detail.kpi.reorderSub": "for 30 days (TVelo × 30)",
   "sku.detail.kpi.stock": "Stock",

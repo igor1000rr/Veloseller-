@@ -144,7 +144,7 @@ export function InfoTooltip({
               pointerEvents: "none",
               zIndex: 9999,
             }}
-            className="px-3 py-2 rounded-md bg-ink text-paper text-[11px] leading-snug font-normal normal-case tracking-normal w-64 max-w-[calc(100vw-1rem)] text-left shadow-lg transition-opacity"
+            className="px-3 py-2 rounded-md bg-ink text-paper text-[11px] leading-snug font-normal normal-case tracking-normal w-64 max-w-[calc(100vw-1rem)] text-left whitespace-pre-line shadow-lg transition-opacity"
           >
             {text}
           </div>,
