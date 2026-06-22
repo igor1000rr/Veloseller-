@@ -719,13 +719,14 @@ def dispatch_daily_reports() -> None:
             elif channel == "telegram":
                 if seller.get("telegram_chat_id"):
                     try:
-                        from app.telegram import send_document
+                        from app.telegram import send_document, clear_dead_telegram
                         caption = _build_telegram_caption(kinds, sku_counts)
                         success = send_document(
                             chat_id=seller["telegram_chat_id"],
                             file_bytes=xlsx_bytes,
                             filename=filename,
                             caption=caption,
+                            on_dead_chat=lambda: clear_dead_telegram(sb, seller_id),
                         )
                     except Exception as e:
                         logger.exception("send telegram failed %s", seller_id)

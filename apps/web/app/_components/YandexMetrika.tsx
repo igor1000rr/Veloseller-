@@ -1,6 +1,13 @@
-// Yandex.Metrika counter — ранняя загрузка на всех страницах (RU-деплой).
+"use client";
+
+// Yandex.Metrika — грузится ТОЛЬКО на RU-деплое и ТОЛЬКО после согласия
+// пользователя (cookie-баннер → "accepted"). До согласия счётчик не
+// инициализируется: ни cookies, ни webvisor (запись сессий), ни clickmap.
+// Это требование 152-ФЗ и условие самой Метрики на сбор ПДн/поведения.
 import Script from "next/script";
+import { useEffect, useState } from "react";
 import { LOCALE } from "@/lib/features";
+import { CONSENT_EVENT, getStoredConsent, type ConsentValue } from "@/lib/consent";
 
 const METRIKA_ID = 109864311;
 
@@ -15,24 +22,22 @@ const METRIKA_INIT = `
 ym(${METRIKA_ID}, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
 `;
 
-/** Счётчик Яндекс.Метрики — только на RU-деплое (veloseller.ru). */
+/** Счётчик Яндекс.Метрики — только RU-деплой + только при cookie-согласии. */
 export function YandexMetrika() {
-  if (LOCALE !== "ru") return null;
+  const [consent, setConsent] = useState<ConsentValue>(null);
+
+  useEffect(() => {
+    setConsent(getStoredConsent());
+    const onChange = (e: Event) => setConsent((e as CustomEvent<ConsentValue>).detail ?? getStoredConsent());
+    window.addEventListener(CONSENT_EVENT, onChange);
+    return () => window.removeEventListener(CONSENT_EVENT, onChange);
+  }, []);
+
+  if (LOCALE !== "ru" || consent !== "accepted") return null;
 
   return (
-    <>
-      <Script id="yandex-metrika" strategy="beforeInteractive">
-        {METRIKA_INIT}
-      </Script>
-      <noscript>
-        <div>
-          <img
-            src={`https://mc.yandex.ru/watch/${METRIKA_ID}`}
-            style={{ position: "absolute", left: "-9999px" }}
-            alt=""
-          />
-        </div>
-      </noscript>
-    </>
+    <Script id="yandex-metrika" strategy="afterInteractive">
+      {METRIKA_INIT}
+    </Script>
   );
 }

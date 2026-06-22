@@ -20,6 +20,10 @@ export type NewsPost = {
   description: string;
   keywords: string[];
   publishedAt: string;
+  // Дата последнего существенного обновления статьи (ISO). Если не задана —
+  // в Article JSON-LD dateModified падает на publishedAt. Обновляйте при правках
+  // контента: Google использует dateModified для свежести в выдаче.
+  updatedAt?: string;
   category: NewsCategory;
   readingMinutes: number;
   content: string;

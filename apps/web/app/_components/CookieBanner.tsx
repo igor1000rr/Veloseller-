@@ -3,20 +3,18 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { t } from "@/lib/i18n";
-
-const STORAGE_KEY = "veloseller-cookie-consent";
-const CONSENT_VERSION = "v1";
-
-type ConsentValue = "accepted" | "rejected" | null;
+import { getStoredConsent, setConsentChoice, type ConsentValue } from "@/lib/consent";
 
 /**
- * GDPR cookie consent banner. Показывается, пока пользователь не сделал выбор.
+ * Cookie consent banner (152-ФЗ / GDPR). Показывается, пока пользователь не сделал выбор.
  *
- * Выбор сохраняется в localStorage. "accepted" — разрешает analytics cookies,
- * "rejected" — только essential (auth, CSRF) cookies.
+ * Выбор сохраняется в localStorage. "accepted" — разрешает аналитику
+ * (Яндекс.Метрика), "rejected" — только essential (auth, CSRF) cookies.
+ * При выборе диспатчится событие (см. lib/consent) — Метрика стартует/не
+ * стартует вживую, без перезагрузки.
  *
- * Версия консента (`CONSENT_VERSION`) позволяет переспросить пользователя при
- * существенном изменении политики (просто увеличить версию).
+ * Версия консента (`CONSENT_VERSION` в lib/consent) позволяет переспросить
+ * пользователя при существенном изменении политики (просто увеличить версию).
  *
  * Тексты — через i18n (t), чтобы на .com баннер был на английском, на .ru — на русском.
  */
@@ -26,29 +24,11 @@ export function CookieBanner() {
 
   useEffect(() => {
     setMounted(true);
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Если консент устарел — переспрашиваем
-        if (parsed.version === CONSENT_VERSION) {
-          setConsent(parsed.value);
-        }
-      }
-    } catch {
-      // localStorage недоступен или повреждён — показываем баннер
-    }
+    setConsent(getStoredConsent());
   }, []);
 
   const setChoice = (value: "accepted" | "rejected") => {
-    try {
-      localStorage.setItem(
-        STORAGE_KEY,
-        JSON.stringify({ value, version: CONSENT_VERSION, ts: new Date().toISOString() })
-      );
-    } catch {
-      // ignore
-    }
+    setConsentChoice(value);
     setConsent(value);
   };
 

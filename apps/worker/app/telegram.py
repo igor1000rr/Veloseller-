@@ -6,12 +6,17 @@ import html
 import logging
 import os
 import time
+from typing import Callable
 import httpx
 
 logger = logging.getLogger("veloseller.telegram")
 
 API_BASE = "https://api.telegram.org/bot"
 _MAX_429_RETRIES = 3
+# Лимиты Telegram Bot API: текст сообщения ≤4096, подпись к файлу ≤1024.
+# Превышение → API возвращает 400 и сообщение теряется. Поэтому режем заранее.
+_TG_TEXT_LIMIT = 4096
+_TG_CAPTION_LIMIT = 1024
 
 
 def _app_url() -> str:
@@ -61,17 +66,77 @@ def _post_telegram(method: str, **kwargs) -> httpx.Response | None:
     return r
 
 
-def send_message(chat_id: str, text: str, *, parse_mode: str = "HTML") -> bool:
+def _truncate_for_telegram(text: str, limit: int) -> str:
+    """Ужимает текст под лимит Telegram, не ломая HTML. Режем по границе строки —
+    в наших форматтерах теги открыты и закрыты в пределах одной строки, так что
+    перенос не рвёт разметку. Дополнительно не обрываем на середине тега/entity."""
+    if len(text) <= limit:
+        return text
+    notice = "\n…(сокращено)"
+    budget = limit - len(notice)
+    cut = text.rfind("\n", 0, budget)
+    if cut < 0:
+        cut = budget
+    clipped = text[:cut]
+    if clipped.rfind("<") > clipped.rfind(">"):
+        clipped = clipped[: clipped.rfind("<")]
+    if clipped.rfind("&") > clipped.rfind(";"):
+        clipped = clipped[: clipped.rfind("&")]
+    return clipped + notice
+
+
+def _is_dead_chat(r: httpx.Response) -> bool:
+    """chat_id «мёртв»: 403 (бот заблокирован/удалён/деактивирован) либо
+    400 'chat not found'. Слать в такой чат дальше бесполезно."""
+    if r.status_code == 403:
+        return True
+    if r.status_code == 400:
+        try:
+            desc = (r.json().get("description") or "").lower()
+        except Exception:
+            desc = (r.text or "").lower()
+        return "chat not found" in desc
+    return False
+
+
+def clear_dead_telegram(sb, seller_id: str) -> None:
+    """Telegram сообщил, что чат мёртв — гасим telegram_chat_id, чтобы не слать
+    в него при каждом запуске джобы (иначе вечные 403 в логах). Пользователь
+    переподключит уведомления через deep-link (/start). `sb` — Supabase-клиент."""
+    try:
+        sb.table("sellers").update({"telegram_chat_id": None}).eq("id", seller_id).execute()
+        logger.info("telegram: очищен мёртвый chat_id у seller %s", seller_id)
+    except Exception:
+        logger.warning("telegram: не удалось очистить chat_id у seller %s", seller_id)
+
+
+def send_message(
+    chat_id: str,
+    text: str,
+    *,
+    parse_mode: str = "HTML",
+    on_dead_chat: Callable[[], None] | None = None,
+) -> bool:
     if not os.getenv("TELEGRAM_BOT_TOKEN") or not chat_id:
         return False
     r = _post_telegram(
         "sendMessage",
-        json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode, "disable_web_page_preview": True},
+        json={
+            "chat_id": chat_id,
+            "text": _truncate_for_telegram(text, _TG_TEXT_LIMIT),
+            "parse_mode": parse_mode,
+            "disable_web_page_preview": True,
+        },
         timeout=15.0,
     )
     if r is None:
         return False
     if r.status_code != 200:
+        if on_dead_chat and _is_dead_chat(r):
+            try:
+                on_dead_chat()
+            except Exception:
+                logger.exception("on_dead_chat handler failed")
         logger.warning("Telegram API %s: %s", r.status_code, r.text[:200])
         return False
     return True
@@ -83,6 +148,8 @@ def send_document(
     filename: str,
     caption: str = "",
     parse_mode: str = "HTML",
+    *,
+    on_dead_chat: Callable[[], None] | None = None,
 ) -> bool:
     """Шлёт файл в telegram через Bot API sendDocument."""
     if not os.getenv("TELEGRAM_BOT_TOKEN") or not chat_id:
@@ -92,12 +159,17 @@ def send_document(
     }
     data = {"chat_id": chat_id}
     if caption:
-        data["caption"] = caption
+        data["caption"] = _truncate_for_telegram(caption, _TG_CAPTION_LIMIT)
         data["parse_mode"] = parse_mode
     r = _post_telegram("sendDocument", data=data, files=files, timeout=60.0)
     if r is None:
         return False
     if r.status_code != 200:
+        if on_dead_chat and _is_dead_chat(r):
+            try:
+                on_dead_chat()
+            except Exception:
+                logger.exception("on_dead_chat handler failed")
         logger.warning("Telegram sendDocument %s: %s", r.status_code, r.text[:200])
         return False
     return True
@@ -120,8 +192,9 @@ def format_alerts_digest(alerts: list[dict]) -> str:
         if isinstance(product, list):
             product = product[0] if product else {}
         sku = product.get("sku", "—")
-        sku_safe = html.escape(str(sku))
-        message_safe = html.escape(str(a.get("message", "")))
+        # Каппим переменные поля, чтобы дайджест не раздулся за лимит Telegram
+        sku_safe = html.escape(str(sku)[:64])
+        message_safe = html.escape(str(a.get("message", ""))[:280])
         lines.append(f"{emoji} <code>{sku_safe}</code> — {message_safe}")
     if len(alerts) > 20:
         lines.append(f"\n…ещё {len(alerts) - 20}")

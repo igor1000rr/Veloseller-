@@ -599,7 +599,7 @@ def _send_sync_error_notifications(
 
         if seller.get("notify_telegram") and seller.get("telegram_chat_id"):
             try:
-                from app.telegram import send_message, format_sync_error_message
+                from app.telegram import send_message, format_sync_error_message, clear_dead_telegram
                 msg = format_sync_error_message(
                     warehouse_name=warehouse_name,
                     warehouse_kind=warehouse_kind,
@@ -607,7 +607,10 @@ def _send_sync_error_notifications(
                     failure_count=failure_count,
                     auto_paused=auto_paused,
                 )
-                send_message(seller["telegram_chat_id"], msg)
+                send_message(
+                    seller["telegram_chat_id"], msg,
+                    on_dead_chat=lambda: clear_dead_telegram(sb, conn["seller_id"]),
+                )
             except Exception:
                 logger.exception("send_sync_error_notification telegram failed",
                                  extra={"connection_id": connection_id})

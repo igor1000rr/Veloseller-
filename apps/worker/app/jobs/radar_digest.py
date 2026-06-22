@@ -30,7 +30,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.db import fetch_all, get_supabase
-from app.telegram import send_message
+from app.telegram import send_message, clear_dead_telegram
 
 logger = logging.getLogger("veloseller.radar.digest")
 
@@ -210,7 +210,7 @@ def send_digests_to_all() -> dict[str, Any]:
                     skipped_no_signals += 1
                 continue
 
-            ok = send_message(chat_id, message)
+            ok = send_message(chat_id, message, on_dead_chat=lambda: clear_dead_telegram(sb, seller_id))
             if ok:
                 sent_count += 1
                 # Логируем факт отправки для анти-дубля
