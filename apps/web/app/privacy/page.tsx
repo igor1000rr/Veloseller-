@@ -11,12 +11,11 @@ const COMPANY = "Veloseller";
 const CONTACT_EMAIL = "info@proaim.ru";
 const DPO_EMAIL = "info@proaim.ru";
 
-// ⚠️ РЕКВИЗИТЫ ОПЕРАТОРА ПДн. 152-ФЗ (ст. 18.1) требует указывать наименование и
-// адрес оператора. Подставьте реальные данные ИП/ООО — это юридически значимо.
-// Пока поля пустые, на странице вместо них показывается «реквизиты по запросу».
-const OPERATOR_NAME = ""; // напр. "ИП Иванов Иван Иванович" / "ООО «Велоселлер»"
-const OPERATOR_INN = ""; // ИНН
-const OPERATOR_ADDRESS = ""; // юридический адрес
+// Реквизиты оператора персональных данных (152-ФЗ, ст. 18.1).
+const OPERATOR_NAME = "ИП Енотаев Александр Андреевич";
+const OPERATOR_INN = "643969557672";
+const OPERATOR_OGRN = "311643925100010";
+const OPERATOR_ADDRESS = "г. Москва, г. Зеленоград, корп. 355";
 const OPERATOR_FILLED = Boolean(OPERATOR_NAME && OPERATOR_INN && OPERATOR_ADDRESS);
 
 // Счётчик Яндекс.Метрики (см. _components/YandexMetrika.tsx) — для прозрачности.
@@ -50,7 +49,7 @@ export default function PrivacyPage() {
         <p>
           <strong>Оператор персональных данных:</strong>{" "}
           {OPERATOR_FILLED ? (
-            <>{OPERATOR_NAME}, ИНН {OPERATOR_INN}, адрес: {OPERATOR_ADDRESS}.</>
+            <>{OPERATOR_NAME}, ИНН {OPERATOR_INN}, ОГРНИП {OPERATOR_OGRN}, адрес регистрации: {OPERATOR_ADDRESS}.</>
           ) : (
             <>
               {COMPANY}. Полные реквизиты оператора (наименование, ИНН, адрес) предоставляются по
