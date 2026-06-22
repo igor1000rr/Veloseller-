@@ -231,10 +231,19 @@ export type Database = {
 };
 
 // Точечные хелперы типов. Используйте их для аннотации результатов запросов
-// вместо глобального generic createClient<Database> (последний даёт never из-за
-// drift @supabase/ssr@0.5.2 ↔ supabase-js@2.108). Пример:
+// вместо глобального generic createClient<Database>. Пример:
 //   const { data } = await sb.from("products").select("*");
 //   const rows = data as Tables<"products">[];
+//
+// Почему НЕ глобальный <Database>: файл собран вручную (CLI `supabase gen types`
+// недоступен на self-hosted из-за multi-tenant postgres-meta), поэтому покрывает
+// только Row/Insert/Update базовых таблиц. Здесь НЕТ полного вывода gen types:
+// Relationships у всех таблиц пустые ([]) и не описаны вьюхи (connections,
+// radar_queries_view). А postgrest-js@2.108 строго проверяет встроенные select'ы
+// (sellers(email), products!inner(...)) по Relationships и цели .from() по списку
+// отношений — с неполными метаданными глобальный generic даёт ложные ошибки на
+// валидных запросах (каскад ~182 ошибок). Включить <Database> можно после
+// регенерации файла через CLI либо полного заполнения Relationships + Views.
 export type Tables<T extends keyof Database["public"]["Tables"]> =
   Database["public"]["Tables"][T]["Row"];
 

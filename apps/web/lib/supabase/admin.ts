@@ -6,8 +6,9 @@
 import { createClient } from "@supabase/supabase-js";
 
 // Типизация результатов — точечно через @/lib/database.types (Tables<>/Enums<>).
-// Глобальный <Database> здесь не ставим: ssr@0.5.2 + supabase-js@2.108 ломают
-// select-вывод (never). См. database.types.ts.
+// Глобальный <Database> здесь не ставим: типы собраны вручную (CLI недоступен) и
+// не содержат Relationships/Views, поэтому postgrest-js@2.108 даёт ложные ошибки
+// на встроенных select'ах. Подробности и условия включения — в database.types.ts.
 
 export function createSupabaseAdminClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
