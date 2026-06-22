@@ -459,7 +459,6 @@ def _build_pdf(seller_name: str, period_label: str, data: dict, currency: str) -
         # better = (lower и diff<0) либо (higher и diff>0)
         is_better = (lower_is_better and diff < 0) or (not lower_is_better and diff > 0)
         line = f"{label}: {fmt(pv)} → {fmt(cv)}"
-        (target if is_better else target)  # ничего, target уже выбран
         if is_better:
             positives.append(line)
         else:
@@ -669,11 +668,13 @@ def _top_table_style(font_name: str, font_bold: str):
 
 # ─── Идемпотентность ──────────────────────────────────────
 
-def _already_sent_this_month(sb, seller_id: str, period_start: date) -> bool:
-    """Проверяет что для seller'а уже не отправляли отчёт за этот период.
+def _already_sent_this_month(sb, seller_id: str, month_start: date) -> bool:
+    """True, если месячный отчёт уже отправляли в ТЕКУЩЕМ календарном месяце.
 
-    Используем report_history с фильтром по kinds=['monthly_report'] —
-    отдельную таблицу не заводим, schema уже подходит.
+    Идемпотентность в пределах прогона: kinds=['monthly_report'] + sent_date >=
+    первого числа ТЕКУЩЕГО месяца (month_start = today.replace(day=1)). Раньше
+    сюда передавали начало ОТЧЁТНОГО (прошлого) месяца, и проверка ловила
+    прошломесячный отчёт → отчёт уходил через месяц. Фикс аудита 22.06.
     """
     try:
         res = (
@@ -681,7 +682,7 @@ def _already_sent_this_month(sb, seller_id: str, period_start: date) -> bool:
             .select("id")
             .eq("seller_id", seller_id)
             .contains("kinds", ["monthly_report"])
-            .gte("sent_date", period_start.isoformat())
+            .gte("sent_date", month_start.isoformat())
             .limit(1)
             .execute()
         )
@@ -753,7 +754,7 @@ def dispatch_monthly_reports() -> None:
 
         prev_start, prev_end = _previous_month_period(today)
         period_label = _month_label(prev_start)
-        two_back_start, _ = _two_months_back(today)
+        _, two_back_end = _two_months_back(today)
 
         logger.info(
             "dispatch_monthly_reports start: period=%s..%s label=%s",
@@ -781,7 +782,7 @@ def dispatch_monthly_reports() -> None:
                 skipped += 1
                 continue
 
-            if _already_sent_this_month(sb, seller_id, prev_start):
+            if _already_sent_this_month(sb, seller_id, today.replace(day=1)):
                 logger.info("monthly already sent seller=%s", seller_id)
                 skipped += 1
                 continue
@@ -790,7 +791,9 @@ def dispatch_monthly_reports() -> None:
 
             # Собираем данные
             current_metric = _fetch_store_metric_for_date(sb, seller_id, prev_end)
-            previous_metric = _fetch_store_metric_for_date(sb, seller_id, two_back_start + timedelta(days=1) - timedelta(days=1))
+            # Якорь «позапрошлого» месяца — его КОНЕЦ (two_back_end), чтобы окно
+            # сравнения было ровно перед прошлым месяцем, а не за месяц до него.
+            previous_metric = _fetch_store_metric_for_date(sb, seller_id, two_back_end)
 
             if current_metric is None:
                 logger.info("no current metric for seller=%s — skip", seller_id)

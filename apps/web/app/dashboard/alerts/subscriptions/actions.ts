@@ -4,6 +4,12 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Json } from "@/lib/database.types";
 
+/** Деталь ошибки БД — в лог, наружу generic (Supabase message может светить схему). */
+function dbError(e: { message?: string } | null): string {
+  console.error("[subscriptions action] db error:", e?.message ?? e);
+  return "Не удалось выполнить операцию. Попробуйте ещё раз.";
+}
+
 /**
  * Server actions для управления подписками на отчёты.
  *
@@ -71,12 +77,12 @@ export async function upsertSubscription(
         .update({ enabled, params, frequency })
         .eq("id", existing.id)
         .eq("seller_id", user.id);
-      if (error) return { ok: false, error: error.message };
+      if (error) return { ok: false, error: dbError(error) };
     } else {
       const { error } = await supabase
         .from("notification_subscriptions")
         .insert({ seller_id: user.id, kind, channel, enabled, params, frequency });
-      if (error) return { ok: false, error: error.message };
+      if (error) return { ok: false, error: dbError(error) };
     }
 
     revalidatePath("/dashboard/alerts/subscriptions");
@@ -98,7 +104,7 @@ export async function deleteSubscription(subscriptionId: string): Promise<Action
       .eq("id", subscriptionId)
       .eq("seller_id", user.id);
 
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
 
     revalidatePath("/dashboard/alerts/subscriptions");
     return { ok: true };
@@ -122,7 +128,7 @@ export async function toggleSubscription(
       .eq("id", subscriptionId)
       .eq("seller_id", user.id);
 
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
 
     revalidatePath("/dashboard/alerts/subscriptions");
     return { ok: true };

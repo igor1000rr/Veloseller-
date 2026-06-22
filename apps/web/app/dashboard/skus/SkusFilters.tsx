@@ -147,7 +147,10 @@ export function SkusFilters({
   }, [sp, defaultDateFrom, defaultDateTo]);
 
   const minDate = warehouseCreatedAt ? warehouseCreatedAt.slice(0, 10) : undefined;
-  const today = new Date().toISOString().slice(0, 10);
+  // today вычисляем ПОСЛЕ монтирования — иначе SSR(UTC) vs клиент на границе
+  // суток дают разный max → hydration mismatch (паттерн как в SyncButton).
+  const [today, setToday] = useState<string | undefined>(undefined);
+  useEffect(() => setToday(new Date().toISOString().slice(0, 10)), []);
 
   return (
     <div className="space-y-3">

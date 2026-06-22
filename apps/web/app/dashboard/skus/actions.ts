@@ -4,6 +4,15 @@ import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 /**
+ * Деталь ошибки БД — в лог, наружу generic-сообщение: Supabase error.message
+ * может содержать имена колонок/constraint'ов. (как jsonError в API-роутах).
+ */
+function dbError(e: { message?: string } | null): string {
+  console.error("[skus action] db error:", e?.message ?? e);
+  return "Не удалось выполнить операцию. Попробуйте ещё раз.";
+}
+
+/**
  * Server action для сохранения user_notes по SKU.
  *
  * Безопасность: RLS на products гарантирует что юзер может апдейтить только
@@ -36,7 +45,7 @@ export async function saveUserNotes(productId: string, notes: string): Promise<{
       .eq("seller_id", user.id);
 
     if (error) {
-      return { ok: false, error: error.message };
+      return { ok: false, error: dbError(error) };
     }
 
     // Освежить страницу SKU — заметка появится в таблице у других открытых табов
@@ -69,7 +78,7 @@ export async function clearAllUserNotes(): Promise<{ ok: boolean; cleared?: numb
       .select("product_id");
 
     if (error) {
-      return { ok: false, error: error.message };
+      return { ok: false, error: dbError(error) };
     }
 
     revalidatePath("/dashboard/skus");
@@ -122,7 +131,7 @@ export async function saveProductTags(
       .eq("product_id", productId)
       .eq("seller_id", user.id);
     if (error) {
-      return { ok: false, error: error.message };
+      return { ok: false, error: dbError(error) };
     }
     revalidatePath("/dashboard/skus");
     return { ok: true, tags: clean };
@@ -164,7 +173,7 @@ export async function saveCostPrice(
       .eq("product_id", productId)
       .eq("seller_id", user.id);
     if (error) {
-      return { ok: false, error: error.message };
+      return { ok: false, error: dbError(error) };
     }
     revalidatePath("/dashboard/skus");
     return { ok: true };
@@ -199,7 +208,7 @@ export async function saveSellerTaxRate(rate: number | null): Promise<{ ok: bool
       .update({ tax_rate: finalRate })
       .eq("id", user.id);
     if (error) {
-      return { ok: false, error: error.message };
+      return { ok: false, error: dbError(error) };
     }
     // Дефолт налога читает карточка SKU (юнит-экономика).
     revalidatePath("/dashboard/skus");
@@ -297,7 +306,7 @@ export async function createProductEvent(
       })
       .select("id")
       .single();
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
 
     revalidatePath("/dashboard/skus");
     revalidatePath("/dashboard");
@@ -330,7 +339,7 @@ export async function updateProductEvent(
       })
       .eq("id", id)
       .eq("seller_id", user.id);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
     revalidatePath("/dashboard/skus");
     revalidatePath("/dashboard");
     return { ok: true };
@@ -351,7 +360,7 @@ export async function deleteProductEvent(id: string): Promise<{ ok: boolean; err
       .delete()
       .eq("id", id)
       .eq("seller_id", user.id);
-    if (error) return { ok: false, error: error.message };
+    if (error) return { ok: false, error: dbError(error) };
     revalidatePath("/dashboard/skus");
     revalidatePath("/dashboard");
     return { ok: true };
