@@ -56,7 +56,7 @@
   "connections.delete.busy": "Удаляю…",
   "connections.delete.cancel": "Отмена",
   "connections.delete.errStatus": "Ошибка: {status}",
-  "connections.delete.errNetwork": "Network error",
+  "connections.delete.errNetwork": "Не удалось связаться с сервером",
   "connections.delete.title": "Удалить источник",
   "connections.resumeSync": "Возобновить sync",
   "connections.resume.busy": "Снимаем паузу…",
