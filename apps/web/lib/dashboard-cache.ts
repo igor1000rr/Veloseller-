@@ -8,10 +8,10 @@ export type DashboardVelocity = {
   confidence_score: number | null;
 };
 
-// Точная форма строки RPC get_warehouse_dashboard_metrics (из сгенерированных
-// типов) вместо Record<string, any> — переименование колонки теперь поймает tsc.
-export type WarehouseMetricsRow =
-  Database["public"]["Functions"]["get_warehouse_dashboard_metrics"]["Returns"][number];
+// Каноническая строка метрик склада из warehouse_metrics (её же читают графики).
+// Раньше KPI-плитки брались из RPC get_warehouse_dashboard_metrics, который
+// пересчитывал по-своему и расходился с этой таблицей (см. fetchComputed).
+export type WarehouseMetricsRow = Database["public"]["Tables"]["warehouse_metrics"]["Row"];
 
 export type DashboardComputed = {
   wm: WarehouseMetricsRow | null;
@@ -52,18 +52,33 @@ async function fetchComputed(
   periodDays: number,
 ): Promise<DashboardComputed> {
   const sb = createServiceClient();
+  // C3-фикс: KPI-плитки берём из КАНОНИЧЕСКОЙ warehouse_metrics (та же таблица, что
+  // и графики динамики), а НЕ из get_warehouse_dashboard_metrics. RPC пересчитывал
+  // метрики иначе и расходился с таблицей/воркером (на проде low_stock 4 vs 37,
+  // health 81 vs 75, lost_revenue −7%). Берём строку нужного окна
+  // (period_end − period_start ≈ periodDays−1) за последний period_end.
+  const targetWin = periodDays - 1; // 7→6, 30→29, 90→89
   const [wmRes, velRes] = await Promise.all([
-    sb.rpc("get_warehouse_dashboard_metrics", {
-      p_seller_id: sellerId,
-      p_connection_id: connectionId,
-      p_period_days: periodDays,
-    }),
+    sb
+      .from("warehouse_metrics")
+      .select("*")
+      .eq("seller_id", sellerId)
+      .eq("connection_id", connectionId)
+      .order("period_end", { ascending: false })
+      .limit(8), // последний period_end несёт ~3 окна; берём с запасом
     sb.rpc("get_dashboard_velocities", {
       p_seller_id: sellerId,
       p_connection_id: connectionId,
     }),
   ]);
-  const wm = (wmRes.data ?? [])[0] ?? null;
+  const rows = wmRes.data ?? [];
+  const latestPe = rows[0]?.period_end ?? null;
+  const winDays = (r: WarehouseMetricsRow) =>
+    Math.round((Date.parse(r.period_end) - Date.parse(r.period_start)) / 86_400_000);
+  const wm =
+    rows.find((r) => r.period_end === latestPe && Math.abs(winDays(r) - targetWin) <= 1) ??
+    rows.find((r) => r.period_end === latestPe) ??
+    null;
   const velRows = (velRes.data as DashboardVelocity[] | null) ?? [];
   return { wm, velRows };
 }
