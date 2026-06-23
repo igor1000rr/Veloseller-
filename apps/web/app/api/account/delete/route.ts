@@ -3,6 +3,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireUser, jsonError } from "@/lib/auth";
 import { batchedInDelete } from "@/lib/supabase/batched";
+import { z } from "zod";
+import { parseJsonBody } from "@/lib/validation";
 
 /**
  * GDPR Article 17 — Right to erasure.
@@ -17,13 +19,10 @@ export async function DELETE(req: NextRequest) {
   const limited = enforceRateLimit(req, RATE_LIMITS.SENSITIVE, user.id);
   if (limited) return limited;
 
-  let body: { confirm?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
-  if (body.confirm !== "DELETE-MY-ACCOUNT") {
+  const parsed = await parseJsonBody(req, z.object({
+    confirm: z.literal("DELETE-MY-ACCOUNT"),
+  }));
+  if (!parsed.ok) {
     return NextResponse.json({
       error: "Confirmation required. Send body: { confirm: 'DELETE-MY-ACCOUNT' }"
     }, { status: 400 });

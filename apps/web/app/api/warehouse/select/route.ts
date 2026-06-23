@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { WAREHOUSE_COOKIE_NAME, WAREHOUSE_COOKIE_MAX_AGE } from "@/lib/warehouse";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/auth";
+import { z } from "zod";
+import { parseJsonBody } from "@/lib/validation";
 
 /**
  * POST /api/warehouse/select — установить выбранный склад в cookie vs-warehouse.
@@ -21,17 +23,11 @@ export async function POST(req: NextRequest) {
   const limited = enforceRateLimit(req, RATE_LIMITS.WRITE, user.id);
   if (limited) return limited;
 
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-
-  const warehouseId = body?.warehouse_id;
-  if (!warehouseId || typeof warehouseId !== "string") {
-    return NextResponse.json({ error: "warehouse_id обязателен" }, { status: 400 });
-  }
+  const parsed = await parseJsonBody(req, z.object({
+    warehouse_id: z.string().min(1, "warehouse_id обязателен"),
+  }));
+  if (!parsed.ok) return parsed.response;
+  const warehouseId = parsed.data.warehouse_id;
 
   // Проверяем что склад принадлежит пользователю (защита от подмены)
   const { data: connection, error } = await supabase

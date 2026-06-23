@@ -2,11 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/auth";
 import type { Enums } from "@/lib/database.types";
-
-// Разрешённые типы alert'ов (синхронизировано с engine/alerts.py)
-const ALLOWED_KINDS = new Set([
-  "low_stock", "critical_stock", "dead_inventory", "repeated_stockout", "underestimated_sku",
-]);
+import { z } from "zod";
+import { parseJsonBody } from "@/lib/validation";
 
 /**
  * POST /api/alerts/bulk-ack
@@ -22,13 +19,15 @@ export async function POST(req: NextRequest) {
   const limited = enforceRateLimit(req, RATE_LIMITS.WRITE, user.id);
   if (limited) return limited;
 
-  let body: { kind?: string } = {};
-  try { body = await req.json(); } catch { /* allow empty */ }
-
-  // Валидация kind
-  if (body.kind && !ALLOWED_KINDS.has(body.kind)) {
-    return NextResponse.json({ error: `Недопустимый kind` }, { status: 400 });
+  const parsed = await parseJsonBody(req, z.object({
+    kind: z.enum([
+      "low_stock", "critical_stock", "dead_inventory", "repeated_stockout", "underestimated_sku",
+    ]).optional(),
+  }));
+  if (!parsed.ok) {
+    return NextResponse.json({ error: "Недопустимый kind" }, { status: 400 });
   }
+  const body = parsed.data;
 
   let query = supabase
     .from("alerts")

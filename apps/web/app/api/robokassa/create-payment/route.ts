@@ -9,6 +9,8 @@ import {
   planLabelOf,
   productKindOfPlan,
 } from "@/lib/robokassa";
+import { z } from "zod";
+import { parseJsonBody } from "@/lib/validation";
 
 /**
  * POST /api/robokassa/create-payment — создаёт invoice в БД + URL для оплаты на Robokassa.
@@ -39,19 +41,13 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: any;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  const parsed = await parseJsonBody(req, z.object({ plan: z.string() }));
+  if (!parsed.ok) {
+    return NextResponse.json({ error: "Неизвестный тариф" }, { status: 400 });
   }
-
-  const plan = body?.plan;
-  if (!plan || typeof plan !== "string" || !isPayablePlan(plan)) {
-    return NextResponse.json(
-      { error: "Неизвестный тариф" },
-      { status: 400 },
-    );
+  const { plan } = parsed.data;
+  if (!isPayablePlan(plan)) {
+    return NextResponse.json({ error: "Неизвестный тариф" }, { status: 400 });
   }
 
   const amount = planPriceOf(plan)!;
