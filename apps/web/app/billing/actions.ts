@@ -1,6 +1,7 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
 import { revalidatePath } from "next/cache";
 
 /**
@@ -32,7 +33,12 @@ export async function actionStartRadarTrial() {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
 
-  const { error } = await sb
+  // Привилегированная запись radar-тарифа идёт через service-role: биллинговые
+  // колонки sellers закрыты от роли authenticated на уровне column-grants (защита
+  // от самоапгрейда через прямой PostgREST). Анти-фрод (один trial на аккаунт)
+  // уже проверен выше на authenticated-клиенте с учётом RLS.
+  const admin = createServiceClient();
+  const { error } = await admin
     .from("sellers")
     .update({
       radar_plan: "trial",
