@@ -1,8 +1,8 @@
-/** Сравнение Excel vs Veloseller, «Как это работает», отзывы. Перенос из page.tsx 1:1. */
+/** Сравнение Excel vs Veloseller, «Как это работает». Перенос из page.tsx 1:1. */
 import { Icons } from "../_components/Icons";
 import { t } from "@/lib/i18n";
 import { Eyebrow } from "./ui";
-import { compareLeft, compareRight, steps, testimonials } from "./data";
+import { compareLeft, compareRight, steps } from "./data";
 
 export default function LandingStory() {
   return (
@@ -71,37 +71,6 @@ export default function LandingStory() {
                 </div>
                 <h3 className="mt-4 md:mt-5 font-display text-base sm:text-lg md:text-xl font-medium">{s.title}</h3>
                 <p className="mt-3 text-sm text-ink-muted leading-relaxed">{s.text}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ===== TESTIMONIALS ===== */}
-      <section className="relative w-full px-4 md:px-8 lg:px-12 py-8 md:py-12 border-t border-line">
-        <div className="max-w-[1600px] mx-auto">
-          <div className="text-center mb-10 md:mb-14">
-            <Eyebrow center>{t("landing.ts.eyebrow")}</Eyebrow>
-            <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
-              {t("landing.ts.h2")}
-            </h2>
-          </div>
-          <div className="grid md:grid-cols-3 gap-4 md:gap-5">
-            {testimonials.map((item, i) => (
-              <div key={i} className="rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7 hover:shadow-lg transition">
-                <div className="flex items-center gap-1 text-lime-deep">
-                  {[...Array(5)].map((_, j) => <Icons.Star key={j} />)}
-                </div>
-                <p className="mt-4 text-sm md:text-[15px] text-ink-soft leading-relaxed">{item.quote}</p>
-                <div className="mt-5 md:mt-6 flex items-center gap-3">
-                  <div className="size-10 rounded-full flex items-center justify-center font-display text-base font-medium shrink-0" style={{ background: item.avatarBg, color: item.avatarColor }}>
-                    {item.initials}
-                  </div>
-                  <div className="min-w-0">
-                    <div className="font-medium text-sm text-ink truncate">{item.name}</div>
-                    <div className="font-mono text-[10px] text-ink-hush uppercase tracking-wider truncate">{item.role}</div>
-                  </div>
-                </div>
               </div>
             ))}
           </div>

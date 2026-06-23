@@ -78,17 +78,8 @@ export const steps = isEn
       { title: "Управляй запасами на основе данных",   text: "Получай сигналы в Telegram и email, следи за рисками, планируй закупки и контролируй остатки в одном дашборде." },
     ];
 
-export const testimonials = isEn
-  ? [
-      { quote: "Finally stopped computing sales velocity in Excel. Within a week I saw 12% of my working capital frozen in dead stock — cut a couple of reorders and freed up $4k.", name: "Alex Carter", role: "Shopify seller, 1,200 SKUs", initials: "AC", avatarBg: "#84cc16", avatarColor: "#0a0a08" },
-      { quote: "TVelo showed that half of my 'slow' items were actually fast — they just kept going out of stock. Reordered them — revenue +18% in a month.", name: "Maria Lopez", role: "Shopify, 3,400 SKUs", initials: "ML", avatarBg: "#0284c7", avatarColor: "#fff" },
-      { quote: "Telegram alerts are the killer feature. I do not sit in dashboards. A signal comes in, I reorder, done.", name: "Daniel Brooks", role: "Multi-store, 800 SKUs", initials: "DB", avatarBg: "#ea580c", avatarColor: "#fff" },
-    ]
-  : [
-      { quote: "Наконец перестал считать скорость продаж в Excel. Через неделю увидел, что 12% оборотных денег заморожено в неликвиде — закрыл закупку на пару SKU и освободил 380к.", name: "Артём Кузнецов", role: "Селлер на Ozon, 1200 SKU", initials: "АК", avatarBg: "#84cc16", avatarColor: "#0a0a08" },
-      { quote: "TVelo показал, что половина моих медленных товаров на самом деле быстрые — просто часто уходили в out-of-stock. Перезаказал — выручка +18% за месяц.", name: "Мария Логинова", role: "WB Premium, 3400 SKU", initials: "МЛ", avatarBg: "#0284c7", avatarColor: "#fff" },
-      { quote: "Telegram-уведомления — главная фишка. Не сижу в дашборде. Приходит сигнал и пошёл, заказал, забыл.", name: "Дмитрий Беляев", role: "Multi-marketplace, 800 SKU", initials: "ДБ", avatarBg: "#ea580c", avatarColor: "#fff" },
-    ];
+// Демо-отзывы удалены (выглядели как боты). Вернём export testimonials + секцию
+// «Отзывы» в Story.tsx, когда будут живые отзывы клиентов.
 
 export const footerWarehouseTypes = isEn
   ? ["Shopify", "Google Sheet"]
