@@ -15,6 +15,44 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from types import SimpleNamespace
+
+
+# ─── _latest_30d_window (антидубль: окна 7/30/90 на один period_end) ──────────
+
+class _FakeQuery:
+    def __init__(self, data): self._data = data
+    def select(self, *a, **k): return self
+    def eq(self, *a, **k): return self
+    def order(self, *a, **k): return self
+    def limit(self, *a, **k): return self
+    def execute(self): return SimpleNamespace(data=self._data)
+
+
+class _FakeSB:
+    def __init__(self, data): self._data = data
+    def table(self, *a, **k): return _FakeQuery(self._data)
+
+
+def test_latest_30d_window_picks_30day_window():
+    """Из окон 7/30/90 дней на последний period_end отчёт берёт 30-дневное —
+    иначе SKU дублируется по числу окон."""
+    from app.jobs.reports import _latest_30d_window
+    data = [
+        {"period_start": "2026-06-17", "period_end": "2026-06-23"},  # ~7д
+        {"period_start": "2026-05-25", "period_end": "2026-06-23"},  # ~30д
+        {"period_start": "2026-03-26", "period_end": "2026-06-23"},  # ~90д
+    ]
+    ps, pe = _latest_30d_window(_FakeSB(data), "seller-1")
+    assert pe == "2026-06-23"
+    assert ps == "2026-05-25"
+
+
+def test_latest_30d_window_no_metrics():
+    from app.jobs.reports import _latest_30d_window
+    ps, pe = _latest_30d_window(_FakeSB([]), "seller-1")
+    assert ps is None and pe is None
+
 
 # ─── _build_xlsx ──────────────────────────────────────────────────────────────
 

@@ -102,15 +102,55 @@ def _sheet_name(kind: str) -> str:
 
 # ─── Fetchers ────────────────────────────────
 
+def _latest_30d_window(sb, seller_id: str) -> tuple[str | None, str | None]:
+    """tvelo_metrics пишется по НЕСКОЛЬКИМ окнам (7/30/90 дней) на один period_end
+    (recalc_seller_all_periods — для графиков Динамики). Для отчётов берём ровно
+    30-дневное окно последнего периода (как в заголовках «за 30 дней»), иначе один
+    SKU дублируется по числу окон. Возвращает (period_start, period_end) ISO либо
+    (None, None), если метрик нет."""
+    try:
+        res = (
+            sb.table("tvelo_metrics")
+            .select("period_start,period_end,products!inner(seller_id)")
+            .eq("products.seller_id", seller_id)
+            .order("period_end", desc=True)
+            .limit(500)
+            .execute()
+        )
+    except Exception:
+        logger.exception("_latest_30d_window failed seller=%s", seller_id)
+        return None, None
+    rows = res.data or []
+    if not rows:
+        return None, None
+    latest_end = rows[0].get("period_end")
+    starts = {r["period_start"] for r in rows
+              if r.get("period_end") == latest_end and r.get("period_start")}
+    if not starts or not latest_end:
+        return None, latest_end
+    end_d = date.fromisoformat(latest_end[:10])
+    # из доступных окон берём ближайшее к 30 дням
+    best = min(starts, key=lambda ps: abs((end_d - date.fromisoformat(ps[:10])).days - 30))
+    return best, latest_end
+
+
 def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
     """Возвращает строки для листа Excel в формате [{sku, name, ...}, ...]."""
     try:
+        # Все kind на основе tvelo_metrics фиксируем на ОДНОМ окне (последний
+        # period_end + ~30 дней), иначе SKU троится по числу окон (7/30/90).
+        if kind in ("low_stock", "critical_stock", "dead_inventory", "repeated_stockout", "underestimated_sku"):
+            period_start, period_end = _latest_30d_window(sb, seller_id)
+            if not period_start or not period_end:
+                return []
         if kind == "low_stock":
             threshold = int(params.get("coverage_days_threshold", 7))
             res = (
                 sb.table("tvelo_metrics")
                 .select("coverage_days,current_stock,adjusted_velocity,products!inner(sku,product_name,seller_id)")
                 .eq("products.seller_id", seller_id)
+                .eq("period_start", period_start)
+                .eq("period_end", period_end)
                 .lte("coverage_days", threshold)
                 .gt("current_stock", 0)
                 .gt("adjusted_velocity", 0)
@@ -128,6 +168,8 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
                 sb.table("tvelo_metrics")
                 .select("coverage_days,current_stock,current_price,adjusted_velocity,products!inner(sku,product_name,seller_id)")
                 .eq("products.seller_id", seller_id)
+                .eq("period_start", period_start)
+                .eq("period_end", period_end)
                 .lte("coverage_days", threshold)
                 .gt("current_stock", 0)
                 .gt("adjusted_velocity", 0)
@@ -145,6 +187,8 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
                 sb.table("tvelo_metrics")
                 .select("coverage_days,adjusted_velocity,current_stock,current_price,inventory_segment,products!inner(sku,product_name,seller_id)")
                 .eq("products.seller_id", seller_id)
+                .eq("period_start", period_start)
+                .eq("period_end", period_end)
                 .or_(f"coverage_days.gt.{threshold},inventory_segment.eq.dead_inventory_risk")
                 .order("coverage_days", desc=True)
                 .limit(SHEET_ROW_LIMIT)
@@ -158,6 +202,8 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
                 sb.table("tvelo_metrics")
                 .select("stockout_days,adjusted_velocity,coverage_days,products!inner(sku,product_name,seller_id)")
                 .eq("products.seller_id", seller_id)
+                .eq("period_start", period_start)
+                .eq("period_end", period_end)
                 .gte("stockout_days", threshold)
                 .order("stockout_days", desc=True)
                 .limit(SHEET_ROW_LIMIT)
@@ -172,6 +218,8 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
                 sb.table("tvelo_metrics")
                 .select("adjusted_velocity,median_30d_velocity,stockout_days,current_price,products!inner(sku,product_name,seller_id),underestimated_sku")
                 .eq("products.seller_id", seller_id)
+                .eq("period_start", period_start)
+                .eq("period_end", period_end)
                 .eq("underestimated_sku", True)
                 .order("adjusted_velocity", desc=True)
                 .limit(SHEET_ROW_LIMIT)
