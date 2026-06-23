@@ -56,8 +56,11 @@ export async function activatePaidInvoice(args: {
     return { ok: false, httpStatus: 404, reason: "invoice not found" };
   }
 
+  // Сумму сверяем нормализованно: Robokassa может прислать OutSum как "2500" или
+  // "2500.00" — оба валидны (сама сумма закреплена подписью выше). Сравниваем числа.
   const expectedSum = Number(invoice.amount).toFixed(2);
-  if (expectedSum !== outSum) {
+  const paidSum = Number(outSum).toFixed(2);
+  if (!Number.isFinite(Number(outSum)) || expectedSum !== paidSum) {
     console.warn(`[robokassa-${source}] amount mismatch`, { invId, expectedSum, outSum });
     return { ok: false, httpStatus: 400, reason: "amount mismatch" };
   }
