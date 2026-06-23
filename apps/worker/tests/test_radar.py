@@ -127,8 +127,9 @@ def test_detect_models():
     models = detect_models_from_price(rows)
     assert "v11" in models
     assert "v15" in models
-    # NB: TOKEN_SPLIT включает '-', поэтому "GBH2-26" рвётся на "gbh2"+"26".
-    assert "gbh2" in models
+    # Дефис сохраняется: "GBH2-26" — единый модельный токен (фикс матча с Wordstat).
+    assert "gbh2-26" in models
+    assert "gbh2" not in models
     assert "26" not in models        # чистое число — не модель
 
 
@@ -175,3 +176,14 @@ def test_match_wordstat_to_price_integration():
     by_model = {m.model: m.status for m in res}
     assert by_model["v11"] == "archived"
     assert by_model["v15"] == "new"
+
+
+def test_hyphenated_model_matches_price_and_wordstat():
+    """Регресс: модель с дефисом ("GBH2-26") из прайса и из Wordstat-фразы должна
+    совпасть → archived, а не ложная «новинка» (раньше прайс рвал токен по дефису)."""
+    price_rows = [{"n": "Bosch GBH2-26 drill"}, {"n": "Bosch GBH2-26 pro"}]
+    phrases = [{"phrase": "bosch gbh2-26 professional", "frequency": 200}]
+    res = match_wordstat_to_price("bosch", phrases, price_rows, min_frequency=60)
+    assert len(res) == 1
+    assert res[0].model == "gbh2-26"
+    assert res[0].status == "archived"

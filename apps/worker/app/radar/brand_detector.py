@@ -71,8 +71,12 @@ _RE_PURE_NUMBER = re.compile(r"^\d+(?:[.,]\d+)?$")
 _RE_HAS_DIGIT = re.compile(r"\d")
 # Только латиница с возможными ' и & внутри
 _RE_LATIN_TOKEN = re.compile(r"^[a-zA-Z][a-zA-Z'&]*$")
-# Разделение токенов по пробелам и спецсимволам
+# Разделение токенов по пробелам и спецсимволам (для брендов).
 _RE_TOKEN_SPLIT = re.compile(r"[\s\-_,/.()\[\]{}\"'\\|;:!?]+")
+# Для МОДЕЛЕЙ дефис НЕ разделитель: "GBH2-26", "RTX-4090", "X-1000" — единый
+# модельный токен. Раньше detect_models рвал "GBH2-26"→"gbh2", а Wordstat-фраза
+# (split по пробелам) давала "gbh2-26" → не совпадали → ложная «новинка».
+_RE_MODEL_TOKEN_SPLIT = re.compile(r"[\s_,/.()\[\]{}\"'\\|;:!?]+")
 # Модельный токен — должен содержать И букву И цифру.
 # Примеры: V11, GBH2-26, AD12, RTX4090, X1
 # Не проходят: Pro (нет цифр), 2024 (нет букв), пылесос (кириллица)
@@ -220,7 +224,7 @@ def detect_models_from_price(rows: list[dict]) -> set[str]:
             continue
 
         joined = " ".join(row_text_parts)
-        tokens = _RE_TOKEN_SPLIT.split(joined)
+        tokens = _RE_MODEL_TOKEN_SPLIT.split(joined)
 
         for tok in tokens:
             if _is_model_candidate_token(tok):
