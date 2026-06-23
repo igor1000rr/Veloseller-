@@ -32,7 +32,7 @@ export default async function SettingsPage() {
         <h1 className="font-display text-3xl md:text-4xl tracking-tight font-medium text-ink">{t("settings.title")}</h1>
         <p className="mt-1 text-ink-muted text-sm">{t("settings.subtitle")}</p>
       </header>
-      <SettingsForm initial={seller ?? {}} telegramDeeplink={deeplinkUrl} />
+      <SettingsForm initial={seller ?? {}} telegramDeeplink={deeplinkUrl} email={user.email} />
     </div>
   );
 }

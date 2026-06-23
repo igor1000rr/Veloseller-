@@ -2,6 +2,8 @@
   "settings.kicker": "Settings",
   "settings.title": "Settings",
   "settings.subtitle": "Profile & notifications",
+  "settings.section.info": "Information",
+  "settings.field.email": "Email",
   "settings.section.profile": "Profile",
   "settings.section.notifications": "Notifications",
   "settings.field.name": "Name",

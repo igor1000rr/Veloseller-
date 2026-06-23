@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { t } from "@/lib/i18n";
+import { TIMEZONES } from "@/lib/timezones";
+import { Toggle } from "@/app/_components/Toggle";
 
 type Initial = {
   display_name?: string | null;
@@ -12,10 +14,21 @@ type Initial = {
   notify_telegram?: boolean;
 };
 
-export default function SettingsForm({ initial, telegramDeeplink }: { initial: Initial; telegramDeeplink: string | null }) {
+/**
+ * Настройки кабинета: Информация (имя + email) · Часовой пояс и уведомления
+ * (выпадающий ЧП + тумблеры, как на /account) · Telegram · одна кнопка «Сохранить».
+ * Сохраняет всё разом через POST /api/notifications.
+ */
+export default function SettingsForm({ initial, telegramDeeplink, email }: {
+  initial: Initial;
+  telegramDeeplink: string | null;
+  email?: string | null;
+}) {
   const router = useRouter();
   const [displayName, setDisplayName] = useState(initial.display_name ?? "");
-  const [timezone, setTimezone] = useState(initial.timezone ?? "UTC");
+  // Часовой пояс — IANA из общего списка. Незнакомое/старое значение ("UTC+3") → дефолт.
+  const knownTz = TIMEZONES.some((tz) => tz.value === initial.timezone);
+  const [timezone, setTimezone] = useState(knownTz ? (initial.timezone as string) : "Europe/Moscow");
   const [chatId, setChatId] = useState(initial.telegram_chat_id ?? "");
   const [notifyEmail, setNotifyEmail] = useState(initial.notify_email ?? true);
   const [notifyTelegram, setNotifyTelegram] = useState(initial.notify_telegram ?? true);
@@ -47,81 +60,105 @@ export default function SettingsForm({ initial, telegramDeeplink }: { initial: I
     }
   }
 
+  const sectionCls = "rounded-2xl border border-line bg-paper p-6 space-y-4";
+  const headCls = "font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold";
+  const inputCls = "w-full rounded-lg border border-line bg-bg-soft px-3 py-2 text-ink focus:bg-paper focus:border-lime-deep focus:outline-none transition text-sm";
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 bg-white border border-slate-200 rounded-2xl p-6">
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-3">{t("settings.section.profile")}</h2>
-        <label className="block mb-3">
-          <span className="block text-sm font-medium text-slate-700 mb-1">{t("settings.field.name")}</span>
+    <form onSubmit={handleSubmit} className="space-y-6">
+      {/* ─── Информация ─── */}
+      <section className={sectionCls}>
+        <h2 className={headCls}>{t("settings.section.info")}</h2>
+        <label className="block">
+          <span className="block text-sm font-medium text-ink mb-1.5">{t("settings.field.name")}</span>
           <input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             placeholder={t("settings.field.namePlaceholder")}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500"
+            className={inputCls}
           />
         </label>
-        <label className="block">
-          <span className="block text-sm font-medium text-slate-700 mb-1">{t("settings.field.timezone")}</span>
-          <input
-            value={timezone}
-            onChange={(e) => setTimezone(e.target.value)}
-            placeholder={t("settings.field.timezonePlaceholder")}
-            className="w-full px-3 py-2 border border-slate-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
-          />
-          <span className="text-xs text-slate-500 mt-1 block">
-            {t("settings.field.timezoneHint")}
-          </span>
-        </label>
+        {email && (
+          <div>
+            <span className="block text-sm font-medium text-ink mb-1.5">{t("settings.field.email")}</span>
+            <div className="w-full rounded-lg border border-line bg-bg-soft px-3 py-2 text-ink-muted text-sm">{email}</div>
+          </div>
+        )}
       </section>
 
-      <hr className="border-slate-200" />
+      {/* ─── Часовой пояс и уведомления ─── */}
+      <section className="rounded-2xl border border-line bg-paper p-6 space-y-6">
+        <h2 className={headCls}>{t("account.notif.title")}</h2>
+        <div>
+          <label className="block text-sm font-medium text-ink mb-1.5">{t("account.notif.tzLabel")}</label>
+          <select
+            value={timezone}
+            onChange={(e) => setTimezone(e.target.value)}
+            className={inputCls}
+          >
+            {TIMEZONES.map((tz) => (
+              <option key={tz.value} value={tz.value}>{tz.label}</option>
+            ))}
+          </select>
+          <p className="mt-1.5 text-xs text-ink-hush">{t("account.notif.tzHint")}</p>
+        </div>
+        <Toggle
+          label={t("account.notif.emailLabel")}
+          description={t("account.notif.emailDesc")}
+          checked={notifyEmail}
+          disabled={saving}
+          onChange={setNotifyEmail}
+        />
+        <Toggle
+          label={t("account.notif.tgLabel")}
+          description={t("account.notif.tgDesc")}
+          checked={notifyTelegram}
+          disabled={saving}
+          onChange={setNotifyTelegram}
+        />
+      </section>
 
-      <section>
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500 mb-3">{t("settings.section.notifications")}</h2>
-
-        <label className="flex items-center gap-3 mb-3 cursor-pointer">
-          <input type="checkbox" checked={notifyEmail} onChange={(e) => setNotifyEmail(e.target.checked)}
-                 className="w-4 h-4 accent-violet-600" />
-          <span className="text-sm text-slate-700">{t("settings.notify.email")}</span>
-        </label>
-
-        <label className="flex items-center gap-3 mb-3 cursor-pointer">
-          <input type="checkbox" checked={notifyTelegram} onChange={(e) => setNotifyTelegram(e.target.checked)}
-                 className="w-4 h-4 accent-violet-600" />
-          <span className="text-sm text-slate-700">{t("settings.notify.telegram")}</span>
-        </label>
-
-        <label className="block ml-7">
-          <span className="block text-xs text-slate-600 mb-1">{t("settings.telegram.chatIdLabel")}</span>
+      {/* ─── Telegram ─── */}
+      <section className={sectionCls}>
+        <h2 className={headCls}>Telegram</h2>
+        <label className="block">
+          <span className="block text-sm font-medium text-ink mb-1.5">{t("settings.telegram.chatIdLabel")}</span>
           <input
             value={chatId}
             onChange={(e) => setChatId(e.target.value)}
             placeholder={t("settings.telegram.chatIdPlaceholder")}
-            className="w-full max-w-xs px-3 py-2 border border-slate-300 rounded-lg font-mono text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+            className={`${inputCls} max-w-xs font-mono`}
           />
-          {telegramDeeplink ? (
-            <a href={telegramDeeplink} target="_blank" rel="noopener noreferrer"
-               className="inline-flex items-center gap-2 mt-2 px-3 py-1.5 bg-sky-50 hover:bg-sky-100 border border-sky-200 text-sky-700 rounded-lg text-sm font-medium">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.222l-1.97 9.28c-.148.661-.537.823-1.088.513l-3.005-2.215-1.45 1.394c-.16.16-.295.295-.605.295l.215-3.062 5.572-5.034c.243-.214-.054-.334-.376-.121l-6.888 4.337-2.966-.926c-.645-.202-.657-.645.135-.955l11.586-4.466c.537-.198 1.006.121.84.96z"/></svg>
-              {t("settings.telegram.connectAuto")}
-            </a>
-          ) : (
-            <span className="text-xs text-slate-500 mt-1 block">
-              {t("settings.telegram.manualHintBefore")}<a href="https://t.me/userinfobot" target="_blank" className="text-violet-600 hover:underline">@userinfobot</a>{t("settings.telegram.manualHintAfter")}
-            </span>
-          )}
         </label>
+        {telegramDeeplink ? (
+          <a
+            href={telegramDeeplink}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-lime-soft hover:bg-lime-soft/70 border border-lime-deep/30 text-lime-deep text-sm font-medium transition"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.222l-1.97 9.28c-.148.661-.537.823-1.088.513l-3.005-2.215-1.45 1.394c-.16.16-.295.295-.605.295l.215-3.062 5.572-5.034c.243-.214-.054-.334-.376-.121l-6.888 4.337-2.966-.926c-.645-.202-.657-.645.135-.955l11.586-4.466c.537-.198 1.006.121.84.96z"/></svg>
+            {t("settings.telegram.connectAuto")}
+          </a>
+        ) : (
+          <p className="text-xs text-ink-hush">
+            {t("settings.telegram.manualHintBefore")}
+            <a href="https://t.me/userinfobot" target="_blank" rel="noopener noreferrer" className="text-lime-deep hover:underline">@userinfobot</a>
+            {t("settings.telegram.manualHintAfter")}
+          </p>
+        )}
       </section>
 
+      {/* ─── Сохранить ─── */}
       <div className="flex items-center gap-3">
         <button
           type="submit"
           disabled={saving}
-          className="bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-medium px-5 py-2 rounded-lg"
+          className="rounded-lg bg-ink text-paper px-5 py-2.5 text-sm font-semibold hover:bg-ink-soft disabled:opacity-50 transition"
         >
           {saving ? t("common.saving") : t("common.save")}
         </button>
-        {msg && <span className="text-sm text-slate-600">{msg}</span>}
+        {msg && <span className="text-sm text-ink-muted">{msg}</span>}
       </div>
     </form>
   );

@@ -2,6 +2,8 @@
   "settings.kicker": "Settings",
   "settings.title": "Настройки",
   "settings.subtitle": "Профиль и уведомления",
+  "settings.section.info": "Информация",
+  "settings.field.email": "Email",
   "settings.section.profile": "Профиль",
   "settings.section.notifications": "Уведомления",
   "settings.field.name": "Имя",
