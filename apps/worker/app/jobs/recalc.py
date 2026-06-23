@@ -230,12 +230,21 @@ _HYSTERESIS_KEEP_CHECKS = {
 }
 
 
-def _write_alerts(sb, seller_id, product_id, m, underestimated):
+# Порог свежести данных (дней). Если последний снапшот старше относительно конца
+# окна — синк застрял, current_stock устарел, low/critical-алерты по нему ложны.
+_STALE_DATA_DAYS = 7
+
+
+def _write_alerts(sb, seller_id, product_id, m, underestimated, data_stale=False):
     cov = m.coverage_days
     desired_alerts = []
-    if critical_stock_alert(cov):
+    # data_stale: последний снапшот устарел (синк застрял) → current_stock и
+    # coverage_days ненадёжны. НЕ открываем новые low/critical «пора заказывать»
+    # на устаревшем остатке (ложная тревога); уже открытые держит гистерезис.
+    # dead/repeated_stockout/underestimated историчны — к свежести не так чувствительны.
+    if not data_stale and critical_stock_alert(cov):
         desired_alerts.append(("critical_stock", f"Coverage {cov:.1f} дн — критически мало"))
-    elif low_stock_alert(cov):
+    elif not data_stale and low_stock_alert(cov):
         desired_alerts.append(("low_stock", f"Coverage {cov:.1f} дн — мало"))
     if dead_inventory_alert(cov) or m.segment == InventorySegment.DEAD_INVENTORY_RISK:
         dead_msg = (
@@ -342,6 +351,18 @@ def recalc_seller(seller_id, period_days=30, progress=None):
             aggregates, event_rows = build_daily_aggregates(rows, period_start, period_end, seller_tz)
             current_stock = int(rows[-1]["stock_quantity"] or 0)
             current_price = float(rows[-1]["price"] or 0)
+
+            # Свежесть данных: насколько последний снапшот отстаёт от конца окна
+            # (period_end = сегодня, см. recalc_seller). Застрявший синк → last_ts
+            # сильно в прошлом → current_stock устарел → подавляем stock-алерты.
+            data_stale = False
+            last_ts = rows[-1].get("snapshot_time")
+            if last_ts:
+                try:
+                    last_date = datetime.fromisoformat(str(last_ts).replace("Z", "+00:00")).date()
+                    data_stale = (period_end - last_date).days > _STALE_DATA_DAYS
+                except (ValueError, TypeError):
+                    data_stale = False
 
             history_arg = pre_period_history if pre_period_history else None
             metric = compute_metrics_for_sku(
@@ -477,7 +498,7 @@ def recalc_seller(seller_id, period_days=30, progress=None):
                 "underestimated_sku": underestimated,
             }, on_conflict="product_id,period_start,period_end"))
             metrics_written += 1
-            alerts_written += _write_alerts(sb, seller_id, pid, m, underestimated)
+            alerts_written += _write_alerts(sb, seller_id, pid, m, underestimated, data_stale=data_stale)
         except Exception as e:
             failed_skus += 1
             loop2_failures += 1

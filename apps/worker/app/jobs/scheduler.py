@@ -146,12 +146,17 @@ def _run_connection_sync(sb, conn) -> None:
 
 
 def _mark_connection_error(sb, conn, err) -> None:
+    """Помечает склад ошибкой через ОБЩИЙ путь ingest_persist._mark_connection_synced:
+    инкремент failure_count, авто-пауза после порога (3) и письмо/Telegram.
+
+    Раньше крон-путь (ночной sync-active + retry-transient) писал только
+    status='error' + last_error — БЕЗ счётчика, паузы и нотификаций (это было лишь
+    в ручном HTTP-пути main.py). Склад с протухшим токеном молча устаревал, юзер
+    не получал алерт, а авто-пауза (SYNC_FAILURE_AUTO_PAUSE_THRESHOLD) из крона была
+    недостижима. Теперь оба пути идентичны. Импорт отложен — во избежание циклов."""
     try:
-        sb.table("data_connections").update({
-            "last_sync_at": datetime.now(timezone.utc).isoformat(),
-            "status": "error",
-            "last_error": str(err)[:500],
-        }).eq("id", conn["id"]).execute()
+        from app.ingest_persist import _mark_connection_synced
+        _mark_connection_synced(sb, conn["id"], error=str(err)[:500])
     except Exception:
         logger.exception("Failed to mark connection error", extra={"connection_id": conn["id"]})
 

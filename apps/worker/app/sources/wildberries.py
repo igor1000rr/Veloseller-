@@ -463,9 +463,20 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
         # 3. Список FBS-складов
         warehouses = _fetch_fbs_warehouses(cli, token)
         if not warehouses:
-            logger.warning("WB FBS: no warehouses found via /api/v3/warehouses")
-            # Возвращаем snapshots с 0 остатками — это валидное состояние (юзер ещё не создал FBS-склад)
-            return _build_zero_stock_snapshots(names_by_vendor, prices_by_vendor, now)
+            # РАНЬШЕ: писали 0 остатков по ВСЕМ карточкам. Но /api/v3/warehouses может
+            # вернуть пустой список и из-за временного сбоя/прав, а не только потому,
+            # что складов реально нет. Для устоявшегося продавца это обнуляло весь
+            # каталог → на следующем recalc обрыв стока = фантомные стокауты и
+            # завышенная потерянная выручка (ровно те метрики, ради которых продукт).
+            # Безопаснее НИЧЕГО не писать по неоднозначному сигналу: прежние снапшоты
+            # сохраняются, а склад начнёт обновляться, как только FBS-склад появится.
+            # Цена: FBS-продавец без склада не увидит товары до создания склада — для
+            # FBS это корректная предпосылка (без склада продавать FBS нельзя).
+            logger.warning(
+                "WB FBS: /api/v3/warehouses вернул пусто — НЕ обнуляем каталог, "
+                "снапшоты не пишем в этом цикле (cards=%d)", len(names_by_vendor),
+            )
+            return []
 
         # 4. По каждому FBS-складу — остатки по barcode'ам
         stocks_by_vendor: dict[str, int] = defaultdict(int)
@@ -521,19 +532,3 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
     return snapshots
 
 
-def _build_zero_stock_snapshots(
-    names_by_vendor: dict[str, str],
-    prices_by_vendor: dict[str, Decimal],
-    now: datetime,
-) -> list[SnapshotInput]:
-    """Собираем snapshots с qty=0 для всех карточек когда у продавца 0 FBS-складов."""
-    return [
-        SnapshotInput(
-            sku=vendor_code,
-            product_name=title or vendor_code,
-            stock_quantity=0,
-            price=prices_by_vendor.get(vendor_code, Decimal("0")),
-            snapshot_time=now,
-        )
-        for vendor_code, title in names_by_vendor.items()
-    ]

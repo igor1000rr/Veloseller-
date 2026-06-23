@@ -399,3 +399,33 @@ class TestWildberries:
         assert len(snaps) == 1
         assert snaps[0].stock_quantity == 10
         assert snaps[0].price == Decimal("1500")
+
+
+class TestWbFbsEmptyWarehouses:
+    """P2-фикс: пустой /api/v3/warehouses НЕ обнуляет каталог.
+
+    Раньше при пустом ответе писались 0-остатки по ВСЕМ карточкам. Но пустой
+    список мог прийти и из-за временного сбоя/прав — для устоявшегося продавца
+    это обрыв стока → фантомные стокауты и завышенная потерянная выручка. Теперь
+    при пустых складах снапшоты не пишутся (прежние данные сохраняются).
+    """
+
+    def test_empty_warehouses_returns_empty_not_zeroed(self, monkeypatch):
+        monkeypatch.setattr(
+            wildberries, "_fetch_card_data",
+            lambda cli, token, with_skus=True: ({"VEND1": "Product 1"}, {"VEND1": ["bc1"]}, {}, {}),
+        )
+        monkeypatch.setattr(wildberries, "_fetch_wb_commission", lambda cli, token: {})
+        monkeypatch.setattr(wildberries, "_fetch_wb_prices", lambda cli, token: {})
+        # Ключевое: складов нет (или transient-пусто)
+        monkeypatch.setattr(wildberries, "_fetch_fbs_warehouses", lambda cli, token: [])
+
+        cli = MagicMock()
+        cli.__enter__ = MagicMock(return_value=cli)
+        cli.__exit__ = MagicMock(return_value=False)
+        with patch.object(wildberries.httpx, "Client", return_value=cli), \
+             patch.object(wildberries, "with_retry", side_effect=lambda fn, **kw: fn()):
+            snaps = wildberries.fetch_fbs_snapshots("token")
+
+        # Пусто — НЕ обнулённый каталог из 1 карточки.
+        assert snaps == []

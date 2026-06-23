@@ -13,6 +13,50 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 
+class TestCronSyncFailureNotifies:
+    """P1-фикс: крон-путь при ошибке синка ДЕЛЕГИРУЕТ в общий
+    ingest_persist._mark_connection_synced (инкремент failure_count + авто-пауза
+    после порога + письмо/Telegram), а не пишет молча status='error'.
+
+    Раньше авто-пауза и нотификации работали ТОЛЬКО на ручном HTTP-пути (main.py),
+    а ночной sync-active / retry-transient тихо помечали error без счётчика —
+    склад с протухшим токеном устаревал без единого алерта юзеру.
+    """
+
+    def test_mark_connection_error_delegates_to_shared(self, monkeypatch):
+        from app.jobs import scheduler
+
+        calls = []
+
+        def fake_synced(sb, connection_id, error=None):
+            calls.append((connection_id, error))
+
+        monkeypatch.setattr("app.ingest_persist._mark_connection_synced", fake_synced)
+
+        mock_sb = MagicMock()
+        err_text = "401 unauthorized " + "x" * 600
+        scheduler._mark_connection_error(mock_sb, {"id": "conn-1"}, RuntimeError(err_text))
+
+        assert len(calls) == 1
+        assert calls[0][0] == "conn-1"
+        # ошибка проброшена и обрезана до 500 символов
+        assert calls[0][1].startswith("401 unauthorized")
+        assert len(calls[0][1]) == 500
+        # критично: НЕ обходит общий путь прямым минимальным update'ом
+        mock_sb.table.assert_not_called()
+
+    def test_mark_connection_error_swallows_exceptions(self, monkeypatch):
+        """Если общий путь упал — крон-цикл не падает (только лог)."""
+        from app.jobs import scheduler
+
+        def boom(sb, connection_id, error=None):
+            raise RuntimeError("notify dispatch failed")
+
+        monkeypatch.setattr("app.ingest_persist._mark_connection_synced", boom)
+        # не должно выбросить наружу
+        scheduler._mark_connection_error(MagicMock(), {"id": "c"}, Exception("sync x"))
+
+
 class TestSyncConnectionsPagination:
     """БАГ 31: пагинация через fetch_all при ≥1000 connections."""
 

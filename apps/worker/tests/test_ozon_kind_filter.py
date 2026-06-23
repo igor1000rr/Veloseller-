@@ -186,6 +186,40 @@ class TestFetchSnapshotsKind:
         assert len(snaps) == 1
         assert snaps[0].stock_quantity == 0
 
+    def test_kind_fbo_truncated_catalog_raises(self):
+        """FBO: /v3/product/list упёрся в лимит страниц с НЕисчерпанным курсором →
+        синк ПАДАЕТ, а не отдаёт частичный каталог (раньше FBO молча обрезал хвост
+        по len(items)<page_size; теперь паритет с fbs/None-путём)."""
+        # 50 страниц, каждая с непустыми items и ДВИГАЮЩИМСЯ last_id → курсор никогда
+        # не исчерпывается → truncated остаётся True → RuntimeError.
+        responses = [
+            _ozon_resp({"result": {"items": [{"product_id": i}], "last_id": f"cur{i}"}})
+            for i in range(ozon.MAX_PAGES_PER_BATCH)
+        ]
+        cli = _mock_client(responses)
+        with patch.object(ozon.httpx, "Client", return_value=cli):
+            with pytest.raises(RuntimeError, match="превышен лимит"):
+                ozon._fetch_snapshots_fbo("cid", "key")
+
+    def test_kind_fbo_short_last_page_not_truncated(self):
+        """FBO: короткая последняя страница (last_id пуст) — это НОРМАЛЬНОЕ
+        завершение, не усечение. Раньше len(items)<page_size мог оборвать раньше."""
+        # Страница 1: полная (page_size=2), курсор двигается; страница 2: короткая
+        # (1 item) НО курсор пуст → штатный конец, без raise.
+        responses = [
+            _ozon_resp({"result": {"items": [{"product_id": 1}, {"product_id": 2}], "last_id": "cur1"}}),
+            _ozon_resp({"result": {"items": [{"product_id": 3}], "last_id": ""}}),
+            # info/list + analytics + prices — пустые, нам важно лишь что не было raise
+            _ozon_resp({"items": []}),
+            _ozon_resp({"items": []}),
+            _ozon_resp({"items": [], "cursor": ""}),
+        ]
+        cli = _mock_client(responses)
+        with patch.object(ozon.httpx, "Client", return_value=cli):
+            snaps = ozon._fetch_snapshots_fbo("cid", "key", page_size=2)
+        # 3 product_id прошли пагинацию без падения (остатки 0 — нет в analytics)
+        assert isinstance(snaps, list)
+
     def test_kind_fbs_takes_only_fbs_stock(self):
         responses = self._build_full_response([
             {"type": "fbo", "present": 50, "reserved": 5},

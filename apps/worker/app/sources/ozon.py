@@ -410,6 +410,7 @@ def _fetch_snapshots_fbo(client_id: str, api_key: str, page_size: int = 1000) ->
         product_ids: list[str] = []
         last_id = ""
         pages = 0
+        truncated = True
         while pages < MAX_PAGES_PER_BATCH:
             pages += 1
 
@@ -425,15 +426,26 @@ def _fetch_snapshots_fbo(client_id: str, api_key: str, page_size: int = 1000) ->
             data = with_retry(_list_call).get("result", {})
             items = data.get("items", [])
             if not items:
+                truncated = False
                 break
             product_ids.extend(str(i["product_id"]) for i in items)
             new_last_id = data.get("last_id") or ""
-            if not new_last_id or new_last_id == last_id or len(items) < page_size:
+            # Завершаем ТОЛЬКО по курсору last_id (пуст/не двигается). Прежний
+            # early-stop по len(items) < page_size мог обрезать хвост на короткой
+            # странице в середине потока → пропавшие SKU = неполный каталог FBO
+            # (паритет с fbs/None-путём ниже, где этот баг уже исправлен).
+            if not new_last_id or new_last_id == last_id:
+                truncated = False
                 break
             last_id = new_last_id
 
-        if pages >= MAX_PAGES_PER_BATCH:
-            logger.warning("ozon /v3/product/list hit MAX_PAGES_PER_BATCH=%d (fbo)", MAX_PAGES_PER_BATCH)
+        if truncated:
+            # Курсор не исчерпан, но уперлись в лимит страниц → каталог неполный.
+            # Падаем, а не отдаём частичный список (иначе пропавшие SKU не обновятся).
+            raise RuntimeError(
+                f"ozon /v3/product/list (fbo): >{len(product_ids)} товаров, превышен лимит "
+                f"страниц MAX_PAGES_PER_BATCH={MAX_PAGES_PER_BATCH} — синк прерван (частичные данные)"
+            )
 
         if not product_ids:
             return []

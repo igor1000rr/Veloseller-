@@ -3,7 +3,7 @@
 - Price change detection → changelog
 - Price elasticity (нужно ≥7 in-stock days до/после)
 """
-from datetime import datetime, date, timezone
+from datetime import datetime, date, timedelta, timezone
 from unittest.mock import MagicMock, patch
 import pytest
 
@@ -167,16 +167,27 @@ def test_recalc_seller_writes_price_change_to_changelog():
     pid = "11111111-1111-1111-1111-111111111111"
     tz = timezone.utc
 
+    # Даты — ОТНОСИТЕЛЬНО сегодня: recalc_seller берёт period_end = now().date(),
+    # поэтому фиксированные даты (был май 2026) выпадали из окна со временем, и тест
+    # переставал реально проверять price_change (snapshots_total=0). Окно 16 дней:
+    # цена 100 первые 8 дней → 150 последние 8.
+    start = datetime.now(tz).replace(hour=12, minute=0, second=0, microsecond=0) - timedelta(days=15)
     snapshots = []
     stock = 200
     for i in range(8):
-        snapshots.append(_snap(f"a{i}", datetime(2026, 5, 1 + i, 12, tzinfo=tz), stock, price=100.0))
+        snapshots.append(_snap(f"a{i}", start + timedelta(days=i), stock, price=100.0))
         stock -= 1
     for i in range(8):
-        snapshots.append(_snap(f"b{i}", datetime(2026, 5, 9 + i, 12, tzinfo=tz), stock, price=150.0))
+        snapshots.append(_snap(f"b{i}", start + timedelta(days=8 + i), stock, price=150.0))
         stock -= 1
 
+    # Кэшируем мок по имени таблицы — иначе каждый sb.table("changelog") давал бы
+    # НОВЫЙ мок, и мы не смогли бы проверить, что именно записалось.
+    table_mocks: dict = {}
+
     def _table_router(name):
+        if name in table_mocks:
+            return table_mocks[name]
         m = MagicMock()
         if name == "sellers":
             m.select.return_value.eq.return_value.execute.return_value = MagicMock(data=[{"timezone": "UTC"}])
@@ -204,16 +215,32 @@ def test_recalc_seller_writes_price_change_to_changelog():
             m.insert.return_value.execute.return_value = MagicMock()
         elif name == "price_elasticity":
             m.upsert.return_value.execute.return_value = MagicMock()
+        table_mocks[name] = m
         return m
 
     mock_sb = MagicMock()
     mock_sb.table.side_effect = _table_router
 
-    with patch("app.jobs.recalc.get_supabase", return_value=mock_sb):
+    # Снапшоты грузятся батч-фетчем через .in_(product_id) — его _setup_snapshots_mock
+    # (на .eq()) НЕ покрывал, поэтому раньше snapshots_total=0 и price_change-путь не
+    # исполнялся вовсе. Патчим фетч напрямую — отдаём готовые снапшоты в цикл.
+    with patch("app.jobs.recalc.get_supabase", return_value=mock_sb), \
+         patch("app.jobs.recalc._fetch_snapshots_batched", return_value={pid: snapshots}):
         result = recalc_seller(seller_id, period_days=16)
 
-    # smoke: проверяем что не упало и что-то записалось
     assert result["products"] >= 1
+
+    # ГЛАВНОЕ: цена 100 → 150 за период должна породить changelog-запись типа
+    # price_change. Раньше тест проверял только products>=1 и прошёл бы, даже если
+    # запись price_change в changelog удалить целиком.
+    inserted_event_types = []
+    for call in table_mocks["changelog"].insert.call_args_list:
+        rows = call.args[0] if call.args else None
+        if isinstance(rows, list):
+            inserted_event_types.extend(r.get("event_type") for r in rows if isinstance(r, dict))
+        elif isinstance(rows, dict):
+            inserted_event_types.append(rows.get("event_type"))
+    assert "price_change" in inserted_event_types
 
 
 def test_recalc_seller_no_snapshots_skips_product():
