@@ -224,7 +224,8 @@ export function buildPaymentUrl(args: {
 }
 
 /**
- * Проверяет подпись Result URL от Robokassa (constant-time).
+ * Проверяет подпись Result URL от Robokassa (Password2, constant-time).
+ * Result URL — server-to-server, authoritative-источник подтверждения оплаты.
  */
 export function verifyResultSignature(args: {
   outSum: string;
@@ -234,5 +235,26 @@ export function verifyResultSignature(args: {
   const password2 = getPassword2();
   if (!password2) return false;
   const expected = md5Hex(`${args.outSum}:${args.invId}:${password2}`);
+  return safeEqualHex(expected, args.signatureValue);
+}
+
+/**
+ * Проверяет подпись Success URL от Robokassa (Password1, constant-time).
+ *
+ * Success URL — браузерный возврат покупателя после оплаты. Robokassa подписывает
+ * его Password1: MD5(OutSum:InvId:Password1). Это менее авторитетно, чем Result URL
+ * (Password2, server-to-server), НО Password1 — тоже серверный секрет: наружу уходит
+ * только md5 от него в платёжной ссылке, восстановить сам пароль нельзя, значит и
+ * подделать Success-редирект нельзя. Используется как резервная активация подписки
+ * на случай, если Result URL не настроен в кабинете Robokassa или не доходит.
+ */
+export function verifySuccessSignature(args: {
+  outSum: string;
+  invId: string;
+  signatureValue: string;
+}): boolean {
+  const password1 = getPassword1();
+  if (!password1) return false;
+  const expected = md5Hex(`${args.outSum}:${args.invId}:${password1}`);
   return safeEqualHex(expected, args.signatureValue);
 }

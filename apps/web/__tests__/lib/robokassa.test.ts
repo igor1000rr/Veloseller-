@@ -177,3 +177,58 @@ describe("Robokassa: verifyResultSignature", () => {
     })).toBe(true);
   });
 });
+
+describe("Robokassa: verifySuccessSignature", () => {
+  beforeEach(() => {
+    process.env.ROBOKASSA_MERCHANT_LOGIN = "veloseller_test";
+    process.env.ROBOKASSA_PASSWORD_1 = "secret1";
+    process.env.ROBOKASSA_PASSWORD_2 = "secret2";
+    delete process.env.ROBOKASSA_TEST_MODE;
+  });
+
+  it("принимает правильную подпись (Password1: outSum:invId:password1)", async () => {
+    const { verifySuccessSignature } = await import("@/lib/robokassa");
+    const { createHash } = await import("node:crypto");
+    const sig = createHash("md5").update("2500.00:42:secret1", "utf8").digest("hex");
+    expect(verifySuccessSignature({
+      outSum: "2500.00", invId: "42", signatureValue: sig,
+    })).toBe(true);
+  });
+
+  it("отклоняет подпись, сделанную по Password2 (Result-, а не Success-формула)", async () => {
+    const { verifySuccessSignature } = await import("@/lib/robokassa");
+    const { createHash } = await import("node:crypto");
+    const sigP2 = createHash("md5").update("2500.00:42:secret2", "utf8").digest("hex");
+    expect(verifySuccessSignature({
+      outSum: "2500.00", invId: "42", signatureValue: sigP2,
+    })).toBe(false);
+  });
+
+  it("case-insensitive (Робокасса может прислать в UPPERCASE)", async () => {
+    const { verifySuccessSignature } = await import("@/lib/robokassa");
+    const { createHash } = await import("node:crypto");
+    const sig = createHash("md5").update("2500.00:42:secret1", "utf8").digest("hex");
+    expect(verifySuccessSignature({
+      outSum: "2500.00", invId: "42", signatureValue: sig.toUpperCase(),
+    })).toBe(true);
+  });
+
+  it("без PASSWORD_1 в env возвращает false", async () => {
+    delete process.env.ROBOKASSA_PASSWORD_1;
+    const { verifySuccessSignature } = await import("@/lib/robokassa");
+    expect(verifySuccessSignature({
+      outSum: "2500.00", invId: "42", signatureValue: "any_signature",
+    })).toBe(false);
+  });
+
+  it("в test mode использует TEST_PASSWORD_1", async () => {
+    process.env.ROBOKASSA_TEST_MODE = "1";
+    process.env.ROBOKASSA_TEST_PASSWORD_1 = "test_secret1";
+    const { verifySuccessSignature } = await import("@/lib/robokassa");
+    const { createHash } = await import("node:crypto");
+    const sig = createHash("md5").update("100.00:1:test_secret1", "utf8").digest("hex");
+    expect(verifySuccessSignature({
+      outSum: "100.00", invId: "1", signatureValue: sig,
+    })).toBe(true);
+  });
+});
