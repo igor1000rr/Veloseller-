@@ -35,7 +35,7 @@
   "landing.feat.cov.x": "How long your stock will last. A signal in advance — not after the item is already gone.",
   "landing.feat.lost.t": "Lost revenue",
   "landing.feat.lost.x": "How much revenue you lose while an item is out of stock.",
-  "landing.feat.plan.t": "Purchase planning",
+  "landing.feat.plan.t": "Accurate purchase planning",
   "landing.feat.plan.x": "Calculations based on true sales velocity and supplier lead time.",
   "landing.feat.frozen.t": "Frozen stock",
   "landing.feat.frozen.x": "How much money is frozen in slow-moving SKUs.",
