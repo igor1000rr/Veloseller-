@@ -100,7 +100,12 @@ export function FooterCol({ title, items }: { title: string; items: [string, str
       <ul className="mt-4 space-y-2.5 text-sm">
         {items.map(([href, label]) => (
           <li key={label}>
-            <Link href={href} className="text-ink-soft hover:text-lime-deep transition">{label}</Link>
+            {href.startsWith("http") ? (
+              // Внешние ссылки (чаты Telegram/MAX) — в новой вкладке.
+              <a href={href} target="_blank" rel="noopener noreferrer" className="text-ink-soft hover:text-lime-deep transition">{label}</a>
+            ) : (
+              <Link href={href} className="text-ink-soft hover:text-lime-deep transition">{label}</Link>
+            )}
           </li>
         ))}
       </ul>

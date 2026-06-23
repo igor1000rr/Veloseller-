@@ -4,6 +4,7 @@ import { t } from "@/lib/i18n";
 import { FooterCol } from "./ui";
 import { footerWarehouseTypes, isEn } from "./data";
 import { APP_PROMO_ENABLED } from "@/lib/features";
+import { MAX_URL, TELEGRAM_URL } from "../_components/ContactLinks";
 
 export default function LandingFooter({ isAuthed }: { isAuthed: boolean }) {
   return (
@@ -42,9 +43,9 @@ export default function LandingFooter({ isAuthed }: { isAuthed: boolean }) {
               : [["/login", t("landing.login")], ["/register", t("landing.ft.register")], ["#", t("landing.ft.docs")], ["#", t("landing.ft.support")]]
           } />
           <FooterCol title={t("landing.ft.community")} items={[
-            ["#", "Telegram"],
+            [TELEGRAM_URL, "Telegram"],
+            [MAX_URL, "MAX"],
             ["mailto:info@proaim.ru", "info@proaim.ru"],
-            ["#", "GitHub"],
           ]} />
         </div>
         <div className="mt-10 md:mt-12 pt-6 md:pt-8 border-t border-line flex flex-wrap items-center justify-between gap-4">

@@ -6,9 +6,10 @@
 // у корня его нет, чтобы не конфликтовал с `hidden`.
 import { Icons } from "./Icons";
 
-const MAX_URL =
+// Единственный источник правды для ссылок на чаты — переиспользуется в подвале лендинга.
+export const MAX_URL =
   "https://max.ru/u/f9LHodD0cOLdTY-mgu4RRfH59lh2qM9C0g-betyGC8tX2xfg80K1rZue2vc";
-const TELEGRAM_URL = "https://t.me/veloseller1";
+export const TELEGRAM_URL = "https://t.me/veloseller1";
 
 export function ContactLinks({ className = "" }: { className?: string }) {
   return (
