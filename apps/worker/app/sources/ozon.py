@@ -299,7 +299,9 @@ def _stock_qty(stocks: list[dict], kind: Optional[str]) -> int:
             stock_type = (s.get("type") or "").lower()
             if stock_type != kind:
                 continue
-        total += int(s.get("present", 0)) - int(s.get("reserved", 0))
+        # `or 0` страхует и от отсутствия ключа, и от явного null (int(None) → TypeError,
+        # который раньше ронял весь _stock_qty и синк склада).
+        total += int(s.get("present") or 0) - int(s.get("reserved") or 0)
     return max(0, total)
 
 
@@ -559,6 +561,7 @@ def fetch_snapshots(
         product_ids: list[str] = []
         last_id = ""
         pages = 0
+        truncated = True
         while pages < MAX_PAGES_PER_BATCH:
             pages += 1
 
@@ -574,15 +577,25 @@ def fetch_snapshots(
             data = with_retry(_list_call).get("result", {})
             items = data.get("items", [])
             if not items:
+                truncated = False
                 break
             product_ids.extend(str(i["product_id"]) for i in items)
             new_last_id = data.get("last_id") or ""
-            if not new_last_id or new_last_id == last_id or len(items) < page_size:
+            # Завершаем ТОЛЬКО по курсору last_id (пуст/не двигается). Прежний
+            # early-stop по len(items) < page_size мог обрезать хвост на короткой
+            # странице в середине потока → пропавшие SKU = сток-ноль = фантомные продажи.
+            if not new_last_id or new_last_id == last_id:
+                truncated = False
                 break
             last_id = new_last_id
 
-        if pages >= MAX_PAGES_PER_BATCH:
-            logger.warning("ozon /v3/product/list hit MAX_PAGES_PER_BATCH=%d", MAX_PAGES_PER_BATCH)
+        if truncated:
+            # Курсор не исчерпан, но уперлись в лимит страниц → список товаров неполный.
+            # Падаем, а не пишем частичные остатки (иначе фантомные стокауты/продажи).
+            raise RuntimeError(
+                f"ozon /v3/product/list: >{len(product_ids)} товаров, превышен лимит страниц "
+                f"MAX_PAGES_PER_BATCH={MAX_PAGES_PER_BATCH} — синк прерван (частичные данные)"
+            )
 
         if not product_ids:
             return []

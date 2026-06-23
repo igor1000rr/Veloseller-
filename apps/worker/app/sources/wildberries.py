@@ -96,6 +96,8 @@ def _fetch_card_data(cli: httpx.Client, token: str, with_skus: bool = False) -> 
             break
 
         cards = data.get("cards") or []
+        if not cards:
+            break  # пустая страница — стоп, не крутим до MAX_CARDS_PAGES
         for card in cards:
             vendor_code = (card.get("vendorCode") or "").strip()
             title = (card.get("title") or "").strip()
@@ -297,7 +299,8 @@ def fetch_snapshots(token: str) -> list[SnapshotInput]:
         else:
             product_name = None
         nominal = v["price"]
-        disc = v.get("discount") or Decimal("0")
+        # Клампим скидку в [0,100]: мусорный disc>100 дал бы отрицательную цену.
+        disc = max(Decimal("0"), min(Decimal("100"), v.get("discount") or Decimal("0")))
         # Факт. цена WB = Price*(1 - Discount/100), округление до копеек.
         marketing = (nominal * (Decimal("1") - disc / Decimal("100"))).quantize(Decimal("0.01")) if nominal else Decimal("0")
         subj_key = (v.get("subject") or "").lower()
@@ -476,6 +479,7 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
         else:
             price = prices_by_vendor.get(vendor_code, Decimal("0"))
             disc = discount_by_vendor.get(vendor_code, Decimal("0"))
+        disc = max(Decimal("0"), min(Decimal("100"), disc))  # см. выше: clamp скидки
         marketing = (price * (Decimal("1") - disc / Decimal("100"))).quantize(Decimal("0.01")) if price else Decimal("0")
         # Предмет/бренд: приоритет карточкам Content API (есть у всех), фолбэк — Statistics.
         subject = subjects_by_card.get(vendor_code) or subject_by_vendor.get(vendor_code)

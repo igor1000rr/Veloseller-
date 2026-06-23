@@ -41,13 +41,17 @@ def _parse_retry_after(value: Optional[str], max_delay: float) -> Optional[float
 
 
 def _backoff_delay(attempt: int, base_delay: float, max_delay: float) -> float:
-    """Экспоненциальный backoff с full jitter.
+    """Экспоненциальный backoff с equal jitter.
 
-    Jitter (случай в [0, capped]) разводит во времени повторы, когда ночной синк
-    ловит один и тот же 429/503 сразу по многим подключениям (thundering herd).
+    Equal jitter (capped/2 + случай в [0, capped/2]) разводит повторы во времени
+    против thundering herd, но гарантирует НИЖНИЙ порог задержки. Раньше был full
+    jitter (uniform [0, capped]) с нижней границей 0 — повтор мог выстрелить почти
+    мгновенно и снова словить 429 в окне WB Statistics (1 req/60s), сжигая все
+    попытки внутри одного throttle-окна.
     """
     capped = min(max_delay, base_delay * (2 ** (attempt - 1)))
-    return random.uniform(0, capped)
+    half = capped / 2
+    return half + random.uniform(0, half)
 
 
 def with_retry(
