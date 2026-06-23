@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Icons } from "./Icons";
 import { warehouseKindLabel, type WarehouseListItem } from "@/lib/warehouse-types";
+import { useModalA11y } from "@/lib/use-modal-a11y";
 
 /**
  * Селектор склада для AppHeader.
@@ -22,6 +23,12 @@ export default function WarehouseSelector({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
+  const popupRef = useRef<HTMLDivElement>(null);
+
+  // a11y: Esc закрывает дропдаун, фокус уходит на список при открытии и возвращается
+  // на кнопку-триггер при закрытии. trap=false: это листбокс, а не модалка — Tab по
+  // контракту уводит фокус наружу (клик по фону уже закрывает попап отдельным слоем).
+  useModalA11y({ open, onClose: () => setOpen(false), containerRef: popupRef, trap: false });
 
   const visibilityCls = forceVisible ? "inline-flex w-full" : "hidden sm:inline-flex";
 
@@ -94,8 +101,9 @@ export default function WarehouseSelector({
 
       {open && hasMultiple && (
         <>
-          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
           <div
+            ref={popupRef}
             className="absolute left-0 right-0 sm:left-auto sm:right-0 top-full mt-1.5 z-50 min-w-[260px] rounded-lg border border-line bg-paper shadow-xl overflow-hidden"
             style={{ backgroundColor: "#ffffff" }}
           >

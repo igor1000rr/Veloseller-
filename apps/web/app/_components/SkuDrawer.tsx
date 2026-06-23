@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LOCALE } from "@/lib/features";
+import { useModalA11y } from "@/lib/use-modal-a11y";
 
 const isEn = LOCALE === "en";
 const L = {
@@ -16,6 +17,13 @@ const L = {
 export default function SkuDrawer() {
   const [id, setId] = useState<string | null>(null);
   const open = id !== null;
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+
+  // a11y: Esc закрывает, фокус при открытии — на кнопку «Закрыть», при закрытии
+  // возвращается на строку списка, открывшую карточку. trap=false: основной контент
+  // дровера — <iframe> (карточка в embed-режиме), фокус внутри фрейма не protrap'ить.
+  useModalA11y({ open, onClose: () => setId(null), containerRef: dialogRef, trap: false, initialFocusRef: closeBtnRef });
 
   useEffect(() => {
     const onOpen = (e: Event) => {
@@ -39,14 +47,10 @@ export default function SkuDrawer() {
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setId(null); };
-    document.addEventListener("keydown", onKey);
+    // Esc/фокус — в useModalA11y; здесь только блокировка скролла фона под дровером.
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    return () => {
-      document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prev;
-    };
+    return () => { document.body.style.overflow = prev; };
   }, [open]);
 
   if (!open) return null;
@@ -56,7 +60,7 @@ export default function SkuDrawer() {
   return (
     <div className="fixed inset-0 z-[60]">
       <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm" onClick={() => setId(null)} aria-hidden />
-      <div role="dialog" aria-modal="true" aria-label={L.title} className="absolute inset-y-0 right-0 flex w-full max-w-[1200px] flex-col bg-bg shadow-2xl sm:w-[82%] lg:w-[76%]">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label={L.title} className="absolute inset-y-0 right-0 flex w-full max-w-[1200px] flex-col bg-bg shadow-2xl sm:w-[82%] lg:w-[76%]">
         <div className="flex items-center justify-between border-b border-line bg-paper px-4 py-2.5">
           <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{L.title}</span>
           <div className="flex items-center gap-3">
@@ -64,6 +68,7 @@ export default function SkuDrawer() {
               {L.openFull}
             </a>
             <button
+              ref={closeBtnRef}
               type="button"
               onClick={() => setId(null)}
               aria-label={L.close}

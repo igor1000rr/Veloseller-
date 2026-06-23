@@ -1,11 +1,12 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Icons } from "./Icons";
 import { ContactLinks } from "./ContactLinks";
 import { t } from "@/lib/i18n";
 import { isEn } from "../_landing/data";
 import { APP_PROMO_ENABLED } from "@/lib/features";
+import { useModalA11y } from "@/lib/use-modal-a11y";
 
 const nav = [
   { href: "/#features", label: t("landing.nav.features") },
@@ -17,6 +18,11 @@ const nav = [
 
 export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean }) {
   const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // a11y: Esc закрывает, фокус уходит в меню при открытии и возвращается на кнопку-
+  // бургер при закрытии, Tab зациклен внутри меню (полноэкранная модалка без iframe).
+  useModalA11y({ open, onClose: () => setOpen(false), containerRef: dialogRef, trap: true });
 
   useEffect(() => {
     if (open) {
@@ -42,6 +48,7 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
            поэтому меню выглядело "прозрачным" и контент за ним просвечивал. Теперь
            bg-paper (белый) + inline-style fallback на случай проблем с Tailwind. */
         <div
+          ref={dialogRef}
           role="dialog"
           aria-modal="true"
           aria-label={t("landing.menu.open")}
