@@ -8,27 +8,40 @@ export default function UploadForm() {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [done, setDone] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const router = useRouter();
 
-  const submit = async () => {
-    if (!file) return;
-    setError(null);
-    const form = new FormData();
-    form.append("file", file);
+  const MAX_BYTES = 50 * 1024 * 1024; // 50 МБ — как в подписи и серверном лимите
+  const ALLOWED_EXT = /\.(csv|xlsx|xls)$/i;
 
-    const res = await fetch("/api/radar/upload", { method: "POST", body: form });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: "unknown" }));
-      setError(err.error ?? `HTTP ${res.status}`);
-      return;
+  const submit = async () => {
+    if (!file || uploading) return; // защита от двойной отправки
+    // Клиентская предпроверка: не льём огромный/чужой файл целиком ради 400 с сервера.
+    if (!ALLOWED_EXT.test(file.name)) { setError("Только CSV или XLSX"); return; }
+    if (file.size > MAX_BYTES) { setError("Файл больше 50 МБ"); return; }
+    setError(null);
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/radar/upload", { method: "POST", body: form });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "unknown" }));
+        setError(err.error ?? `HTTP ${res.status}`);
+        return;
+      }
+      // Правка Александра (#0): НЕ уводим пользователя со страницы прайсов —
+      // остаёмся здесь, где «История загрузок» сразу покажет статус, число строк
+      // и извлечённых брендов. Явный следующий шаг — ссылка на бренды ниже.
+      setDone(true);
+      startTransition(() => {
+        router.refresh();
+      });
+    } catch {
+      setError("Не удалось загрузить — проверьте соединение");
+    } finally {
+      setUploading(false);
     }
-    // Правка Александра (#0): НЕ уводим пользователя со страницы прайсов —
-    // остаёмся здесь, где «История загрузок» сразу покажет статус, число строк
-    // и извлечённых брендов. Явный следующий шаг — ссылка на бренды ниже.
-    setDone(true);
-    startTransition(() => {
-      router.refresh();
-    });
   };
 
   return (
@@ -47,10 +60,10 @@ export default function UploadForm() {
       <div className="mt-4 flex items-center gap-3">
         <button
           onClick={submit}
-          disabled={!file || pending}
+          disabled={!file || uploading || pending}
           className="inline-flex items-center rounded-lg bg-lime-deep text-paper px-5 py-2.5 text-sm font-mono uppercase tracking-wider font-semibold hover:bg-lime-deep/90 disabled:opacity-40 transition"
         >
-          {pending ? "Обработка…" : "Извлечь бренды"}
+          {uploading ? "Загрузка…" : pending ? "Обработка…" : "Извлечь бренды"}
         </button>
         {error && <span className="text-xs text-rose">{error}</span>}
       </div>
