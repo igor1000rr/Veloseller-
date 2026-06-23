@@ -23,7 +23,7 @@ const FAQ_RU: FaqItem[] = [
   },
   {
     q: 'Что если у меня несколько складов на разных маркетплейсах?',
-    a: 'Подключите каждый склад отдельно — Ozon FBO, Ozon FBS, Wildberries FBO. Данные считаются раздельно и не смешиваются. Старт даёт 2 склада, Рост — 6, Про — 15.',
+    a: 'Подключите каждый склад отдельно — Ozon FBO, Ozon FBS, Wildberries FBO. Данные считаются раздельно и не смешиваются.',
   },
   {
     q: 'Нужно ли выдавать вам доступ на изменение данных?',
@@ -50,7 +50,7 @@ const FAQ_EN: FaqItem[] = [
   },
   {
     q: 'What if I have several stores or warehouses?',
-    a: 'Connect each one separately — every store is analyzed on its own, data never mixes. Starter gives 2 warehouses, Growth — 6, Pro — 15.',
+    a: 'Connect each one separately — every store is analyzed on its own, data never mixes.',
   },
   {
     q: 'Do you need write access to my data?',
