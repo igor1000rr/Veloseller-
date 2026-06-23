@@ -1,0 +1,21 @@
+-- system_settings: убрать «мёртвую» политику чтения для authenticated (hardening).
+--
+-- Все легитимные обращения к таблице идут через service-role:
+--   web   — createSupabaseAdminClient() в lib/admin/system-settings.ts (getSetting,
+--           loadSystemSettings) и app/admin/settings/actions.ts (запись);
+--   worker — get_supabase() в jobs/scheduler.py и jobs/landing_stats.py.
+-- Ни один клиентский путь (anon/authenticated JWT) таблицу НЕ читает: публичный
+-- лендинг рендерит landing_live_stats на сервере через getSetting, админ-UI — через
+-- admin-клиент. Политика «read for authenticated USING (true)» лишь открывала весь
+-- конфиг любому залогиненному пользователю через прямой REST-вызов PostgREST.
+--
+-- Сейчас в таблице нет секретов (флаги/лимиты/брендинг), но это generic key-value
+-- конфиг: будущий чувствительный ключ (вебхук-секрет, внутренний порог) утёк бы
+-- молча под этой политикой. Делаем secure-by-default: таблица доступна только
+-- service-role (он обходит RLS), клиентское чтение закрыто.
+DROP POLICY IF EXISTS "system_settings read for authenticated" ON public.system_settings;
+
+-- RLS остаётся ВКЛЮЧЁННЫМ намеренно: при включённом RLS и отсутствии permissive-
+-- политик anon/authenticated получают 0 строк (deny by default), а service-role
+-- продолжает читать/писать в обход RLS. Если в будущем клиенту понадобится читать
+-- конкретный НЕсекретный ключ — заводить узкую политику на эти строки явно.
