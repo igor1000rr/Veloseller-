@@ -1,6 +1,7 @@
 "use client";
 import { useState, useTransition } from "react";
 import { actionAddBrandManual } from "../actions";
+import { errMessage } from "@/lib/error-message";
 
 /**
  * Простая форма добавления одного бренда руками.
@@ -25,8 +26,8 @@ export default function AddBrandForm({ limitReached }: { limitReached: boolean }
         await actionAddBrandManual(value);
         setValue("");
         setSuccess("Бренд добавлен");
-      } catch (e: any) {
-        setError(e.message ?? "Ошибка");
+      } catch (e) {
+        setError(errMessage(e, "Ошибка"));
       }
     });
   };

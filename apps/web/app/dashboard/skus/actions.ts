@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { errMessage } from "@/lib/error-message";
 
 /**
  * Деталь ошибки БД — в лог, наружу generic-сообщение: Supabase error.message
@@ -10,20 +11,6 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 function dbError(e: { message?: string } | null): string {
   console.error("[skus action] db error:", e?.message ?? e);
   return "Не удалось выполнить операцию. Попробуйте ещё раз.";
-}
-
-/**
- * Безопасно извлечь текст ошибки из unknown (catch теперь типизирован как unknown,
- * а не any). Достаёт message из Error ИЛИ из объекта-ошибки (напр. PostgrestError —
- * это plain object, не instanceof Error), сохраняя прежнюю детализацию.
- */
-function errMessage(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (typeof e === "object" && e !== null && "message" in e) {
-    const m = (e as { message?: unknown }).message;
-    if (typeof m === "string") return m;
-  }
-  return "unknown error";
 }
 
 /**

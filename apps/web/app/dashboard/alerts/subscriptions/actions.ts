@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { errMessage } from "@/lib/error-message";
 import type { Json } from "@/lib/database.types";
 
 /** Деталь ошибки БД — в лог, наружу generic (Supabase message может светить схему). */
@@ -87,8 +88,8 @@ export async function upsertSubscription(
 
     revalidatePath("/dashboard/alerts/subscriptions");
     return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "unknown error" };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }
 
@@ -108,8 +109,8 @@ export async function deleteSubscription(subscriptionId: string): Promise<Action
 
     revalidatePath("/dashboard/alerts/subscriptions");
     return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "unknown error" };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }
 
@@ -132,7 +133,7 @@ export async function toggleSubscription(
 
     revalidatePath("/dashboard/alerts/subscriptions");
     return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "unknown error" };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }

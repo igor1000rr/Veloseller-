@@ -58,7 +58,7 @@ export default async function DashboardOverview({ searchParams }: {
   searchParams: Promise<{ period?: string }>;
 }) {
   const sp = await searchParams;
-  const period: "7" | "30" | "90" = (["7", "30", "90"].includes(sp.period ?? "") ? sp.period : "30") as any;
+  const period: "7" | "30" | "90" = (["7", "30", "90"].includes(sp.period ?? "") ? sp.period : "30") as "7" | "30" | "90";
   const periodDays = parseInt(period, 10);
 
   const supabase = await createSupabaseServerClient();

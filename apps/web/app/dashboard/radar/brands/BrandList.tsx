@@ -2,6 +2,7 @@
 import { useTransition } from "react";
 import Link from "next/link";
 import { actionApproveBrand, actionExcludeBrand, actionDeleteBrand } from "../actions";
+import { errMessage } from "@/lib/error-message";
 
 export type Brand = {
   id: string;
@@ -107,10 +108,10 @@ function BrandRow({
       try {
         if (brand.status === "approved") await actionExcludeBrand(brand.id);
         else await actionApproveBrand(brand.id);
-      } catch (err: any) {
+      } catch (err) {
         // server-side проверка лимита в actionApproveBrand даст
         // понятную ошибку — алертом, без молчаливого падения
-        alert(err?.message ?? "Ошибка");
+        alert(errMessage(err, "Ошибка"));
       }
     });
   };
@@ -125,8 +126,8 @@ function BrandRow({
     startTransition(async () => {
       try {
         await actionDeleteBrand(brand.id);
-      } catch (err: any) {
-        alert(err?.message ?? "Ошибка");
+      } catch (err) {
+        alert(errMessage(err, "Ошибка"));
       }
     });
   };
