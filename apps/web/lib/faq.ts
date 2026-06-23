@@ -35,7 +35,7 @@ const FAQ_RU: FaqItem[] = [
   },
   {
     q: 'Есть ли бесплатный пробный период?',
-    a: 'Да — 30 дней любого плана, 15 складов как на Pro. Карта не требуется. Если не подошло — просто перестаёшь пользоваться.',
+    a: 'Да — 30 дней с полным доступом ко всем функциям и 3 склада. Карта не требуется. Если не подошло — просто перестаёшь пользоваться.',
   },
 ];
 
@@ -62,7 +62,7 @@ const FAQ_EN: FaqItem[] = [
   },
   {
     q: 'Is there a free trial?',
-    a: 'Yes — 30 days of any plan with 15 warehouses, same as Pro. No credit card required. If it is not a fit, just stop using it.',
+    a: 'Yes — 30 days with full access to all features and 3 warehouses. No credit card required. If it is not a fit, just stop using it.',
   },
 ];
 

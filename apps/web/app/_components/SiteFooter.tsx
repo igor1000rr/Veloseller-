@@ -92,10 +92,6 @@ export default function SiteFooter() {
           <div className="font-mono text-xs text-ink-hush">
             {t("site.footer.copyright", { year: new Date().getFullYear() })}
           </div>
-          <div className="flex items-center gap-2">
-            <span className="size-1.5 rounded-full bg-lime-deep animate-pulse" />
-            <span className="font-mono text-xs text-ink-hush">{t("site.footer.allSystems")}</span>
-          </div>
         </div>
       </div>
     </footer>

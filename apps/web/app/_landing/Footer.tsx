@@ -39,8 +39,8 @@ export default function LandingFooter({ isAuthed }: { isAuthed: boolean }) {
           </div>
           <FooterCol title={t("landing.ft.account")} items={
             isAuthed
-              ? [["/dashboard", t("landing.ft.dashboard")], ["/billing", t("landing.ft.plan")], ["/account", t("landing.ft.profile")], ["#", t("landing.ft.support")]]
-              : [["/login", t("landing.login")], ["/register", t("landing.ft.register")], ["#", t("landing.ft.support")]]
+              ? [["/dashboard", t("landing.ft.dashboard")], ["/billing", t("landing.ft.plan")], ["/account", t("landing.ft.profile")], ["mailto:info@veloseller.ru", t("landing.ft.support")]]
+              : [["/login", t("landing.login")], ["/register", t("landing.ft.register")], ["mailto:info@veloseller.ru", t("landing.ft.support")]]
           } />
           <FooterCol title={t("landing.ft.community")} items={[
             [TELEGRAM_URL, "Telegram"],

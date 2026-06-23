@@ -24,6 +24,5 @@
   "site.footer.newsGuides": "Новости и гайды",
   "site.footer.register": "Регистрация",
   "site.footer.contacts": "Контакты",
-  "site.footer.copyright": "© {year} Veloseller — управление складом для ecommerce",
-  "site.footer.allSystems": "все системы работают"
+  "site.footer.copyright": "© {year} Veloseller — управление складом для ecommerce"
 }

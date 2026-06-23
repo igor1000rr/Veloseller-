@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 
 const CATEGORY_LABELS: Record<string, { title: string; desc: string; tone: string }> = {
   access:        { title: "Доступ и режимы",       desc: "Регистрация, maintenance mode, фичи-флаги",   tone: "lime" },
-  billing:       { title: "Биллинг",                desc: "Триал, Stripe, цены",                       tone: "emerald" },
+  billing:       { title: "Биллинг",                desc: "Триал, Робокасса, цены",                    tone: "emerald" },
   limits:        { title: "Лимиты планов",          desc: "Ограничения по количеству SKU и магазинов",  tone: "azure" },
   pipeline:      { title: "Pipeline",               desc: "Частота snapshots, параметры расчётов",   tone: "orange" },
   notifications: { title: "Уведомления",           desc: "Настройки по умолчанию для новых селлеров", tone: "azure" },
