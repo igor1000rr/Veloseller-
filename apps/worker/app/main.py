@@ -117,131 +117,43 @@ _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f
 _CSV_MAX_SIZE_BYTES = 20 * 1024 * 1024
 
 
-
-# --- Глобальный лимит параллельных пересчётов (выставка / залп синков) --------
-# Пересчёт грузит в память всю историю продавца и считает на Python (GIL). Без
-# ограничения N одновременных пересчётов разъедают RAM (риск OOM) и душат event-
-# loop, из-за чего ingest-ручки начинают ловить таймаут. Решение: пул из
-# RECALC_CONCURRENCY выделенных потоков + thread-safe очередь. Лишние пересчёты
-# ждут в очереди и считаются чуть позже — RAM/CPU ограничены, воркер живой,
-# ingest остаётся отзывчивым (recalc уходит с anyio-threadpool в свой пул).
+# --- Пулы воркеров: глобальный потолок параллельных пересчётов и синков -------
+# Пересчёт грузит в память всю историю продавца и считает на Python (GIL); ручные
+# синки через /ingest/* уходят в anyio-threadpool (до 40 одновременно) и под залпом
+# (синк всех складов разом) дают спайк RAM/CPU + пула соединений Postgres. Без
+# потолка N параллельных задач разъедают RAM (риск OOM) и душат event-loop, из-за
+# чего ingest начинает ловить таймауты. Решение: пул из N выделенных потоков +
+# thread-safe очередь (см. app.task_queues.WorkerPool). Лишние задачи ждут в
+# очереди (backpressure) — RAM/CPU ограничены, воркер живой, ingest отзывчив.
 #
-# Активируется в lifespan (т.е. под uvicorn в проде). В юнит-тестах TestClient
-# поднят без `with`, lifespan не стартует → _recalc_queue=None → старый путь
-# background_tasks.add_task (поведение 1:1, CI не меняется).
-import queue as _queue
-import threading
+# Состояние очереди инкапсулировано в инстансе WorkerPool (НЕ module-глобал с
+# реассайном) — иначе `from app.main import _recalc_queue` зафиксировал бы None
+# навсегда и пул молча не активировался бы у импортёра. Пулы поднимаются в lifespan
+# (прод под uvicorn); в юнит-тестах TestClient без `with` lifespan не стартует →
+# active()==False → старый путь background_tasks.add_task (поведение 1:1, CI не меняется).
+from app.task_queues import WorkerPool
 
 _RECALC_CONCURRENCY = int(_os.environ.get("RECALC_CONCURRENCY", "3"))
-_recalc_queue: "Optional[_queue.Queue]" = None
-_recalc_threads: list[threading.Thread] = []
-
-
-def _recalc_worker_loop() -> None:
-    q = _recalc_queue
-    if q is None:
-        return
-    while True:
-        seller_id = q.get()
-        try:
-            if seller_id is None:  # sentinel остановки
-                return
-            _run_recalc_bg(seller_id)
-        except Exception:
-            logger.exception("recalc queue worker crashed", extra={"seller_id": seller_id})
-        finally:
-            q.task_done()
-
-
-def _start_recalc_workers() -> None:
-    global _recalc_queue
-    if _recalc_queue is not None or _RECALC_CONCURRENCY < 1:
-        return
-    _recalc_queue = _queue.Queue()
-    for _ in range(_RECALC_CONCURRENCY):
-        t = threading.Thread(target=_recalc_worker_loop, name="recalc-worker", daemon=True)
-        t.start()
-        _recalc_threads.append(t)
-    logger.info("recalc worker pool started", extra={"concurrency": _RECALC_CONCURRENCY})
-
-
-def _stop_recalc_workers() -> None:
-    global _recalc_queue
-    q = _recalc_queue
-    if q is None:
-        return
-    for _ in list(_recalc_threads):
-        q.put(None)
-    _recalc_threads.clear()
-    _recalc_queue = None
-
-
-# --- Глобальный лимит параллельных синков (выставка / залп ручных синков) -----
-# В отличие от ночного крона (_job_sync_active_connections крутит синки
-# ПОСЛЕДОВАТЕЛЬНО в одном потоке), ручные синки через /ingest/* уходят в
-# background_tasks.add_task → Starlette гонит их в anyio-threadpool (до 40
-# одновременно). Под залпом (синк всех складов разом / демо) это сетевые fetch
-# + пачки insert в БД → спайк RAM/CPU и пула соединений Postgres. Тот же приём,
-# что и с пересчётом: пул из SYNC_CONCURRENCY потоков + очередь. Лишние синки
-# ждут в очереди; статус склада 'syncing' держит per-connection лок, а
-# _job_reset_stuck_syncing подчистит, если процесс упал с непустой очередью.
-#
-# Активируется в lifespan (прод под uvicorn). В тестах TestClient без `with`
-# lifespan не стартует → _sync_queue=None → старый путь add_task (CI без изменений).
 _SYNC_CONCURRENCY = int(_os.environ.get("SYNC_CONCURRENCY", "4"))
-_sync_queue: "Optional[_queue.Queue]" = None
-_sync_threads: list[threading.Thread] = []
+_recalc_pool = WorkerPool("recalc", _RECALC_CONCURRENCY)
+_sync_pool = WorkerPool("sync", _SYNC_CONCURRENCY)
 
 
-def _sync_worker_loop() -> None:
-    q = _sync_queue
-    if q is None:
-        return
-    while True:
-        item = q.get()
-        try:
-            if item is None:  # sentinel остановки
-                return
-            fn, args = item
-            fn(*args)
-        except Exception:
-            logger.exception("sync queue worker crashed")
-        finally:
-            q.task_done()
-
-
-def _start_sync_workers() -> None:
-    global _sync_queue
-    if _sync_queue is not None or _SYNC_CONCURRENCY < 1:
-        return
-    _sync_queue = _queue.Queue()
-    for _ in range(_SYNC_CONCURRENCY):
-        t = threading.Thread(target=_sync_worker_loop, name="sync-worker", daemon=True)
-        t.start()
-        _sync_threads.append(t)
-    logger.info("sync worker pool started", extra={"concurrency": _SYNC_CONCURRENCY})
-
-
-def _stop_sync_workers() -> None:
-    global _sync_queue
-    q = _sync_queue
-    if q is None:
-        return
-    for _ in list(_sync_threads):
-        q.put(None)
-    _sync_threads.clear()
-    _sync_queue = None
+def _run_sync_item(item: tuple[Callable[..., None], tuple]) -> None:
+    """Хендлер пула синков: распаковывает (fn, args) и выполняет fn(*args)."""
+    fn, args = item
+    fn(*args)
 
 
 def _dispatch_sync(background_tasks: BackgroundTasks, fn: Callable[..., None], *args) -> None:
     """Синк → в пул (если поднят в lifespan), иначе fallback в FastAPI background tasks.
 
     Пул держит глобальный потолок одновременных синков (SYNC_CONCURRENCY); очередь
-    создаёт backpressure под залпом. Fallback (None-очередь) сохраняет прежнее
+    создаёт backpressure под залпом. Fallback (пул не активен) сохраняет прежнее
     поведение в юнит-тестах, где lifespan не запускается.
     """
-    if _sync_queue is not None:
-        _sync_queue.put_nowait((fn, args))
+    if _sync_pool.active():
+        _sync_pool.enqueue((fn, args))
     else:
         background_tasks.add_task(fn, *args)
 
@@ -366,11 +278,11 @@ async def lifespan(app: FastAPI):
     if settings.enable_scheduler:
         start_scheduler()
         logger.info("scheduler started", extra={"event": "lifecycle"})
-    _start_recalc_workers()
-    _start_sync_workers()
+    _recalc_pool.start(_run_recalc_bg)
+    _sync_pool.start(_run_sync_item)
     yield
-    _stop_sync_workers()
-    _stop_recalc_workers()
+    _sync_pool.stop()
+    _recalc_pool.stop()
     if settings.enable_scheduler:
         stop_scheduler()
         logger.info("scheduler stopped", extra={"event": "lifecycle"})
@@ -673,7 +585,7 @@ def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: b
             _mark_recalc_error(seller_id, str(e)[:500])
             raise
 
-    if _recalc_queue is not None:
+    if _recalc_pool.active():
         # Ставим running-плейсхолдер сразу (до того как воркер-поток заберёт
         # задачу из очереди), чтобы /status и дедуп видели расчёт без гонки.
         _running_recalcs[seller_id] = {
@@ -681,7 +593,7 @@ def job_recalc_seller(seller_id: str, background_tasks: BackgroundTasks, sync: b
             "status": "running", "result": None, "error": None,
             "progress": {"phase": "queued"},
         }
-        _recalc_queue.put_nowait(seller_id)
+        _recalc_pool.enqueue(seller_id)
     else:
         background_tasks.add_task(_run_recalc_bg, seller_id)
     return {
