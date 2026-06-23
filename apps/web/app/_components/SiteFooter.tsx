@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Icons } from "./Icons";
 import { t } from "@/lib/i18n";
+import { MAX_URL, TELEGRAM_URL } from "./ContactLinks";
 
 export default function SiteFooter() {
   return (
@@ -70,18 +71,28 @@ export default function SiteFooter() {
             <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("site.footer.contacts")}</div>
             <ul className="mt-4 space-y-2.5 text-sm">
               <li>
+                <a href={TELEGRAM_URL} target="_blank" rel="noopener noreferrer" className="text-ink-soft hover:text-lime-deep transition">
+                  Telegram
+                </a>
+              </li>
+              <li>
+                <a href={MAX_URL} target="_blank" rel="noopener noreferrer" className="text-ink-soft hover:text-lime-deep transition">
+                  MAX
+                </a>
+              </li>
+              <li>
                 <a href="mailto:info@veloseller.ru" className="text-ink-soft hover:text-lime-deep transition">
                   info@veloseller.ru
                 </a>
               </li>
               <li>
                 <Link href={"/privacy" as never} className="text-ink-soft hover:text-lime-deep transition">
-                  Privacy
+                  {t("site.footer.privacy")}
                 </Link>
               </li>
               <li>
                 <Link href={"/terms" as never} className="text-ink-soft hover:text-lime-deep transition">
-                  Terms
+                  {t("site.footer.terms")}
                 </Link>
               </li>
             </ul>

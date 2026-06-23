@@ -370,7 +370,7 @@ def _build_pdf(seller_name: str, period_label: str, data: dict, currency: str) -
         buf, pagesize=A4,
         leftMargin=1.5*cm, rightMargin=1.5*cm,
         topMargin=1.5*cm, bottomMargin=1.5*cm,
-        title=f"Veloseller Monthly Report — {period_label}",
+        title=f"Veloseller — месячный отчёт — {period_label}",
         author="Veloseller",
     )
 
@@ -401,7 +401,7 @@ def _build_pdf(seller_name: str, period_label: str, data: dict, currency: str) -
     story: list = []
 
     # ─── Заголовок ─────────────────────────────────────
-    story.append(Paragraph("Veloseller Monthly Report", h1_style))
+    story.append(Paragraph("Veloseller — месячный отчёт", h1_style))
     story.append(Paragraph(f"{seller_name} · {period_label}", muted_style))
     story.append(Spacer(1, 0.4*cm))
 

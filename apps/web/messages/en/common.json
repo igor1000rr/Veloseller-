@@ -24,5 +24,7 @@
   "site.footer.newsGuides": "News & guides",
   "site.footer.register": "Sign up",
   "site.footer.contacts": "Contacts",
+  "site.footer.privacy": "Privacy",
+  "site.footer.terms": "Terms",
   "site.footer.copyright": "© {year} Veloseller — inventory management for ecommerce"
 }

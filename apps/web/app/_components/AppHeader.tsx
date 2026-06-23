@@ -9,13 +9,11 @@ import LogoutButton from "../dashboard/LogoutButton";
 import WarehouseSelector from "./WarehouseSelector";
 import type { WarehouseListItem } from "@/lib/warehouse-types";
 import { t } from "@/lib/i18n";
+import { LOCALE } from "@/lib/features";
 
-const PLAN_LABEL: Record<string, string> = {
-  trial: "Trial",
-  starter: "Starter",
-  growth: "Growth",
-  pro: "Pro",
-};
+const PLAN_LABEL: Record<string, string> = LOCALE === "en"
+  ? { trial: "Trial", starter: "Starter", growth: "Growth", pro: "Pro" }
+  : { trial: "Триал", starter: "Старт", growth: "Рост", pro: "Про" };
 
 const PLAN_COLORS: Record<string, string> = {
   trial: "border-line bg-bg-soft text-ink-muted",

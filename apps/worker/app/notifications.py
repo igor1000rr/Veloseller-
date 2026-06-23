@@ -369,10 +369,10 @@ def send_monthly_report_email(
     greeting = f"Привет{', ' + safe_name if safe_name else ''}!"
     period_safe = html.escape(period_label)
     app_url = _app_url()
-    subject = f"Veloseller Monthly Report — {period_label}"
+    subject = f"Veloseller — месячный отчёт — {period_label}"
 
     html_body = f"""<!DOCTYPE html><html><body style="font-family:-apple-system,sans-serif;color:#0f172a;max-width:680px;margin:0 auto;padding:24px">
-<h2 style="color:#0f766e;margin:0 0 16px">Veloseller Monthly Report</h2>
+<h2 style="color:#0f766e;margin:0 0 16px">Veloseller — месячный отчёт</h2>
 <p>{greeting}</p>
 <p>Сводный управленческий отчёт за <b>{period_safe}</b>. Сравнение с предыдущим месяцем.</p>
 <p>В отчёте:</p>
