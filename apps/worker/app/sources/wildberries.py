@@ -415,8 +415,18 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
         all_barcodes: list[str] = []
         for vendor_code, barcodes in skus_by_vendor.items():
             for barcode in barcodes:
-                barcode_to_vendor[barcode] = vendor_code
-                all_barcodes.append(barcode)
+                prev = barcode_to_vendor.get(barcode)
+                if prev is None:
+                    # дедуп: один баркод в all_barcodes один раз (иначе раздувается батч)
+                    barcode_to_vendor[barcode] = vendor_code
+                    all_barcodes.append(barcode)
+                elif prev != vendor_code:
+                    # коллизия баркода между разными vendorCode → оставляем первый,
+                    # не даём остаткам молча перетечь на чужой товар
+                    logger.warning(
+                        "WB FBS: barcode %s у нескольких vendorCode (%s, %s) — оставляем первый",
+                        barcode, prev, vendor_code,
+                    )
 
         if not all_barcodes:
             logger.warning("WB FBS: no barcodes in cards — nothing to fetch stocks for")

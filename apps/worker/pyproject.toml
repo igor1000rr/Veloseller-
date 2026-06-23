@@ -24,6 +24,8 @@ dependencies = [
     # requirements.txt → `pip install -e ".[dev]"` по README их НЕ ставил.
     "defusedxml>=0.7.1",
     "openpyxl>=3.1.5",
+    # Агрегация ошибок прода (init в main.py под guard SENTRY_DSN; FastApiIntegration).
+    "sentry-sdk[fastapi]>=2.0.0",
 ]
 
 [project.optional-dependencies]

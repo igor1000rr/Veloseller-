@@ -71,6 +71,7 @@ requests==2.34.2
 requests-oauthlib==2.0.0
 resend==2.30.1
 rich==14.3.4
+sentry-sdk==2.63.0
 six==1.17.0
 starlette==1.0.0
 storage3==2.30.0
