@@ -8,11 +8,15 @@
  * по одному выбранному складу. ID в cookie vs-warehouse, читается server-side.
  */
 import { cookies } from "next/headers";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "./database.types";
 import {
   WAREHOUSE_COOKIE_NAME,
   type SelectedWarehouse,
   type WarehouseListItem,
 } from "./warehouse-types";
+
+type Db = SupabaseClient<Database>;
 
 // Re-export для обратной совместимости — существующие server-импорты из "@/lib/warehouse"
 // должны продолжать работать (в layouts и dashboard/page).
@@ -27,7 +31,7 @@ export {
  * Список всех складов пользователя для селектора. Сортирует по дате создания (новые сверху).
  */
 export async function listWarehouses(
-  supabase: any,
+  supabase: Db,
   userId: string,
 ): Promise<WarehouseListItem[]> {
   const { data } = await supabase
@@ -43,7 +47,7 @@ export async function listWarehouses(
  * Включает created_at для использования в календарных фильтрах.
  */
 export async function getSelectedWarehouse(
-  supabase: any,
+  supabase: Db,
   userId: string,
 ): Promise<SelectedWarehouse | null> {
   const cookieStore = await cookies();

@@ -1,5 +1,6 @@
 import { unstable_cache } from "next/cache";
 import { createServiceClient } from "@/lib/supabase/service";
+import type { Database } from "@/lib/database.types";
 
 export type DashboardVelocity = {
   product_id: string;
@@ -7,8 +8,13 @@ export type DashboardVelocity = {
   confidence_score: number | null;
 };
 
+// Точная форма строки RPC get_warehouse_dashboard_metrics (из сгенерированных
+// типов) вместо Record<string, any> — переименование колонки теперь поймает tsc.
+export type WarehouseMetricsRow =
+  Database["public"]["Functions"]["get_warehouse_dashboard_metrics"]["Returns"][number];
+
 export type DashboardComputed = {
-  wm: Record<string, any> | null;
+  wm: WarehouseMetricsRow | null;
   velRows: DashboardVelocity[];
 };
 
@@ -57,7 +63,7 @@ async function fetchComputed(
       p_connection_id: connectionId,
     }),
   ]);
-  const wm = ((wmRes.data as any[] | null) ?? [])[0] ?? null;
+  const wm = (wmRes.data ?? [])[0] ?? null;
   const velRows = (velRes.data as DashboardVelocity[] | null) ?? [];
   return { wm, velRows };
 }
