@@ -42,28 +42,52 @@ export const integrations = isEn
 
 export const compareLeft = isEn
   ? [
-      "You compute sales velocity by hand once a month",
-      "Out-of-stock days are ignored — your numbers are distorted",
-      "No idea how much money is stuck in dead stock",
-      "Alarms arrive after the fact, when it is already too late",
+      "You compute sales velocity by hand",
+      "Formulas keep breaking",
+      "Lost revenue stays invisible",
+      "No stockout warnings",
+      "Decisions rely on manual analysis",
     ]
   : [
-      "Считаешь скорость продаж вручную раз в месяц",
-      "Не учитываешь дни отсутствия товара на складе — данные искажены",
-      "Не видишь сколько денег зависло в неликвиде",
-      "Тревожные сигналы приходят постфактум, когда уже поздно",
+      "Считаешь скорость продаж вручную",
+      "Формулы постоянно ломаются",
+      "Не видно потерянную выручку",
+      "Нет предупреждений о дефиците",
+      "Решения зависят от ручного анализа",
+    ];
+
+export const compareMiddle = isEn
+  ? [
+      "Show sales and stock",
+      "Good at explaining the past",
+      "Ignore data quality",
+      "Do not show how reliable the numbers are",
+      "Purchasing ignores all sales channels",
+    ]
+  : [
+      "Показывают продажи и остатки",
+      "Хорошо объясняют прошлое",
+      "Не учитывают качество данных",
+      "Не показывают надёжность расчётов",
+      "Закупки не учитывают все каналы продаж",
     ];
 
 export const compareRight = isEn
   ? [
-      "We exclude out-of-stock days — true sales velocity",
-      "Reorder signal 7–14 days before you run out",
-      "Telegram + email reports every morning",
+      "Computes real demand velocity from stock",
+      "Excludes out-of-stock, restocks and anomalies",
+      "Flags stockout risk in advance",
+      "Shows frozen cash",
+      "Shows how much you can trust the data",
+      "Gives purchasing recommendations",
     ]
   : [
-      "Вычитаем дни отсутствия товара на складе — реальная скорость продаж",
-      "Сигнал на закупку за 7–14 дней до окончания остатков",
-      "Telegram + email отчёты каждое утро",
+      "Считает реальную скорость спроса по остаткам",
+      "Исключает отсутствие на складе, пополнения и аномалии",
+      "Показывает риск дефицита заранее",
+      "Показывает замороженные деньги",
+      "Показывает насколько можно доверять данным",
+      "Даёт рекомендации по закупкам",
     ];
 
 export const steps = isEn

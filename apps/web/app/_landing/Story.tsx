@@ -2,7 +2,7 @@
 import { Icons } from "../_components/Icons";
 import { t } from "@/lib/i18n";
 import { Eyebrow } from "./ui";
-import { compareLeft, compareRight, steps } from "./data";
+import { compareLeft, compareMiddle, compareRight, steps } from "./data";
 
 export default function LandingStory() {
   return (
@@ -13,19 +13,17 @@ export default function LandingStory() {
           <div className="text-center mb-10 md:mb-14">
             <Eyebrow center>{t("landing.cmp.eyebrow")}</Eyebrow>
             <h2 className="mt-2 font-display text-2xl sm:text-3xl md:text-5xl tracking-tight font-medium">
-              Excel vs Veloseller
+              {t("landing.cmp.h2")}
             </h2>
             <p className="mt-3 text-ink-muted text-sm md:text-base">
               {t("landing.cmp.sub")}
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-4 md:gap-6">
-            <div className="rounded-2xl border-2 border-line bg-bg-soft p-5 sm:p-6 md:p-8 relative">
-              <div className="absolute -top-3 left-7 px-2.5 py-0.5 rounded bg-paper border border-line-2">
-                <span className="font-mono text-[10px] text-ink-hush uppercase tracking-widest">{t("landing.cmp.before")}</span>
-              </div>
-              <h3 className="font-display text-lg sm:text-xl md:text-2xl mt-3 text-ink-muted font-medium">{t("landing.cmp.left")}</h3>
+          <div className="grid md:grid-cols-3 gap-4 md:gap-6">
+            {/* Excel — старый ручной способ (минусы) */}
+            <div className="rounded-2xl border border-line bg-bg-soft p-5 sm:p-6 md:p-7">
+              <h3 className="font-display text-lg sm:text-xl md:text-2xl text-ink-muted font-medium">{t("landing.cmp.left")}</h3>
               <ul className="mt-5 space-y-3">
                 {compareLeft.map((it) => (
                   <li key={it} className="flex items-start gap-3 text-ink-muted text-sm md:text-base">
@@ -35,11 +33,21 @@ export default function LandingStory() {
                 ))}
               </ul>
             </div>
-            <div className="rounded-2xl border-2 border-lime-deep/40 bg-lime-soft p-5 sm:p-6 md:p-8 relative shadow-[0_20px_60px_-20px_rgba(132,204,22,0.3)]">
-              <div className="absolute -top-3 left-7 px-2.5 py-0.5 rounded bg-ink text-paper">
-                <span className="font-mono text-[10px] uppercase tracking-widest">{t("landing.cmp.after")}</span>
-              </div>
-              <h3 className="font-display text-lg sm:text-xl md:text-2xl mt-3 text-ink font-medium">Veloseller</h3>
+            {/* Другие сервисы — частично (нейтральный маркер) */}
+            <div className="rounded-2xl border border-line bg-paper p-5 sm:p-6 md:p-7">
+              <h3 className="font-display text-lg sm:text-xl md:text-2xl text-ink-soft font-medium">{t("landing.cmp.middle")}</h3>
+              <ul className="mt-5 space-y-3">
+                {compareMiddle.map((it) => (
+                  <li key={it} className="flex items-start gap-3 text-ink-muted text-sm md:text-base">
+                    <span className="shrink-0 mt-2 size-1.5 rounded-full bg-orange" />
+                    <span>{it}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            {/* Veloseller — полный охват (выделенная карточка) */}
+            <div className="rounded-2xl border-2 border-lime-deep/40 bg-lime-soft p-5 sm:p-6 md:p-7 shadow-[0_20px_60px_-20px_rgba(132,204,22,0.3)]">
+              <h3 className="font-display text-lg sm:text-xl md:text-2xl text-ink font-medium">Veloseller</h3>
               <ul className="mt-5 space-y-3">
                 {compareRight.map((it) => (
                   <li key={it} className="flex items-start gap-3 text-ink-soft font-medium text-sm md:text-base">
