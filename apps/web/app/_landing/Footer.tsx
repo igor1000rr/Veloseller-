@@ -45,7 +45,7 @@ export default function LandingFooter({ isAuthed }: { isAuthed: boolean }) {
           <FooterCol title={t("landing.ft.community")} items={[
             [TELEGRAM_URL, "Telegram"],
             [MAX_URL, "MAX"],
-            ["mailto:info@proaim.ru", "info@proaim.ru"],
+            ["mailto:info@veloseller.ru", "info@veloseller.ru"],
           ]} />
         </div>
         <div className="mt-10 md:mt-12 pt-6 md:pt-8 border-t border-line flex flex-wrap items-center justify-between gap-4">

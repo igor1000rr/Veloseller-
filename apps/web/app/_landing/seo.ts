@@ -69,10 +69,10 @@ export const landingJsonLd = {
       name: "Veloseller",
       url: SITE_URL,
       description: LD.orgDescription,
-      email: "info@proaim.ru",
+      email: "info@veloseller.ru",
       contactPoint: {
         "@type": "ContactPoint",
-        email: "info@proaim.ru",
+        email: "info@veloseller.ru",
         contactType: "customer support",
         availableLanguage: LD.availableLanguage,
       },

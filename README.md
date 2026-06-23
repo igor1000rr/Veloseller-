@@ -303,7 +303,7 @@ apps/worker/tests/         ~30 файлов тестов Python (pytest)
 
 Made with 🟢 by [@igor1000rr](https://t.me/igor1000rr)
 
-Для интеграторов и агентств: **info@proaim.ru**
+Для интеграторов и агентств: **info@veloseller.ru**
 
 </div>
 

@@ -27,7 +27,7 @@ export default function LandingBottom({ isAuthed }: { isAuthed: boolean }) {
             <span>TVelo</span><Icons.Dot size={3} /> <span>{t("billing.feat.coverage")}</span><Icons.Dot size={3} /> <span>{t("billing.feat.lost")}</span><Icons.Dot size={3} /> <span>{t("billing.feat.purchase")}</span><Icons.Dot size={3} /> <span>Email + Telegram</span>
           </p>
           <p className="mt-3 text-center font-mono text-[11px] text-ink-hush">
-            {t("billing.integrators")} <a href="mailto:info@proaim.ru" className="text-lime-deep hover:underline">info@proaim.ru</a>
+            {t("billing.integrators")} <a href="mailto:info@veloseller.ru" className="text-lime-deep hover:underline">info@veloseller.ru</a>
           </p>
         </div>
       </section>

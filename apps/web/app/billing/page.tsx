@@ -239,7 +239,7 @@ export default async function BillingPage({ searchParams }: { searchParams: Prom
       )}
 
       <div className="text-center font-mono text-[11px] text-ink-hush">
-        {t("billing.integrators")} <a href="mailto:info@proaim.ru" className="text-lime-deep hover:underline">info@proaim.ru</a>
+        {t("billing.integrators")} <a href="mailto:info@veloseller.ru" className="text-lime-deep hover:underline">info@veloseller.ru</a>
       </div>
 
       <div className="text-center space-y-2">

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { PAYMENT_PROVIDER } from "@/lib/features";
 import { t } from "@/lib/i18n";
 
-const CONTACT_EMAIL = "info@proaim.ru";
+const CONTACT_EMAIL = "info@veloseller.ru";
 
 /**
  * Кнопка «Купить тариф».

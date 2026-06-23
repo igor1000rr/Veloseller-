@@ -9,8 +9,8 @@ export const metadata = {
 const LAST_UPDATED = "22 июня 2026";
 const COMPANY = "Veloseller";
 // Единый публичный контакт (совпадает с разметкой на главной)
-const SUPPORT_EMAIL = "info@proaim.ru";
-const LEGAL_EMAIL = "info@proaim.ru";
+const SUPPORT_EMAIL = "info@veloseller.ru";
+const LEGAL_EMAIL = "info@veloseller.ru";
 export default function TermsPage() {
   return (
     <div className="min-h-screen bg-paper text-ink">

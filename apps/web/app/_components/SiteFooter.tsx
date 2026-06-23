@@ -70,8 +70,8 @@ export default function SiteFooter() {
             <div className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{t("site.footer.contacts")}</div>
             <ul className="mt-4 space-y-2.5 text-sm">
               <li>
-                <a href="mailto:info@proaim.ru" className="text-ink-soft hover:text-lime-deep transition">
-                  info@proaim.ru
+                <a href="mailto:info@veloseller.ru" className="text-ink-soft hover:text-lime-deep transition">
+                  info@veloseller.ru
                 </a>
               </li>
               <li>

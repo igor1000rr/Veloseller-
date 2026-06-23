@@ -8,8 +8,8 @@ export const metadata = {
 
 const LAST_UPDATED = "22 июня 2026";
 const COMPANY = "Veloseller";
-const CONTACT_EMAIL = "info@proaim.ru";
-const DPO_EMAIL = "info@proaim.ru";
+const CONTACT_EMAIL = "info@veloseller.ru";
+const DPO_EMAIL = "info@veloseller.ru";
 
 // Реквизиты оператора персональных данных (152-ФЗ, ст. 18.1).
 const OPERATOR_NAME = "ИП Енотаев Александр Андреевич";
