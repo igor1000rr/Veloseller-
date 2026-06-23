@@ -4,6 +4,7 @@ import { Icons } from '@/app/_components/Icons';
 import { posts } from '@/lib/news/posts';
 import { CATEGORY_LABELS, CATEGORY_COLORS } from '@/lib/news/types';
 import { SITE_URL } from '@/lib/features';
+import LandingHeader from '@/app/_landing/Header';
 
 // Title уйдёт через title.template из layout: "Новости и гайды — Veloseller"
 export const metadata: Metadata = {
@@ -72,26 +73,7 @@ export default function NewsListPage() {
         style={{ background: 'radial-gradient(closest-side, rgba(132,204,22,0.20), transparent 70%)' }}
       />
 
-      <header className="sticky top-0 z-30 backdrop-blur-md bg-bg/85 border-b border-line">
-        <div className="w-full px-4 md:px-8 lg:px-12 py-3 md:py-4 flex items-center justify-between gap-4">
-          <Link href="/" className="flex items-center gap-2.5 shrink-0">
-            <Icons.Logo />
-            <span className="font-display text-lg font-medium tracking-tight">
-              Velo<span className="text-lime-deep">seller</span>
-            </span>
-          </Link>
-          <nav className="hidden md:flex items-center gap-7">
-            <Link href="/" className="text-sm text-ink-soft hover:text-lime-deep transition">Главная</Link>
-            <Link href={'/news'} className="text-sm text-lime-deep font-medium">Новости</Link>
-            <Link href="/#pricing" className="text-sm text-ink-soft hover:text-lime-deep transition">Тарифы</Link>
-            <Link href="/#faq" className="text-sm text-ink-soft hover:text-lime-deep transition">FAQ</Link>
-          </nav>
-          <div className="flex items-center gap-2 md:gap-3">
-            <Link href={'/login'} className="hidden md:inline-block text-sm text-ink-soft hover:text-ink transition px-2 py-1">Войти</Link>
-            <Link href={'/register'} className="inline-flex rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft transition">Начать</Link>
-          </div>
-        </div>
-      </header>
+      <LandingHeader isAuthed={false} />
 
       <section className="relative w-full px-4 md:px-8 lg:px-12 pt-12 md:pt-20 pb-10 md:pb-14">
         <div className="max-w-[1100px] mx-auto">

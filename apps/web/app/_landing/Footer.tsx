@@ -40,7 +40,7 @@ export default function LandingFooter({ isAuthed }: { isAuthed: boolean }) {
           <FooterCol title={t("landing.ft.account")} items={
             isAuthed
               ? [["/dashboard", t("landing.ft.dashboard")], ["/billing", t("landing.ft.plan")], ["/account", t("landing.ft.profile")], ["#", t("landing.ft.support")]]
-              : [["/login", t("landing.login")], ["/register", t("landing.ft.register")], ["#", t("landing.ft.docs")], ["#", t("landing.ft.support")]]
+              : [["/login", t("landing.login")], ["/register", t("landing.ft.register")], ["#", t("landing.ft.support")]]
           } />
           <FooterCol title={t("landing.ft.community")} items={[
             [TELEGRAM_URL, "Telegram"],
@@ -51,10 +51,6 @@ export default function LandingFooter({ isAuthed }: { isAuthed: boolean }) {
         <div className="mt-10 md:mt-12 pt-6 md:pt-8 border-t border-line flex flex-wrap items-center justify-between gap-4">
           <div className="font-mono text-xs text-ink-hush">
             © {new Date().getFullYear()} Veloseller — {t("landing.ft.copyright")}
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="size-1.5 rounded-full bg-lime-deep animate-pulse" />
-            <span className="font-mono text-xs text-ink-hush">{t("landing.ft.allSystems")}</span>
           </div>
         </div>
       </div>

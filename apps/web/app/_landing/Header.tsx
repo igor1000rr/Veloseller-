@@ -26,16 +26,16 @@ export default function LandingHeader({ isAuthed }: { isAuthed: boolean }) {
           </span>
         </Link>
         <nav className="hidden md:flex items-center gap-7">
-          <a href="#features" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.features")}</a>
-          <a href="#how" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.how")}</a>
-          <a href="#integrations" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.integrations")}</a>
-          <a href="#pricing" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.pricing")}</a>
+          <Link href="/#features" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.features")}</Link>
+          <Link href="/#how" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.how")}</Link>
+          <Link href="/#integrations" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.integrations")}</Link>
+          <Link href="/#pricing" className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.pricing")}</Link>
           <Link href={"/news"} className="text-sm text-ink-soft hover:text-lime-deep transition">{t("landing.nav.news")}</Link>
           {APP_PROMO_ENABLED && (
             <Link href={"/apps"} className="text-sm text-ink-soft hover:text-lime-deep transition">{isEn ? "App" : "Приложение"}</Link>
           )}
           <Link href={"/partner"} className="text-sm font-medium text-lime-deep hover:text-lime transition">{isEn ? "Partners" : "Партнёрам"}</Link>
-          <a href="#faq" className="text-sm text-ink-soft hover:text-lime-deep transition">FAQ</a>
+          <Link href="/#faq" className="text-sm text-ink-soft hover:text-lime-deep transition">FAQ</Link>
         </nav>
         <div className="flex items-center gap-2 md:gap-3">
           <ContactLinks className="hidden md:inline-flex" />

@@ -8,11 +8,11 @@ import { isEn } from "../_landing/data";
 import { APP_PROMO_ENABLED } from "@/lib/features";
 
 const nav = [
-  { href: "#features", label: t("landing.nav.features") },
-  { href: "#how", label: t("landing.nav.how") },
-  { href: "#integrations", label: t("landing.nav.integrations") },
-  { href: "#pricing", label: t("landing.nav.pricing") },
-  { href: "#faq", label: "FAQ" },
+  { href: "/#features", label: t("landing.nav.features") },
+  { href: "/#how", label: t("landing.nav.how") },
+  { href: "/#integrations", label: t("landing.nav.integrations") },
+  { href: "/#pricing", label: t("landing.nav.pricing") },
+  { href: "/#faq", label: "FAQ" },
 ];
 
 export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean }) {
