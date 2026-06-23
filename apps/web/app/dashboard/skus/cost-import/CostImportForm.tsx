@@ -161,8 +161,8 @@ export function CostImportForm({
         <div>
           <h2 className="font-display text-lg font-medium text-ink">Ставка налога</h2>
           <p className="mt-1 text-sm text-ink-muted">
-            Один процент на весь кабинет (например, УСН 6%). Станет дефолтом в
-            юнит-экономике по всем товарам. Себестоимость и комиссию не меняет.
+            Один процент на весь кабинет (например, УСН 6%). Станет базовым в
+            юнит-экономике по всем товарам этого склада.
           </p>
         </div>
         <div className="flex items-end gap-3 flex-wrap">
