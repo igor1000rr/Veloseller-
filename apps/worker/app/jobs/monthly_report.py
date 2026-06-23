@@ -28,6 +28,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from app.db import get_supabase
+from app.jobs.period_window import latest_30d_window, store_metric_30d
 
 logger = logging.getLogger("veloseller.monthly_report")
 
@@ -124,21 +125,10 @@ def _two_months_back(today: date) -> tuple[date, date]:
 # ─── Сбор данных ─────────────────────────────────────────
 
 def _fetch_store_metric_for_date(sb, seller_id: str, target_date: date) -> Optional[dict]:
-    """Возвращает store_metrics запись ближайшую (но не позже) к target_date."""
-    try:
-        res = (
-            sb.table("store_metrics")
-            .select("*")
-            .eq("seller_id", seller_id)
-            .lte("period_end", target_date.isoformat())
-            .order("period_end", desc=True)
-            .limit(1)
-            .execute()
-        )
-        return res.data[0] if res.data else None
-    except Exception:
-        logger.exception("fetch store_metrics failed seller=%s date=%s", seller_id, target_date)
-        return None
+    """store_metrics 30-дневного окна, ближайший (но не позже) к target_date.
+    store_metrics пишется по окнам 7/30/90 — для месячного отчёта берём 30-дневное
+    (раньше .limit(1) брал случайное окно, обычно 90-дневное → цифры за 3 месяца)."""
+    return store_metric_30d(sb, seller_id, target_date)
 
 
 def _fetch_period_skus(sb, seller_id: str, period_start: date, period_end: date) -> dict[str, dict]:
@@ -271,15 +261,22 @@ def _segments_from_period(period_skus: dict[str, dict]) -> dict[str, dict[str, f
 def _fetch_data_quality(sb, seller_id: str, period_start: date, period_end: date) -> dict:
     """Качество данных за период: средний confidence, события."""
     try:
-        # Средний confidence — текущие tvelo_metrics
-        cur_res = (
-            sb.table("tvelo_metrics")
-            .select("confidence_score,products!inner(seller_id)")
-            .eq("products.seller_id", seller_id)
-            .limit(5000)
-            .execute()
-        )
-        cur_rows = cur_res.data or []
+        # Средний confidence — ТЕКУЩЕЕ 30-дневное окно. tvelo_metrics пишется по
+        # окнам 7/30/90 на каждый день; без фильтра усреднялось по всей истории×3.
+        ps, pe = latest_30d_window(sb, seller_id)
+        if ps and pe:
+            cur_res = (
+                sb.table("tvelo_metrics")
+                .select("confidence_score,products!inner(seller_id)")
+                .eq("products.seller_id", seller_id)
+                .eq("period_start", ps)
+                .eq("period_end", pe)
+                .limit(5000)
+                .execute()
+            )
+            cur_rows = cur_res.data or []
+        else:
+            cur_rows = []
         conf_vals = [float(r["confidence_score"]) for r in cur_rows if r.get("confidence_score") is not None]
         avg_conf = sum(conf_vals) / len(conf_vals) if conf_vals else None
     except Exception:

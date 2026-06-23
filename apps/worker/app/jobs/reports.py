@@ -31,6 +31,7 @@ from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from app.db import fetch_all, get_supabase
+from app.jobs.period_window import latest_30d_window as _latest_30d_window, store_metric_30d
 
 logger = logging.getLogger("veloseller.reports")
 
@@ -102,36 +103,7 @@ def _sheet_name(kind: str) -> str:
 
 # ─── Fetchers ────────────────────────────────
 
-def _latest_30d_window(sb, seller_id: str) -> tuple[str | None, str | None]:
-    """tvelo_metrics пишется по НЕСКОЛЬКИМ окнам (7/30/90 дней) на один period_end
-    (recalc_seller_all_periods — для графиков Динамики). Для отчётов берём ровно
-    30-дневное окно последнего периода (как в заголовках «за 30 дней»), иначе один
-    SKU дублируется по числу окон. Возвращает (period_start, period_end) ISO либо
-    (None, None), если метрик нет."""
-    try:
-        res = (
-            sb.table("tvelo_metrics")
-            .select("period_start,period_end,products!inner(seller_id)")
-            .eq("products.seller_id", seller_id)
-            .order("period_end", desc=True)
-            .limit(500)
-            .execute()
-        )
-    except Exception:
-        logger.exception("_latest_30d_window failed seller=%s", seller_id)
-        return None, None
-    rows = res.data or []
-    if not rows:
-        return None, None
-    latest_end = rows[0].get("period_end")
-    starts = {r["period_start"] for r in rows
-              if r.get("period_end") == latest_end and r.get("period_start")}
-    if not starts or not latest_end:
-        return None, latest_end
-    end_d = date.fromisoformat(latest_end[:10])
-    # из доступных окон берём ближайшее к 30 дням
-    best = min(starts, key=lambda ps: abs((end_d - date.fromisoformat(ps[:10])).days - 30))
-    return best, latest_end
+# _latest_30d_window и store_metric_30d импортированы выше из app.jobs.period_window.
 
 
 def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
@@ -240,17 +212,10 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             return res.data or []
 
         if kind == "weekly_report":
-            # Для сводки берём ровно одну точку — последнюю.
-            # Build функция формирует одностраничный лист с числами.
-            res = (
-                sb.table("store_metrics")
-                .select("*")
-                .eq("seller_id", seller_id)
-                .order("period_end", desc=True)
-                .limit(1)
-                .execute()
-            )
-            return res.data or []
+            # Сводка — одна точка. store_metrics пишется по окнам 7/30/90; берём
+            # 30-дневное окно последнего периода (иначе .limit(1) брал случайное окно).
+            row = store_metric_30d(sb, seller_id, date.today())
+            return [row] if row else []
 
     except Exception:
         logger.exception("_fetch_sku_rows failed kind=%s seller=%s", kind, seller_id)
