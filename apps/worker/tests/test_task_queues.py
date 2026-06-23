@@ -12,6 +12,7 @@ os.environ["ENABLE_SCHEDULER"] = "false"
 
 import queue as _queue
 import threading
+import time
 
 import pytest
 
@@ -185,3 +186,91 @@ class TestLifespanWiring:
             # выполнятся без ответа FastAPI, поэтому ev.set оттуда не сработает).
             main._dispatch_sync(BackgroundTasks(), lambda: ran.set())
             assert ran.wait(timeout=3), "fn не выполнилась в пуле — _dispatch_sync не ушёл в очередь"
+
+
+class TestWorkerPoolUnderLoad:
+    """Нагрузка/конкурентность пула — самый рискованный новый код (threading).
+
+    Главный инвариант — ПОТОЛОК одновременных задач (ради него пул и вводился:
+    защита от OOM при залпе синков/пересчётов). Проверяем его под бёрстом, плюс
+    отсутствие потери задач, живучесть при исключениях под нагрузкой и аккуратный
+    дренаж очереди при остановке.
+    """
+
+    def _run_burst(self, concurrency: int, n_items: int, hold: float = 0.005):
+        lock = threading.Lock()
+        state = {"current": 0, "max": 0}
+        sink: _queue.Queue = _queue.Queue()
+
+        def handler(item):
+            with lock:
+                state["current"] += 1
+                if state["current"] > state["max"]:
+                    state["max"] = state["current"]
+            time.sleep(hold)  # удерживаем, чтобы перекрытие потоков было реальным
+            with lock:
+                state["current"] -= 1
+            sink.put(item)
+
+        pool = WorkerPool("load", concurrency)
+        try:
+            pool.start(handler)
+            for i in range(n_items):
+                pool.enqueue(i)
+            done = [sink.get(timeout=10) for _ in range(n_items)]
+            return state["max"], done
+        finally:
+            _drain(pool)
+
+    def test_concurrency_cap_holds_under_burst(self):
+        """200 задач, пул=4: одновременно работающих НИКОГДА не больше 4 (потолок),
+        и все 200 обработаны (ничего не потеряно)."""
+        max_seen, done = self._run_burst(concurrency=4, n_items=200)
+        assert max_seen <= 4, f"потолок параллелизма пробит: {max_seen} > 4"
+        assert max_seen >= 2, f"параллелизм не случился (max={max_seen}) — тест не нагрузил пул"
+        assert sorted(done) == list(range(200))
+
+    def test_single_thread_is_strictly_serial(self):
+        """concurrency=1 → строго последовательно (max одновременных = 1)."""
+        max_seen, done = self._run_burst(concurrency=1, n_items=50)
+        assert max_seen == 1
+        assert len(done) == 50
+
+    def test_survives_handler_exceptions_under_load(self):
+        """Каждая 10-я задача падает — остальные всё равно все доходят, пул жив."""
+        sink: _queue.Queue = _queue.Queue()
+
+        def handler(item):
+            if item % 10 == 0:
+                raise ValueError(f"boom {item}")
+            sink.put(item)
+
+        pool = WorkerPool("load", 4)
+        try:
+            pool.start(handler)
+            for i in range(100):
+                pool.enqueue(i)
+            good = sorted(sink.get(timeout=10) for _ in range(90))  # 100 минус 10 «битых»
+            assert good == [i for i in range(100) if i % 10 != 0]
+            assert pool.active() is True  # пул пережил серию исключений
+        finally:
+            _drain(pool)
+
+    def test_stop_with_join_drains_queued_items(self):
+        """stop(join=True) даёт потокам дочерпать уже стоящие в очереди задачи
+        (сентинелы кладутся ПОСЛЕ них) — graceful-дренаж на остановке."""
+        processed: _queue.Queue = _queue.Queue()
+        pool = WorkerPool("load", 4)
+        pool.start(lambda item: processed.put(item))
+        for i in range(100):
+            pool.enqueue(i)
+        pool.stop(join=True, timeout=10)
+        assert pool.active() is False
+        # все 100 успели обработаться до сентинелов остановки
+        drained = []
+        try:
+            while True:
+                drained.append(processed.get_nowait())
+        except _queue.Empty:
+            pass
+        assert sorted(drained) == list(range(100))
