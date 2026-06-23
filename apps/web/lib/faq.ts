@@ -27,7 +27,7 @@ const FAQ_RU: FaqItem[] = [
   },
   {
     q: 'Нужно ли выдавать вам доступ на изменение данных?',
-    a: 'Нет. Исключительно read-only — мы читаем остатки и продажи, ничего не записываем. Даже если ключ забудете у нас — никто не сможет изменить ваш каталог или цены.',
+    a: 'Нет. Исключительно read-only — мы читаем остатки и продажи, ничего не записываем.',
   },
   {
     q: 'Чем TVelo лучше обычного расчёта скорости продаж в Excel?',
@@ -54,7 +54,7 @@ const FAQ_EN: FaqItem[] = [
   },
   {
     q: 'Do you need write access to my data?',
-    a: 'No. Strictly read-only — we read stock levels and prices, we never write anything. Even if you forget your token with us, nobody can change your catalog or prices.',
+    a: 'No. Strictly read-only — we read stock levels and prices, we never write anything.',
   },
   {
     q: 'Why is TVelo better than a plain sales-velocity formula in Excel?',
