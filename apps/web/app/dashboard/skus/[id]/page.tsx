@@ -103,8 +103,8 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
       // В дни нулевого наличия скорость продаж не определена (продавать нечего) —
       // оставляем null, чтобы линия TVelo прерывалась, а не тянулась сквозь сток-аут.
       velocity: inStock ? 0 : null,
-      sellerPrice: (s as any).seller_price != null ? Number((s as any).seller_price) : null,
-      marketingPrice: (s as any).marketing_price != null ? Number((s as any).marketing_price) : null,
+      sellerPrice: s.seller_price != null ? Number(s.seller_price) : null,
+      marketingPrice: s.marketing_price != null ? Number(s.marketing_price) : null,
     });
   }
   for (const m of metrics ?? []) {
@@ -117,7 +117,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
 
   const changelogByDate: Record<string, any[]> = {};
   for (const e of (changelog ?? [])) {
-    const day = (e as any).event_date as string;
+    const day = e.event_date as string;
     if (!changelogByDate[day]) changelogByDate[day] = [];
     changelogByDate[day].push(e);
   }
@@ -130,9 +130,9 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
     .from("product_events")
     .select("id,title,start_date,end_date,comment,product_id")
     .eq("seller_id", user.id)
-    .or(`product_id.eq.${product.product_id},and(product_id.is.null,connection_id.eq.${(product as any).connection_id})`)
+    .or(`product_id.eq.${product.product_id},and(product_id.is.null,connection_id.eq.${product.connection_id})`)
     .order("start_date", { ascending: true });
-  const userEvents: EventItem[] = (eventRows ?? []).map((e: any) => ({
+  const userEvents: EventItem[] = (eventRows ?? []).map((e) => ({
     id: e.id as string,
     title: e.title as string,
     startDate: e.start_date as string,
@@ -151,7 +151,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
 
   // Александр 04.06.2026: дни «нет данных» не показываем в списке событий —
   // они забивали блок (13 из 14 строк). В тултипе графика журнал остаётся полным.
-  const visibleEvents = (changelog ?? []).filter((e: any) => e.event_type !== "missing_data");
+  const visibleEvents = (changelog ?? []).filter((e) => e.event_type !== "missing_data");
 
   let adjVsMedian = "";
   if (latest && latest.median_30d_velocity != null) {
@@ -177,14 +177,14 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
   // Юнит-экономика (#5): фактическая цена со скидками из последнего снапшота
   // (что реально платит покупатель) + комиссия МП из API как стартовый дефолт.
   const lastSnap = snapshots && snapshots.length ? snapshots[snapshots.length - 1] : null;
-  const unitPrice = lastSnap ? Number((lastSnap as any).marketing_price ?? lastSnap.price ?? 0) : price;
+  const unitPrice = lastSnap ? Number(lastSnap.marketing_price ?? lastSnap.price ?? 0) : price;
   // Комиссия: берём самую свежую НЕпустую ставку из окна снапшотов. Ozon /v5
   // для части товаров не отдаёт sales_percent на каждом синке, поэтому последний
   // снапшот мог оказаться без неё — раньше из-за этого «комиссия из API» не
   // подгружалась, хотя ранее значение было. Скан с конца находит последнюю known.
   let unitCommission: number | null = null;
   for (let i = (snapshots?.length ?? 0) - 1; i >= 0; i--) {
-    const c = (snapshots as any)[i]?.commission_pct;
+    const c = snapshots?.[i]?.commission_pct;
     if (c != null) { unitCommission = Number(c); break; }
   }
 
@@ -201,7 +201,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
         <TagsEditor productId={product.product_id} initial={product.tags ?? null} />
         <EventsEditor
           productId={product.product_id}
-          connectionId={(product as any).connection_id}
+          connectionId={product.connection_id}
           initial={userEvents}
           holidays={holidayEvents}
         />
@@ -285,7 +285,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
       )}
 
       {unitPrice > 0 && (
-        <UnitEconomics priceRub={unitPrice} commissionPct={unitCommission} costRub={(product as any).cost_price != null ? Number((product as any).cost_price) : null} taxRate={(seller as any)?.tax_rate != null ? Number((seller as any).tax_rate) : null} productId={id} />
+        <UnitEconomics priceRub={unitPrice} commissionPct={unitCommission} costRub={product.cost_price != null ? Number(product.cost_price) : null} taxRate={seller?.tax_rate != null ? Number(seller.tax_rate) : null} productId={id} />
       )}
 
       {(elasticity ?? []).length > 0 && (
@@ -294,7 +294,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
           <h3 className="font-display text-base sm:text-lg font-medium text-ink mt-1">{t("sku.detail.elasticity.h")}</h3>
           <p className="text-sm text-ink-muted mb-4">{t("sku.detail.elasticity.sub")}</p>
           <div className="grid gap-3">
-            {(elasticity ?? []).map((e: any, i: number) => {
+            {(elasticity ?? []).map((e, i: number) => {
               const impact = Number(e.price_impact_percent);
               const positiveImpact = impact > 0;
               return (

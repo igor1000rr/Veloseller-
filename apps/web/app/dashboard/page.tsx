@@ -95,7 +95,7 @@ export default async function DashboardOverview({ searchParams }: {
     .eq("id", user.id)
     .maybeSingle();
   const daysSinceSetup = seller?.created_at ? Math.floor((Date.now() - new Date(seller.created_at).getTime()) / 86400_000) : 0;
-  const currency = (seller as any)?.currency ?? "RUB";
+  const currency = seller?.currency ?? "RUB";
   const fmt = (n: number | null | undefined) => formatMoney(n, currency);
 
   const { data: oldestSnapshot } = await supabase
@@ -184,7 +184,7 @@ export default async function DashboardOverview({ searchParams }: {
     .eq("connection_id", currentWarehouseId)
     .is("product_id", null)
     .order("start_date", { ascending: true });
-  const generalEvents: EventItem[] = (storeEventRows ?? []).map((e: any) => ({
+  const generalEvents: EventItem[] = (storeEventRows ?? []).map((e) => ({
     id: e.id as string,
     title: e.title as string,
     startDate: e.start_date as string,

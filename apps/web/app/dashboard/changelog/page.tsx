@@ -35,7 +35,7 @@ const STATUS_META: Record<StatusKind, { label: string; cls: string; dot: string 
   stale:   { label: t("changelog.status.stale"),    cls: "text-orange bg-orange/10 border-orange/30",       dot: "#ea580c" },
 };
 
-function classifyStatus(conn: any): StatusKind {
+function classifyStatus(conn: { status: string | null; last_error: string | null; last_sync_at: string | null }): StatusKind {
   if (conn.status === "syncing") return "syncing";
   if (conn.status === "paused" || conn.status === "disabled") return "paused";
   if (conn.last_error) return "error";
@@ -74,7 +74,7 @@ export default async function ChangelogPage() {
 
   const history: SyncHistoryRow[] = (historyRaw ?? []) as SyncHistoryRow[];
 
-  const connById = new Map((connections ?? []).map((c: any) => [c.id, c]));
+  const connById = new Map((connections ?? []).map((c) => [c.id, c]));
 
   return (
     <div className="space-y-6">
@@ -105,7 +105,7 @@ export default async function ChangelogPage() {
           <div>
             <h2 className="font-mono text-[10px] uppercase tracking-[0.2em] text-ink-hush font-semibold mb-3">{t("changelog.nowHeading")}</h2>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {connections.map((c: any) => {
+              {connections.map((c) => {
                 const st = classifyStatus(c);
                 const meta = STATUS_META[st];
                 const hoursAgo = c.last_sync_at
@@ -171,7 +171,7 @@ export default async function ChangelogPage() {
                   </thead>
                   <tbody className="divide-y divide-line">
                     {history.map(row => {
-                      const conn = connById.get(row.connection_id) as any;
+                      const conn = connById.get(row.connection_id);
                       if (!conn) return null;
                       return (
                         <tr key={`${row.sync_date}_${row.connection_id}`} className="hover:bg-bg-soft/40 transition">
