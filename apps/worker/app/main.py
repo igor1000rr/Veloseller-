@@ -658,12 +658,29 @@ async def telegram_webhook(request: Request, x_telegram_bot_api_secret_token: Op
         if seller_id:
             try:
                 sb = get_supabase()
+                # Single-use / anti-rebind: привязываем ТОЛЬКО если у селлера ещё НЕТ
+                # привязанного чата (telegram_chat_id IS NULL). Токен сам по себе
+                # stateless и реиграбелен 30 мин; этот фильтр не даёт перехваченной
+                # deep-ссылке переключить уведомления АКТИВНОГО пользователя на чужой
+                # чат (кража отчётов). Повтор тем же чатом — идемпотентный успех.
+                # Перепривязка к новому чату — после авто-сброса telegram_chat_id при
+                # «мёртвом» чате (clear_dead_telegram) или ручного отключения.
                 res = sb.table("sellers").update({
                     "telegram_chat_id": chat_id, "notify_telegram": True,
-                }).eq("id", seller_id).execute()
+                }).eq("id", seller_id).is_("telegram_chat_id", "null").execute()
                 if res.data:
                     send_message(chat_id, "✅ <b>Telegram подключён!</b>\n\nТеперь вы будете получать ежедневный digest по важным уведомлениям.")
                     return {"ok": True, "linked": True}
+                # 0 строк обновлено: у селлера уже есть привязанный чат. Различаем
+                # «тот же чат» (идемпотентно ок) и «другой чат» (отказ — анти-hijack).
+                cur = sb.table("sellers").select("telegram_chat_id").eq("id", seller_id).limit(1).execute()
+                cur_chat = str((cur.data or [{}])[0].get("telegram_chat_id") or "") if cur.data else ""
+                if cur_chat and cur_chat == chat_id:
+                    send_message(chat_id, "✅ <b>Telegram уже подключён</b> к этому аккаунту.")
+                    return {"ok": True, "linked": True}
+                if cur_chat:
+                    send_message(chat_id, "⚠️ К этому аккаунту уже подключён другой Telegram-чат. Отключите его в настройках Veloseller и подключите заново.")
+                    return {"ok": True, "linked": False}
             except Exception:
                 logger.exception("telegram linking failed", extra={"chat_id": chat_id})
         send_message(chat_id, "Привет! Я бот <b>Veloseller</b>. Чтобы подключить уведомления, откройте Veloseller и нажмите кнопку «Подключить Telegram» в настройках.")

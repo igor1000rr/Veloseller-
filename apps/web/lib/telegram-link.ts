@@ -10,7 +10,7 @@
  *
  * Алгоритм ОБЯЗАН совпадать с apps/worker/app/telegram_link.py:
  *   msg = `${uuidHex}_${expHex}`  (uuid без дефисов, lowercase; exp — unix-сек в hex)
- *   sig = HMAC_SHA256(msg, TELEGRAM_LINK_SECRET).hex().slice(0, 16)
+ *   sig = HMAC_SHA256(msg, TELEGRAM_LINK_SECRET).hex().slice(0, 20)  // 80 бит
  *   token = `${msg}_${sig}`
  * Никакой бинарной упаковки — только строки, чтобы TS и Python совпадали байт-в-байт.
  *
@@ -19,7 +19,10 @@
 import { createHmac } from "node:crypto";
 
 const TTL_SECONDS = 30 * 60; // токен живёт 30 минут
-const SIG_LEN = 16;
+// 20 hex = 80 бит. Максимум, влезающий в 64-символьный лимит start-параметра
+// Telegram (полные 128 бит/32 hex дали бы ~74 символа). ОБЯЗАН совпадать с
+// apps/worker/app/telegram_link.py::_SIG_LEN.
+const SIG_LEN = 20;
 
 /**
  * Возвращает подписанный токен для ?start=, либо null если секрет не задан

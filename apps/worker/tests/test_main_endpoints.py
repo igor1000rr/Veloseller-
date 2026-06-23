@@ -28,12 +28,12 @@ TELEGRAM_LINK_TEST_SECRET = "test-link-secret"
 def _mint_link_token(seller_id: str, ttl: int = 1800, secret: str = TELEGRAM_LINK_TEST_SECRET) -> str:
     """Генерит валидный подписанный токен привязки — как apps/web/lib/telegram-link.ts.
 
-    Формат: <uuidHex32>_<expHex>_<sigHex16>, sig = HMAC_SHA256(msg, secret)[:16].
+    Формат: <uuidHex32>_<expHex>_<sigHex20>, sig = HMAC_SHA256(msg, secret)[:20] (80 бит).
     """
     uuid_hex = seller_id.replace("-", "").lower()
     exp_hex = format(int(time.time()) + ttl, "x")
     msg = f"{uuid_hex}_{exp_hex}"
-    sig = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()[:16]
+    sig = hmac.new(secret.encode(), msg.encode(), hashlib.sha256).hexdigest()[:20]
     return f"{msg}_{sig}"
 
 
@@ -323,8 +323,47 @@ class TestTelegramWebhook:
 
     def test_start_with_valid_signed_token_links_account(self):
         mock_sb = MagicMock()
-        mock_sb.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock(
+        # bind идёт через update().eq().is_(null).execute() — single-use guard.
+        mock_sb.table.return_value.update.return_value.eq.return_value.is_.return_value.execute.return_value = MagicMock(
             data=[{"id": VALID_UUID, "telegram_chat_id": "777"}]
+        )
+        token = _mint_link_token(VALID_UUID)
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.telegram.send_message", return_value=True):
+            r = client.post(
+                "/telegram/webhook",
+                json={"message": {"text": f"/start {token}", "chat": {"id": 777}}},
+                headers=TELEGRAM_TEST_HEADERS,
+            )
+        assert r.status_code == 200
+        assert r.json()["linked"] is True
+
+    def test_start_rebind_to_different_chat_rejected(self):
+        """SECURITY single-use: аккаунт, уже привязанный к ДРУГОМУ чату, не
+        переключается перехваченной deep-ссылкой (update по IS NULL → 0 строк)."""
+        mock_sb = MagicMock()
+        mock_sb.table.return_value.update.return_value.eq.return_value.is_.return_value.execute.return_value = MagicMock(data=[])
+        # текущий привязанный чат — ДРУГОЙ (999), а /start пришёл с 777
+        mock_sb.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{"telegram_chat_id": "999"}]
+        )
+        token = _mint_link_token(VALID_UUID)
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.telegram.send_message", return_value=True):
+            r = client.post(
+                "/telegram/webhook",
+                json={"message": {"text": f"/start {token}", "chat": {"id": 777}}},
+                headers=TELEGRAM_TEST_HEADERS,
+            )
+        assert r.status_code == 200
+        assert r.json()["linked"] is False
+
+    def test_start_reconfirm_same_chat_idempotent(self):
+        """Повтор /start тем же чатом по уже привязанному аккаунту — идемпотентный успех."""
+        mock_sb = MagicMock()
+        mock_sb.table.return_value.update.return_value.eq.return_value.is_.return_value.execute.return_value = MagicMock(data=[])
+        mock_sb.table.return_value.select.return_value.eq.return_value.limit.return_value.execute.return_value = MagicMock(
+            data=[{"telegram_chat_id": "777"}]
         )
         token = _mint_link_token(VALID_UUID)
         with patch("app.main.get_supabase", return_value=mock_sb), \

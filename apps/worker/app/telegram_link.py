@@ -5,14 +5,21 @@
 токен, который умеет выдать только веб (тот же TELEGRAM_LINK_SECRET).
 
 Формат токена (только hex + '_', влезает в 64-символьный лимит start-параметра):
-    <uuidHex32>_<expHex>_<sigHex16>
+    <uuidHex32>_<expHex>_<sigHex20>
 где
     uuidHex32 — seller_id без дефисов, lowercase (32 hex)
-    expHex    — unix-время истечения в hex (lowercase, переменная длина)
-    sigHex16  — HMAC_SHA256("<uuidHex32>_<expHex>", TELEGRAM_LINK_SECRET), первые 16 hex
+    expHex    — unix-время истечения в hex (lowercase, переменная длина, ~8)
+    sigHex20  — HMAC_SHA256("<uuidHex32>_<expHex>", TELEGRAM_LINK_SECRET), первые 20 hex
+
+Подпись — 20 hex = 80 бит. Раньше было 16 hex (64 бита); подняли до максимума,
+который ещё влезает в 64-символьный лимит start-параметра Telegram с запасом
+(32+1+~8+1+20 ≈ 62). Полные 128 бит (32 hex) в hex-формат НЕ влезают (вышло бы
+~74 символа), для этого пришлось бы менять кодировку на base64url — не стали ради
+совместимости. Брутфорс 2^80 за nginx-рейтлимитом нереален; реальный риск (replay
+перехваченной ссылки) закрывается single-use-привязкой в main.telegram_webhook.
 
 Алгоритм ОБЯЗАН совпадать с apps/web/lib/telegram-link.ts (тот же секрет,
-та же ASCII-строка, тот же HMAC-SHA256, та же обрезка до 16 hex). Никакой
+та же ASCII-строка, тот же HMAC-SHA256, та же обрезка до 20 hex). Никакой
 бинарной упаковки — только строковые операции, чтобы TS и Python давали
 идентичный результат.
 """
@@ -25,8 +32,8 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
-_TOKEN_RE = re.compile(r"^([0-9a-f]{32})_([0-9a-f]{1,12})_([0-9a-f]{16})$")
-_SIG_LEN = 16
+_TOKEN_RE = re.compile(r"^([0-9a-f]{32})_([0-9a-f]{1,12})_([0-9a-f]{20})$")
+_SIG_LEN = 20
 
 
 def verify_telegram_link_token(token: str) -> Optional[str]:
