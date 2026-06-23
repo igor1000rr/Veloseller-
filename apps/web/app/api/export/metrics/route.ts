@@ -217,7 +217,12 @@ export async function GET(req: NextRequest) {
         .gt("tvelo_metrics.stockout_days", 0)
         .gt("tvelo_metrics.adjusted_velocity", 0);
     } else if (dashFilter === "dead_inventory") {
-      query = query.gt("tvelo_metrics.coverage_days", effectiveThreshold!);
+      // Тот же 2-веточный предикат, что и в списке (skus/page.tsx): coverage > порог
+      // ИЛИ «мёртвый по скорости». Иначе экспорт ≠ список (нарушался бы коммент роута).
+      query = query.or(
+        `coverage_days.gt.${effectiveThreshold},and(adjusted_velocity.eq.0,current_stock.gt.0,in_stock_days.gte.30)`,
+        { foreignTable: "tvelo_metrics" },
+      );
     } else if (dashFilter === "oos") {
       query = query
         .eq("tvelo_metrics.current_stock", 0)

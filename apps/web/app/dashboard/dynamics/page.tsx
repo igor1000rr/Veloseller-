@@ -142,6 +142,8 @@ export default async function DynamicsPage({ searchParams }: {
       (new Date(r.period_end).getTime() - new Date(r.period_start).getTime()) / 86400_000,
     );
     if (Math.abs(winDiff - WINDOW_DIFF_DAYS) > 1) continue;
+    const v = Number(r.adjusted_velocity);
+    if (!Number.isFinite(v)) continue; // один NaN отравил бы среднее бакета → polyline исчезал
     const bucket = bucketize(r.period_end, period);
     allBuckets.add(bucket);
 
@@ -151,8 +153,8 @@ export default async function DynamicsPage({ searchParams }: {
       byProduct.set(r.product_id, entry);
     }
     const vels = entry.byBucket.get(bucket);
-    if (vels) vels.push(Number(r.adjusted_velocity));
-    else entry.byBucket.set(bucket, [Number(r.adjusted_velocity)]);
+    if (vels) vels.push(v);
+    else entry.byBucket.set(bucket, [v]);
   }
 
   const sortedBuckets = Array.from(allBuckets).sort();

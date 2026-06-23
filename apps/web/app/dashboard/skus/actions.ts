@@ -210,8 +210,9 @@ export async function saveSellerTaxRate(rate: number | null): Promise<{ ok: bool
     if (error) {
       return { ok: false, error: dbError(error) };
     }
-    // Дефолт налога читает карточка SKU (юнит-экономика).
+    // Дефолт налога читает карточка SKU (юнит-экономика) и форма на cost-import.
     revalidatePath("/dashboard/skus");
+    revalidatePath("/dashboard/skus/cost-import");
     return { ok: true };
   } catch (e: any) {
     return { ok: false, error: e?.message ?? "unknown error" };

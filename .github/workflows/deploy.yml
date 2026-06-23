@@ -37,9 +37,11 @@ jobs:
             set -euo pipefail
             cd /opt/veloseller
 
-            echo "→ git pull"
+            echo "→ checkout проверенного CI-коммита (а не текущего origin/main)"
             git fetch origin main
-            git reset --hard origin/main
+            # Пиним деплой на ИМЕННО тот SHA, что прошёл CI: иначе второй push,
+            # прилетевший пока деплой в очереди, выкатил бы непроверенный коммит.
+            git reset --hard ${{ github.event.workflow_run.head_sha }}
 
             echo "→ chmod +x для всех скриптов деплоя"
             chmod +x /opt/veloseller/deploy/*.sh || true
