@@ -16,7 +16,7 @@ set -euo pipefail
 
 DOMAIN="veloseller.ru"
 WWW_DOMAIN="www.veloseller.ru"
-EMAIL="igor1000rr@gmail.com"
+EMAIL="${CERTBOT_EMAIL:-admin@veloseller.ru}"
 REPO_DIR="${REPO_DIR:-/opt/veloseller}"
 
 log() { echo "[$(date -Iseconds)] $*"; }

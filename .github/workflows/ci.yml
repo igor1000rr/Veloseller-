@@ -78,6 +78,10 @@ jobs:
           ISSUES=$(grep -cE "Warning:|Error:" /tmp/lint.log || true)
           echo "## ESLint: ${ISSUES} замечаний" >> "$GITHUB_STEP_SUMMARY"
           exit $STATUS
+      # next build — ловим сломанную прод-сборку В CI, а не на живом сервере во
+      # время деплоя (отката нет, см. deploy.yml). Сборка не требует рантайм-env.
+      - name: build (next build)
+        run: npm run build
       - name: vitest + coverage
         run: npm run test:coverage
       - name: Coverage summary в GitHub Actions Summary

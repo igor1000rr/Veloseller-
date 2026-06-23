@@ -4,8 +4,7 @@
   "private": true,
   "description": "Veloseller — inventory intelligence for ecommerce sellers",
   "workspaces": [
-    "apps/*",
-    "packages/*"
+    "apps/*"
   ],
   "scripts": {
     "dev:web": "npm run dev -w @veloseller/web",

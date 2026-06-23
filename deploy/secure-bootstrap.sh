@@ -7,7 +7,7 @@
 #
 # Запуск от root:
 #   export ADMIN_SSH_KEY="ssh-ed25519 AAAA... ..."
-#   export ADMIN_IP="37.214.205.51"
+#   export ADMIN_IP="<твой_белый_IP>"
 #   curl -sSL https://raw.githubusercontent.com/igor1000rr/Veloseller-/main/deploy/secure-bootstrap.sh | bash
 set -euo pipefail
 
@@ -72,10 +72,10 @@ chown root:root /root/.ssh /root/.ssh/authorized_keys
 chmod 700 /root/.ssh
 chmod 600 /root/.ssh/authorized_keys
 
-log "Даём veloseller NOPASSWD sudo (без пароля)…"
-echo 'veloseller ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/veloseller
-chmod 440 /etc/sudoers.d/veloseller
-visudo -cf /etc/sudoers.d/veloseller || err "sudoers невалидный"
+# sudo для veloseller выдаём УЗКИМ списком команд (deploy/sudoers.veloseller),
+# а НЕ `NOPASSWD: ALL`. Файл лежит в репо → ставим ниже, ПОСЛЕ клонирования (шаг 8).
+# Раньше тут был полный беспарольный root — при компрометации SSH-ключа Actions
+# или RCE в Next.js (бежит под этим же юзером) это давало полный контроль над VPS.
 
 # ============ 5. fail2ban ============
 log "Настраиваем fail2ban…"
@@ -124,6 +124,13 @@ else
 fi
 chown -R veloseller:veloseller /opt/veloseller
 
+# ============ 8b. Узкий sudoers для деплоя ============
+# Только нужные деплою команды (finalize.sh, systemctl restart кластера, chown),
+# а не NOPASSWD: ALL. Файл — из репо, проверяем visudo перед установкой.
+log "Ставим узкий sudoers для veloseller…"
+install -m 440 -o root -g root /opt/veloseller/deploy/sudoers.veloseller /etc/sudoers.d/veloseller
+visudo -cf /etc/sudoers.d/veloseller || err "sudoers невалидный"
+
 # ============ 9. nginx ============
 log "Настраиваем nginx…"
 cp /opt/veloseller/deploy/nginx-secure.conf /etc/nginx/sites-available/veloseller
@@ -154,7 +161,7 @@ chmod 600 "$SECRETS_FILE"
 
 echo
 echo "=================================================="
-log "✅ Bootstrap завершён — без отключения парольного входа."
+log "✅ Bootstrap завершён — без отключения парольного входа."
 echo
 echo "Секреты сохранены в $SECRETS_FILE (читать только от root)."
 echo

@@ -41,11 +41,11 @@ ssh veloseller@<IP>
 
 ## Шаг 4. Supabase секреты
 
-Dashboard: https://supabase.com/dashboard/project/pptetnhdmxehijslbsrx/settings/api-keys
+Dashboard: https://supabase.com/dashboard/project/<project-ref>/settings/api-keys
 
 Возьми:
-- `publishable_key` → `sb_publishable_J4r40...`
-- `secret_key` → `sb_secret_x9Hal...`
+- `publishable_key` → `sb_publishable_…`
+- `secret_key` → `sb_secret_…`
 
 ## Шаг 5. Создай .env-файлы (под veloseller)
 
