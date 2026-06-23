@@ -19,5 +19,6 @@
   "settings.telegram.manualHintBefore": "Или введите Chat ID вручную. Получить можно через ",
   "settings.telegram.manualHintAfter": ".",
   "settings.saved": "Сохранено",
-  "settings.saveError": "Ошибка: {error}"
+  "settings.saveError": "Ошибка: {error}",
+  "settings.network": "сеть недоступна"
 }

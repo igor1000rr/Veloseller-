@@ -39,24 +39,30 @@ export default function SettingsForm({ initial, telegramDeeplink, email }: {
     e.preventDefault();
     setSaving(true);
     setMsg(null);
-    const res = await fetch("/api/notifications", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        display_name: displayName || null,
-        timezone,
-        telegram_chat_id: chatId || null,
-        notify_email: notifyEmail,
-        notify_telegram: notifyTelegram,
-      }),
-    });
-    setSaving(false);
-    if (res.ok) {
-      setMsg(t("settings.saved"));
-      router.refresh();
-    } else {
-      const data = await res.json().catch(() => ({}));
-      setMsg(t("settings.saveError", { error: data.error ?? res.statusText }));
+    try {
+      const res = await fetch("/api/notifications", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          display_name: displayName || null,
+          timezone,
+          telegram_chat_id: chatId || null,
+          notify_email: notifyEmail,
+          notify_telegram: notifyTelegram,
+        }),
+      });
+      if (res.ok) {
+        setMsg(t("settings.saved"));
+        router.refresh();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        setMsg(t("settings.saveError", { error: data.error ?? res.statusText }));
+      }
+    } catch {
+      // Сетевой сбой: без catch промис reject оставлял бы кнопку в «Сохраняю…».
+      setMsg(t("settings.saveError", { error: t("settings.network") }));
+    } finally {
+      setSaving(false);
     }
   }
 

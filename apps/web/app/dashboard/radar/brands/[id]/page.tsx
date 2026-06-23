@@ -62,10 +62,13 @@ export default async function BrandDetailPage({
   const perQueryHistory: Record<string, { ym: string; freq: number }[]> = {};
 
   if (queryIds.length > 0) {
+    // Рендерится ~12 месяцев — не тянем всю историю (без флора рос бы безгранично).
+    const minYear = new Date().getFullYear() - 1;
     const { data: history } = await sb
       .from("radar_query_history")
       .select("query_id, period_year, period_month, frequency")
       .in("query_id", queryIds)
+      .gte("period_year", minYear)
       .order("period_year", { ascending: true })
       .order("period_month", { ascending: true });
 

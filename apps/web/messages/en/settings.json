@@ -19,5 +19,6 @@
   "settings.telegram.manualHintBefore": "Or enter the Chat ID manually. Get it via ",
   "settings.telegram.manualHintAfter": ".",
   "settings.saved": "Saved",
-  "settings.saveError": "Error: {error}"
+  "settings.saveError": "Error: {error}",
+  "settings.network": "network unavailable"
 }
