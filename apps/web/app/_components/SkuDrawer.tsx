@@ -56,7 +56,7 @@ export default function SkuDrawer() {
   return (
     <div className="fixed inset-0 z-[60]">
       <div className="absolute inset-0 bg-ink/40 backdrop-blur-sm" onClick={() => setId(null)} aria-hidden />
-      <div className="absolute inset-y-0 right-0 flex w-full max-w-[1200px] flex-col bg-bg shadow-2xl sm:w-[82%] lg:w-[76%]">
+      <div role="dialog" aria-modal="true" aria-label={L.title} className="absolute inset-y-0 right-0 flex w-full max-w-[1200px] flex-col bg-bg shadow-2xl sm:w-[82%] lg:w-[76%]">
         <div className="flex items-center justify-between border-b border-line bg-paper px-4 py-2.5">
           <span className="font-mono text-[10px] uppercase tracking-widest text-ink-hush">{L.title}</span>
           <div className="flex items-center gap-3">

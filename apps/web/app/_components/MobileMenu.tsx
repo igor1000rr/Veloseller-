@@ -42,6 +42,9 @@ export default function MobileMenu({ isAuthed = false }: { isAuthed?: boolean })
            поэтому меню выглядело "прозрачным" и контент за ним просвечивал. Теперь
            bg-paper (белый) + inline-style fallback на случай проблем с Tailwind. */
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={t("landing.menu.open")}
           className="fixed inset-0 z-50 md:hidden bg-paper flex flex-col slide-down"
           style={{ backgroundColor: "#ffffff" }}
         >

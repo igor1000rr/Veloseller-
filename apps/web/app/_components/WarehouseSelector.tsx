@@ -67,6 +67,8 @@ export default function WarehouseSelector({
       <button
         onClick={() => hasMultiple && setOpen(!open)}
         disabled={!hasMultiple || pending}
+        aria-haspopup="listbox"
+        aria-expanded={open}
         className={`${visibilityCls} ${forceVisible ? "justify-between" : ""} items-center gap-1.5 px-2 py-1.5 rounded-md border transition min-h-[32px] ${
           hasMultiple
             ? "border-line bg-paper text-ink hover:border-lime-deep/40 cursor-pointer"
