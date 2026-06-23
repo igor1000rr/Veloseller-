@@ -57,7 +57,8 @@ export default async function BrandDetailPage({
   //    queryIds, потом раздаём в два бакета:
   //    - monthlyTotals — для большого графика (sum по бренду)
   //    - perQueryHistory — для per-фраза sparkline в таблице
-  const queryIds = queries.map((q: any) => q.id);
+  // q.id у вьюхи типизирован nullable — отфильтровываем null, чтобы queryIds был string[].
+  const queryIds = queries.map((q) => q.id).filter((x): x is string => x != null);
   let monthlyTotals: { ym: string; total: number }[] = [];
   const perQueryHistory: Record<string, { ym: string; freq: number }[]> = {};
 
@@ -73,7 +74,7 @@ export default async function BrandDetailPage({
       .order("period_month", { ascending: true });
 
     const totalBucket = new Map<string, number>();
-    for (const row of (history ?? []) as any[]) {
+    for (const row of history ?? []) {
       const key = `${row.period_year}-${String(row.period_month).padStart(2, "0")}`;
       const freq = Number(row.frequency ?? 0);
       // Агрегат для большого графика
@@ -90,10 +91,10 @@ export default async function BrandDetailPage({
 
   // 4. Сводки по статусам
   const byStatus = {
-    early: queries.filter((q: any) => q.status === "early").length,
-    new: queries.filter((q: any) => q.status === "new").length,
-    watching: queries.filter((q: any) => q.status === "watching").length,
-    archived: queries.filter((q: any) => q.status === "archived").length,
+    early: queries.filter((q) => q.status === "early").length,
+    new: queries.filter((q) => q.status === "new").length,
+    watching: queries.filter((q) => q.status === "watching").length,
+    archived: queries.filter((q) => q.status === "archived").length,
   };
 
   const lastDays = brand.last_wordstat_at

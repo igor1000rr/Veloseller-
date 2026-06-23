@@ -87,17 +87,19 @@ describe("StoreCharts: DeadInventoryChart", () => {
   });
 
   it("при ≥2 точках ComposedChart", () => {
+    const base = { warehouse_health_score: null, lost_revenue: null, total_inventory_value: null };
     const { container } = render(<DeadInventoryChart history={[
-      { period_end: "2026-05-01", dead_inventory_sku_count: 1, store_frozen_inventory_value: 100 },
-      { period_end: "2026-05-02", dead_inventory_sku_count: 2, store_frozen_inventory_value: 200 },
+      { ...base, period_end: "2026-05-01", dead_inventory_sku_count: 1, store_frozen_inventory_value: 100 },
+      { ...base, period_end: "2026-05-02", dead_inventory_sku_count: 2, store_frozen_inventory_value: 200 },
     ]} />);
     expect(container.firstChild).toBeTruthy();
   });
 
   it("null/undefined → 0", () => {
+    const base = { warehouse_health_score: null, lost_revenue: null, total_inventory_value: null };
     const { container } = render(<DeadInventoryChart history={[
-      { period_end: "2026-05-01", dead_inventory_sku_count: 1, store_frozen_inventory_value: null },
-      { period_end: "2026-05-02", dead_inventory_sku_count: 2 },
+      { ...base, period_end: "2026-05-01", dead_inventory_sku_count: 1, store_frozen_inventory_value: null },
+      { ...base, period_end: "2026-05-02", dead_inventory_sku_count: 2 },
     ]} />);
     expect(container.firstChild).toBeTruthy();
   });

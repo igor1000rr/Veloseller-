@@ -2,7 +2,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import RadarTabs from "./RadarTabs";
-import RadarTable from "./RadarTable";
+import RadarTable, { type QueryRow } from "./RadarTable";
 import { OnboardingBlock } from "./OnboardingBlock";
 
 export const dynamic = "force-dynamic";
@@ -77,12 +77,15 @@ export default async function RadarPage({ searchParams }: {
   const excludedBrands = brands.filter(b => b.status === "excluded");
 
   const tabCounts: Record<RadarTab, number> = { new: 0, watching: 0, archived: 0 };
-  for (const row of (countsRes.data ?? []) as any[]) {
+  for (const row of countsRes.data ?? []) {
     const status = row.status === "early" ? "new" : row.status;
     if (status in tabCounts) tabCounts[status as RadarTab]++;
   }
 
-  let queries: any[] = [];
+  // radar_queries_view — вьюха; postgrest типизирует её колонки nullable (вьюхи не
+  // выражают NOT NULL), хотя для строк своего seller_id поля заполнены. Один граничный
+  // каст к контракту RadarTable (как в SKU-листе) вместо any[].
+  let queries: QueryRow[] = [];
   if (hasAccess && approvedBrands.length > 0) {
     const statuses = tab === "new" ? ["new", "early"] : [tab];
     let query = supabase
@@ -94,7 +97,7 @@ export default async function RadarPage({ searchParams }: {
       .limit(500);
     if (brandFilter) query = query.eq("brand_id", brandFilter);
     const { data } = await query;
-    queries = data ?? [];
+    queries = (data ?? []) as unknown as QueryRow[];
   }
 
   return (

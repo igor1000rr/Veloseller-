@@ -115,7 +115,8 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
   }
   const chartData = Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date));
 
-  const changelogByDate: Record<string, any[]> = {};
+  type ChangelogRow = NonNullable<typeof changelog>[number];
+  const changelogByDate: Record<string, ChangelogRow[]> = {};
   for (const e of (changelog ?? [])) {
     const day = e.event_date as string;
     if (!changelogByDate[day]) changelogByDate[day] = [];
@@ -343,7 +344,7 @@ export default async function SkuDetailPage({ params }: { params: Promise<{ id: 
           <p className="text-sm text-ink-muted">{t("sku.detail.events.empty")}</p>
         ) : (
           <ul className="divide-y divide-line">
-            {visibleEvents.map((e: any, i: number) => (
+            {visibleEvents.map((e, i) => (
               <li key={i} className="py-1 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 text-xs">
                 <div className="flex items-center gap-2 sm:gap-3 shrink-0">
                   <span className="text-ink-hush text-[11px] whitespace-nowrap sm:w-20 font-mono">

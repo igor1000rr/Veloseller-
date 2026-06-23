@@ -224,7 +224,7 @@ export default async function DynamicsPage({ searchParams }: {
     const params = new URLSearchParams();
     if (p !== "day") params.set("period", p);
     if (search) params.set("q", search);
-    return `/dashboard/dynamics${params.toString() ? `?${params.toString()}` : ""}` as any;
+    return `/dashboard/dynamics${params.toString() ? `?${params.toString()}` : ""}`;
   };
 
   const exportQs = new URLSearchParams();

@@ -8,6 +8,9 @@ type HistoryPoint = {
   lost_revenue: number | null;
   total_inventory_value: number | null;
   potential_revenue?: number | null;
+  // читаются только в DeadInventoryChart (buildChartHistory тянет их из выборки)
+  dead_inventory_sku_count?: number | null;
+  store_frozen_inventory_value?: number | null;
 };
 
 type SegmentRow = { name: string; value: number };
@@ -120,7 +123,7 @@ export function SegmentPie({ distribution }: { distribution: Record<string, numb
 }
 
 
-export function DeadInventoryChart({ history, currency = "RUB" }: { history: any[]; currency?: string }) {
+export function DeadInventoryChart({ history, currency = "RUB" }: { history: HistoryPoint[]; currency?: string }) {
   const symbol = CURRENCY_SYMBOLS[currency] ?? currency;
   const data = history.slice().reverse().map(p => ({
     date: new Date(p.period_end).toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" }),

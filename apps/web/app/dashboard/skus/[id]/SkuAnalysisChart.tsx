@@ -316,7 +316,7 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
         <Legend wrapperStyle={{ fontSize: 12 }} iconType="circle" />
 
         {/* OOS-полосы (availability=0) — по нижней секции, вровень с остатками */}
-        <Area yAxisId="band" type="step" dataKey={(d: any) => d.availability === 0 ? STOCK_BAND : 0}
+        <Area yAxisId="band" type="step" dataKey={(d: ChartPoint) => d.availability === 0 ? STOCK_BAND : 0}
               fill="#fecaca" stroke="none" name={t("sku.chart.oosLegend")} isAnimationActive={false} />
 
         {/* Остаток — бары по нижней секции (своя скрытая шкала) */}
@@ -328,12 +328,12 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
 
         {/* Цена со скидками (факт.) — фиолетовая пунктирная (как раньше выглядела линия цены),
             фолбэк на price для исторических точек до появления раздельных полей (#3) */}
-        <Line yAxisId="price" type="monotone" dataKey={(d: any) => d.marketingPrice ?? d.price} stroke="#7c3aed"
+        <Line yAxisId="price" type="monotone" dataKey={(d: ChartPoint) => d.marketingPrice ?? d.price} stroke="#7c3aed"
               strokeWidth={2} strokeDasharray="4 4" dot={false} name={L.marketingPrice} connectNulls />
         {/* Ваша цена (номинал, что ставит продавец) — красная сплошная (Игорь 20.06:
             оранжевый отдали под «События», янтарный с ним путался). Расхождение с
             фиолетовой = манипуляция маркетплейса скидками (#3) */}
-        <Line yAxisId="price" type="monotone" dataKey={(d: any) => d.sellerPrice ?? d.price} stroke="#dc2626"
+        <Line yAxisId="price" type="monotone" dataKey={(d: ChartPoint) => d.sellerPrice ?? d.price} stroke="#dc2626"
               strokeWidth={1.5} dot={false} name={L.sellerPrice} connectNulls />
         {/* Пункт легенды «События» (оранжевый): оверлей рисуется ReferenceArea/ReferenceLine
             ниже и в легенду не попадает — добавляем фантомной линией без данных. */}

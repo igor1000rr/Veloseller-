@@ -201,7 +201,7 @@ export default async function DashboardOverview({ searchParams }: {
     source: "holiday" as const,
   }));
 
-  const skusLink = (filter: string) => `/dashboard/skus?period=${period}&filter=${filter}` as any;
+  const skusLink = (filter: string) => `/dashboard/skus?period=${period}&filter=${filter}`;
 
   // Подпись для тултипов графиков (поверх warehouse vs store fallback).
   const trendTooltipSuffix = usingFallback
@@ -403,7 +403,8 @@ export default async function DashboardOverview({ searchParams }: {
           title={t("dashboard.chart.segments.title")}
           tooltip={t("dashboard.chart.segments.tip")}
         >
-          <SegmentPie distribution={wm?.demand_pattern_distribution as any} />
+          {/* demand_pattern_distribution — Json-колонка; рантайм-форма это {pattern: count}. */}
+          <SegmentPie distribution={(wm?.demand_pattern_distribution ?? null) as Record<string, number> | null} />
         </ChartCard>
       </div>
 

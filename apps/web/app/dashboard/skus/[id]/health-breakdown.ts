@@ -14,7 +14,16 @@ import { t } from "@/lib/i18n";
 
 export type BreakdownRow = { label: string; value: string; tone?: "bad" | "warn" | "neutral" };
 
-export function buildHealthBreakdown(m: any): BreakdownRow[] {
+/** Подмножество полей tvelo_metrics, нужное для breakdown'ов (всё nullable — код это чекает). */
+export type BreakdownMetric = {
+  in_stock_days?: number | null;
+  stockout_days?: number | null;
+  coverage_days?: number | null;
+  confidence_score?: number | null;
+  confidence_breakdown?: unknown;
+};
+
+export function buildHealthBreakdown(m: BreakdownMetric | null | undefined): BreakdownRow[] {
   if (!m) return [];
   const rows: BreakdownRow[] = [];
   const periodDays = Number(m.in_stock_days ?? 0) + Number(m.stockout_days ?? 0);
@@ -54,9 +63,10 @@ export function buildHealthBreakdown(m: any): BreakdownRow[] {
  *
  * Каждое значение — это уже процент штрафа (например repl=14.29 = -14.29% от initial).
  */
-export function buildConfidenceBreakdown(m: any): BreakdownRow[] {
+export function buildConfidenceBreakdown(m: BreakdownMetric | null | undefined): BreakdownRow[] {
   const cb = m?.confidence_breakdown;
   if (!cb || typeof cb !== "object") return [];
+  const obj = cb as Record<string, unknown>;
   const rows: BreakdownRow[] = [];
   const labels: Array<[string, string]> = [
     ["replenishment_like", t("sku.conf.replenishment")],
@@ -65,7 +75,7 @@ export function buildConfidenceBreakdown(m: any): BreakdownRow[] {
     ["low_history",        t("sku.conf.lowHistory")],
   ];
   for (const [key, label] of labels) {
-    const v = Number(cb[key] ?? 0);
+    const v = Number(obj[key] ?? 0);
     if (v > 0) {
       rows.push({ label, value: `−${v.toFixed(1)}%`, tone: "warn" });
     }

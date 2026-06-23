@@ -5,7 +5,7 @@ import type { RadarTab } from "./page";
 import { actionToggleFavorite, actionArchiveQuery, actionUnarchiveQuery } from "./actions";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 
-type QueryRow = {
+export type QueryRow = {
   id: string;
   brand_id: string;
   brand_name: string;
