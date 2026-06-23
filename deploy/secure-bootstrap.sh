@@ -131,6 +131,15 @@ log "Ставим узкий sudoers для veloseller…"
 install -m 440 -o root -g root /opt/veloseller/deploy/sudoers.veloseller /etc/sudoers.d/veloseller
 visudo -cf /etc/sudoers.d/veloseller || err "sudoers невалидный"
 
+# ============ 8c. Hardening прав deploy/ (root:root) ============
+# deploy/ → root:root, чтобы RCE под veloseller не мог переписать finalize.sh и
+# эскалироваться через `sudo finalize.sh`. Раньше это был ручной шаг «как-нибудь
+# потом» (и обычно не делался) — теперь выполняется при провижене ПО УМОЛЧАНИЮ.
+# ЦЕНА: обновления deploy/*.sh не катятся git-pull'ом автоматически (нужно вручную
+# от root — инструкция в harden-permissions.sh).
+log "Hardening прав deploy/ (root:root)…"
+bash /opt/veloseller/deploy/harden-permissions.sh
+
 # ============ 9. nginx ============
 log "Настраиваем nginx…"
 cp /opt/veloseller/deploy/nginx-secure.conf /etc/nginx/sites-available/veloseller

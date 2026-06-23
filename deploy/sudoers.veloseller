@@ -5,21 +5,21 @@
 # (он бежит под этим же юзером). Теперь — только узкий набор команд,
 # необходимый деплою.
 #
-# ВАЖНО: для полной защиты файлы /opt/veloseller/deploy/*.sh должны
-# принадлежать root:root и быть не editable для veloseller. Сейчас
-# finalize.sh редактируется юзером (потому что `chown -R veloseller`
-# в finalize.sh выдаёт владение всем каталогом), и атакующий, получив
-# RCE в Next.js, может переписать finalize.sh и запустить его через
-# sudo. Это TODO для следующего раунда hardening:
+# РАЗДЕЛЕНИЕ ПРИВИЛЕГИЙ (закрыто). /opt/veloseller/deploy/ принадлежит root:root —
+# secure-bootstrap.sh вызывает harden-permissions.sh при провижене (а не «как-нибудь
+# потом»). Поэтому RCE под veloseller НЕ может переписать finalize.sh и эскалироваться
+# через `sudo finalize.sh`.
 #
-#   sudo chown -R root:root /opt/veloseller/deploy
-#   sudo chmod 755 /opt/veloseller/deploy /opt/veloseller/deploy/*.sh
-#   (+ убрать chown в finalize.sh так чтобы deploy/ не перезатирался)
+# КРИТИЧНО: правило chown НИЖЕ сужено до apps/ и supabase/. Раньше было
+# `chown -R … /opt/veloseller` (весь корень, включая deploy/) — это сводило защиту
+# на нет: атакующий мог `sudo chown -R veloseller /opt/veloseller` → вернуть себе
+# владение deploy/ → переписать finalize.sh → `sudo finalize.sh` → root. Теперь
+# переовнить deploy/ этим правилом нельзя.
 #
 # Список команд:
-#  - finalize.sh — основной скрипт деплоя
+#  - finalize.sh — основной скрипт деплоя (файл root-owned, неперезаписываем)
 #  - systemctl daemon-reload + restart/is-active сервисов и web-инстансов кластера
-#  - chown /opt/veloseller (нужен для смены владельца после git pull)
+#  - chown apps/ и supabase/ — смена владельца app-каталогов после git pull (НЕ deploy/, НЕ корень)
 
 veloseller ALL=(ALL) NOPASSWD: /usr/bin/bash /opt/veloseller/deploy/finalize.sh
 veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
@@ -33,4 +33,5 @@ veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart veloseller-web@3003
 veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active veloseller-web@3001
 veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active veloseller-web@3002
 veloseller ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active veloseller-web@3003
-veloseller ALL=(ALL) NOPASSWD: /bin/chown -R veloseller\:veloseller /opt/veloseller
+veloseller ALL=(ALL) NOPASSWD: /bin/chown -R veloseller\:veloseller /opt/veloseller/apps
+veloseller ALL=(ALL) NOPASSWD: /bin/chown -R veloseller\:veloseller /opt/veloseller/supabase

@@ -6,7 +6,10 @@ services:
     container_name: veloseller-worker
     restart: unless-stopped
     ports:
-      - "8001:8000"
+      # ТОЛЬКО loopback: worker держит service-role-ключ и доверяет seller_id из
+      # запроса (единственный заслон — X-Worker-Secret). "8001:8000" биндил
+      # 0.0.0.0 (Docker пишет свои iptables в обход ufw) → API торчал в сеть.
+      - "127.0.0.1:8001:8000"
     environment:
       SUPABASE_URL: ${SUPABASE_URL}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
