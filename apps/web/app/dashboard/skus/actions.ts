@@ -13,6 +13,20 @@ function dbError(e: { message?: string } | null): string {
 }
 
 /**
+ * Безопасно извлечь текст ошибки из unknown (catch теперь типизирован как unknown,
+ * а не any). Достаёт message из Error ИЛИ из объекта-ошибки (напр. PostgrestError —
+ * это plain object, не instanceof Error), сохраняя прежнюю детализацию.
+ */
+function errMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "object" && e !== null && "message" in e) {
+    const m = (e as { message?: unknown }).message;
+    if (typeof m === "string") return m;
+  }
+  return "unknown error";
+}
+
+/**
  * Server action для сохранения user_notes по SKU.
  *
  * Безопасность: RLS на products гарантирует что юзер может апдейтить только
@@ -51,8 +65,8 @@ export async function saveUserNotes(productId: string, notes: string): Promise<{
     // Освежить страницу SKU — заметка появится в таблице у других открытых табов
     revalidatePath("/dashboard/skus");
     return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "unknown error" };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }
 
@@ -83,8 +97,8 @@ export async function clearAllUserNotes(): Promise<{ ok: boolean; cleared?: numb
 
     revalidatePath("/dashboard/skus");
     return { ok: true, cleared: data?.length ?? 0 };
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "unknown error" };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }
 
@@ -135,8 +149,8 @@ export async function saveProductTags(
     }
     revalidatePath("/dashboard/skus");
     return { ok: true, tags: clean };
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "unknown error" };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }
 
@@ -177,8 +191,8 @@ export async function saveCostPrice(
     }
     revalidatePath("/dashboard/skus");
     return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "unknown error" };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }
 
@@ -214,8 +228,8 @@ export async function saveSellerTaxRate(rate: number | null): Promise<{ ok: bool
     revalidatePath("/dashboard/skus");
     revalidatePath("/dashboard/skus/cost-import");
     return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "unknown error" };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }
 
@@ -312,8 +326,8 @@ export async function createProductEvent(
     revalidatePath("/dashboard/skus");
     revalidatePath("/dashboard");
     return { ok: true, id: (data?.id as string) ?? undefined };
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "unknown error" };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }
 
@@ -344,8 +358,8 @@ export async function updateProductEvent(
     revalidatePath("/dashboard/skus");
     revalidatePath("/dashboard");
     return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "unknown error" };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }
 
@@ -365,7 +379,7 @@ export async function deleteProductEvent(id: string): Promise<{ ok: boolean; err
     revalidatePath("/dashboard/skus");
     revalidatePath("/dashboard");
     return { ok: true };
-  } catch (e: any) {
-    return { ok: false, error: e?.message ?? "unknown error" };
+  } catch (e) {
+    return { ok: false, error: errMessage(e) };
   }
 }

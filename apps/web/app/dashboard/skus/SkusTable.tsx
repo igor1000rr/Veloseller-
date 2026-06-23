@@ -11,6 +11,7 @@ import Link from "next/link";
 import { InfoTooltip } from "../../_components/InfoTooltip";
 import { NotesCell } from "./NotesCell";
 import { t } from "@/lib/i18n";
+import type { Tables } from "@/lib/database.types";
 
 /** Метрики, пересчитанные на лету за произвольный период (get_skus_period_metrics). */
 export type PeriodMetricsRow = {
@@ -25,6 +26,21 @@ export type PeriodMetricsRow = {
   lost_revenue: number;
 };
 
+/** Срез tvelo_metrics, который тянет SKU-лист встроенным join'ом (см. select в page.tsx). */
+export type SkuMetricSlice = Pick<
+  Tables<"tvelo_metrics">,
+  | "confirmed_velocity" | "adjusted_velocity" | "median_30d_velocity" | "confidence_score"
+  | "stockout_days" | "in_stock_days" | "coverage_days" | "current_stock"
+  | "current_price" | "inventory_segment" | "sku_health_score" | "underestimated_sku"
+  | "period_start" | "period_end"
+>;
+
+/** Строка SKU-листа: поля products + встроенный массив метрик (после фильтрации — 0..1 элемент). */
+export type SkuListRow = Pick<
+  Tables<"products">,
+  "product_id" | "sku" | "product_name" | "user_notes" | "brand" | "category" | "tags"
+> & { tvelo_metrics: SkuMetricSlice[] };
+
 export function SkusTable({
   rows,
   selectedName,
@@ -36,7 +52,7 @@ export function SkusTable({
   reorderDays,
   displayPeriodDays,
 }: {
-  rows: any[];
+  rows: SkuListRow[];
   selectedName: string | null;
   sparkData: Record<string, number[]>;
   salesByProduct: Record<string, number>;
@@ -110,8 +126,8 @@ export function SkusTable({
           </tr>
         </thead>
         <tbody className="divide-y divide-line">
-          {rows.map((p: any) => {
-            const m = (p.tvelo_metrics?.[0] ?? null) as any;
+          {rows.map((p) => {
+            const m = p.tvelo_metrics?.[0] ?? null;
             const override = periodMetrics?.get(p.product_id) ?? null;
 
             const adjVel = override

@@ -8,7 +8,7 @@ import { SkusFilters, type FilterRanges } from "./SkusFilters";
 import { SearchInput } from "./SearchInput";
 import { DashFilterChip } from "./DashFilterChip";
 import { ColumnsPicker } from "./ColumnsPicker";
-import { SkusTable, type PeriodMetricsRow } from "./SkusTable";
+import { SkusTable, type PeriodMetricsRow, type SkuListRow } from "./SkusTable";
 import { SkuAttributeFilters } from "./SkuAttributeFilters";
 import { t } from "@/lib/i18n";
 import { LOCALE } from "@/lib/features";
@@ -179,7 +179,7 @@ export default async function SkusPage({ searchParams }: {
     p_seller_id: user.id,
     p_connection_id: selected?.id ?? null,
   });
-  const facets = (facetsRows as any[] | null)?.[0];
+  const facets = facetsRows?.[0];
   const brandOptions: string[] = facets?.brands ?? [];
   const categoryOptions: string[] = facets?.categories ?? [];
   const tagOptions: string[] = facets?.tags ?? [];
@@ -189,7 +189,7 @@ export default async function SkusPage({ searchParams }: {
     p_connection_id: selected?.id ?? null,
     p_period_days: periodDays,
   });
-  const rangesRaw = (rangesRows as any[] | null)?.[0];
+  const rangesRaw = rangesRows?.[0];
   const filterRanges: FilterRanges = {
     stockMin: Number(rangesRaw?.stock_min ?? 0),
     stockMax: Number(rangesRaw?.stock_max ?? 0),
@@ -211,7 +211,7 @@ export default async function SkusPage({ searchParams }: {
       p_connection_id: selected?.id ?? null,
       p_kind: kind,
     });
-    concentrationIds = ((idsRows as any[] | null) ?? []).map((r: any) => r.product_id);
+    concentrationIds = (idsRows ?? []).map((r) => r.product_id);
   }
 
   let productsQuery = supabase
@@ -304,10 +304,15 @@ export default async function SkusPage({ searchParams }: {
   const lostFilterActiveButPostProcess =
     (lostMin !== null && lostMin > 0) || lostMax !== null;
 
-  const { data: products, count } = await productsQuery
+  const { data: productsRaw, count } = await productsQuery
     .order("sku").range(from, to);
 
-  const productIds = (products ?? []).map((p: any) => p.product_id);
+  // Встроенный select products↔tvelo_metrics!inner postgrest-js не выводит в тип
+  // (Relationships в собранном вручную database.types пусты — см. комментарий там).
+  // Одна граничная ассерта формы строки вместо россыпи `any` по обработке ниже.
+  const products = (productsRaw ?? []) as unknown as SkuListRow[];
+
+  const productIds = products.map((p) => p.product_id);
   const sparkData: Record<string, number[]> = {};
   if (productIds.length > 0) {
     // Спарклайн = последние 7 точек по 30-дневному окну. Раньше тянулась ВСЯ
@@ -342,8 +347,8 @@ export default async function SkusPage({ searchParams }: {
     }
   }
 
-  let filtered = (products ?? []).map((p: any) => {
-    const metrics = (p.tvelo_metrics as any[] | undefined) ?? [];
+  let filtered: SkuListRow[] = products.map((p) => {
+    const metrics = p.tvelo_metrics ?? [];
     const matchedMetric = metrics.find(m => {
       const len = Math.round((new Date(m.period_end).getTime() - new Date(m.period_start).getTime()) / 86400_000);
       return Math.abs(len - (periodDays - 1)) <= 1;
@@ -366,10 +371,10 @@ export default async function SkusPage({ searchParams }: {
       p_connection_id: selected?.id ?? null,
       p_period_start: overrideWindow.start,
       p_period_end: overrideWindow.end,
-      p_product_ids: filtered.map((p: any) => p.product_id),
+      p_product_ids: filtered.map((p) => p.product_id),
     });
     periodMetrics = new Map();
-    for (const r of (rpcRows ?? []) as any[]) {
+    for (const r of rpcRows ?? []) {
       periodMetrics.set(r.product_id, {
         product_id: r.product_id,
         velocity: Number(r.velocity ?? 0),
@@ -391,12 +396,12 @@ export default async function SkusPage({ searchParams }: {
       const { data: salesEvents } = await supabase
         .from("inventory_events")
         .select("product_id, delta_stock")
-        .in("product_id", filtered.map((p: any) => p.product_id))
+        .in("product_id", filtered.map((p) => p.product_id))
         .eq("event_type", "sales_like")
         .gte("event_date", firstM.period_start)
         .lte("event_date", firstM.period_end);
 
-      for (const ev of (salesEvents ?? []) as any[]) {
+      for (const ev of salesEvents ?? []) {
         const pid = ev.product_id;
         const delta = Math.abs(Number(ev.delta_stock ?? 0));
         salesByProduct[pid] = (salesByProduct[pid] ?? 0) + delta;
@@ -426,7 +431,7 @@ export default async function SkusPage({ searchParams }: {
     }
   }
   if (lostFilterActiveButPostProcess) {
-    filtered = filtered.filter((p: any) => {
+    filtered = filtered.filter((p) => {
       const v = lostByProduct[p.product_id] ?? 0;
       if (lostMin !== null && v <= lostMin) return false;
       if (lostMax !== null && v > lostMax) return false;
