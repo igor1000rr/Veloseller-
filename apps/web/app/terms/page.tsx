@@ -6,7 +6,7 @@ export const metadata = {
   description: "Условия использования сервиса Veloseller.",
 };
 
-const LAST_UPDATED = "22 июня 2026";
+const LAST_UPDATED = "23 июня 2026";
 const COMPANY = "Veloseller";
 // Единый публичный контакт (совпадает с разметкой на главной)
 const SUPPORT_EMAIL = "info@veloseller.ru";
