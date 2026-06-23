@@ -25,6 +25,19 @@ from app.sources._http import with_retry
 
 logger = logging.getLogger("veloseller.wb")
 
+
+def _to_decimal(v: object) -> Decimal | None:
+    """Безопасный парс числа от WB API. Одна кривая цена/скидка не должна ронять
+    весь синк: раньше unguarded Decimal(str(price)) при битом значении прерывал
+    загрузку (в т.ч. в fetch_snapshots, где это рушило весь FBO-синк)."""
+    if v in (None, ""):
+        return None
+    try:
+        return Decimal(str(v))
+    except (ArithmeticError, ValueError, TypeError):
+        return None
+
+
 STOCKS_URL = "https://statistics-api.wildberries.ru/api/v1/supplier/stocks"
 CARDS_URL = "https://content-api.wildberries.ru/content/v2/get/cards/list"
 MARKETPLACE_API = "https://marketplace-api.wildberries.ru"
@@ -210,8 +223,9 @@ def _fetch_wb_prices(cli: httpx.Client, token: str) -> dict[str, tuple[Decimal, 
                 for s in (g.get("sizes") or []):
                     pv = s.get("price")
                     if pv:
-                        nominal = Decimal(str(pv))
-                        break
+                        nominal = _to_decimal(pv)
+                        if nominal is not None:
+                            break
                 if nominal is None:
                     continue
                 try:
@@ -259,15 +273,11 @@ def fetch_snapshots(token: str) -> list[SnapshotInput]:
         if not sku:
             continue
         grouped[sku]["qty"] += int(r.get("quantityFull") or 0)
-        price = r.get("Price") or 0
+        price = _to_decimal(r.get("Price"))
         if price and grouped[sku]["price"] == 0:
-            grouped[sku]["price"] = Decimal(str(price))
+            grouped[sku]["price"] = price
             # Discount берём из той же строки, что и цену — чтобы пара была согласована.
-            disc = r.get("Discount") or 0
-            try:
-                grouped[sku]["discount"] = Decimal(str(disc))
-            except Exception:
-                grouped[sku]["discount"] = Decimal("0")
+            grouped[sku]["discount"] = _to_decimal(r.get("Discount")) or Decimal("0")
         if not grouped[sku]["subject"]:
             grouped[sku]["subject"] = r.get("subject")
         if not grouped[sku]["brand"]:
@@ -425,14 +435,10 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
                 vendor = (r.get("supplierArticle") or "").strip()
                 if not vendor:
                     continue
-                price = r.get("Price") or 0
+                price = _to_decimal(r.get("Price"))
                 if price and vendor not in prices_by_vendor:
-                    prices_by_vendor[vendor] = Decimal(str(price))
-                    disc = r.get("Discount") or 0
-                    try:
-                        discount_by_vendor[vendor] = Decimal(str(disc))
-                    except Exception:
-                        discount_by_vendor[vendor] = Decimal("0")
+                    prices_by_vendor[vendor] = price
+                    discount_by_vendor[vendor] = _to_decimal(r.get("Discount")) or Decimal("0")
                 if vendor not in brand_by_vendor and r.get("brand"):
                     brand_by_vendor[vendor] = r.get("brand")
                 if vendor not in subject_by_vendor and r.get("subject"):

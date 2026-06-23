@@ -154,8 +154,11 @@ def _already_sent_today(sb, seller_id: str) -> bool:
             .execute()
         )
         return (getattr(res, "count", 0) or 0) > 0
-    except Exception:
-        return False
+    except Exception as e:
+        # Fail-closed: при ошибке БД считаем, что уже отправляли — лучше пропустить
+        # один дайджест, чем заспамить дублями (особенно на нескольких репликах).
+        logger.warning("radar_digest: дедуп-проверка упала для %s, пропускаю отправку: %s", seller_id, e)
+        return True
 
 
 def send_digests_to_all() -> dict[str, Any]:
@@ -184,8 +187,10 @@ def send_digests_to_all() -> dict[str, Any]:
             try:
                 if datetime.fromisoformat(active_until.replace("Z", "+00:00")) < datetime.now(timezone.utc):
                     continue  # истёк
-            except Exception:
-                pass
+            except Exception as e:
+                # Fail-closed: не распарсили дату окончания — не шлём (вдруг подписка истекла).
+                logger.warning("radar_digest: битая radar_active_until у %s (%r), пропускаю: %s", seller_id, active_until, e)
+                continue
 
         # Есть ли канал отправки?
         chat_id = seller.get("telegram_chat_id")
