@@ -549,6 +549,10 @@ def _already_sent_today(sb, seller_id: str, channel: str) -> bool:
             .eq("seller_id", seller_id)
             .eq("channel", channel)
             .eq("sent_date", _today_iso_date())
+            # Блокируем повтор только на терминальных исходах: 'sent' (доставлено)
+            # и 'skipped' (нет данных — ретраить бессмысленно). 'failed' (транзиентный
+            # сбой Resend/Telegram) НЕ блокирует — отчёт ретраится в тот же день.
+            .in_("status", ["sent", "skipped"])
             .limit(1)
             .execute()
         )
@@ -571,21 +575,44 @@ def _record_history(
     storage_path: Optional[str],
     error: Optional[str],
 ) -> None:
+    payload = {
+        "seller_id": seller_id,
+        "day_of_week": day_of_week,
+        "kinds": kinds,
+        "channel": channel,
+        "status": status,
+        "sku_counts": sku_counts,
+        "file_name": filename,
+        "file_size_bytes": file_size,
+        "storage_path": storage_path,
+        "error_message": error,
+    }
     try:
-        sb.table("report_history").insert({
-            "seller_id": seller_id,
-            "day_of_week": day_of_week,
-            "kinds": kinds,
-            "channel": channel,
-            "status": status,
-            "sku_counts": sku_counts,
-            "file_name": filename,
-            "file_size_bytes": file_size,
-            "storage_path": storage_path,
-            "error_message": error,
-        }).execute()
+        sb.table("report_history").insert(payload).execute()
     except Exception:
-        logger.exception("failed to insert report_history seller=%s", seller_id)
+        # Строка за сегодня уже есть (UNIQUE seller+channel+sent_date+monthly-флаг) —
+        # это повторная попытка после 'failed'. Обновляем существующую строку, а не
+        # плодим дубль и не ловим повторно unique-violation (иначе отчёт ушёл бы,
+        # но статус 'sent' не записался → следующий прогон отправил бы повторно).
+        try:
+            upd = {k: payload[k] for k in (
+                "day_of_week", "kinds", "status", "sku_counts",
+                "file_name", "file_size_bytes", "storage_path", "error_message",
+            )}
+            q = (
+                sb.table("report_history").update(upd)
+                .eq("seller_id", seller_id)
+                .eq("channel", channel)
+                .eq("sent_date", _today_iso_date())
+            )
+            # Сопоставляем тот же monthly-класс, что и в unique-индексе.
+            if "monthly_report" in kinds:
+                q = q.filter("kinds", "cs", "{monthly_report}")
+            else:
+                q = q.filter("kinds", "not.cs", "{monthly_report}")
+            q.execute()
+        except Exception:
+            logger.exception("failed to upsert report_history seller=%s", seller_id)
 
 
 def dispatch_daily_reports() -> None:

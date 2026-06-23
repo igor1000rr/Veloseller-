@@ -207,7 +207,7 @@ def check_suggest_cached(phrase: str, *, ttl_hours: int = 24) -> tuple[bool, boo
 
     # Проверяем кэш
     try:
-        res = sb.table("radar_cache").select("*").eq("cache_key", cache_key).maybeSingle().execute()
+        res = sb.table("radar_cache").select("*").eq("cache_key", cache_key).maybe_single().execute()
         row = res.data
         if row:
             expires_at = row.get("expires_at")

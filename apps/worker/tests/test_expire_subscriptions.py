@@ -57,7 +57,8 @@ def test_expire_subscriptions_rolls_back_expired_veloseller_to_trial():
     assert update_call is not None
     update_args = update_call.args[0]
     assert update_args["plan"] == "trial"
-    assert update_args["plan_warehouses_limit"] == 15
+    # Триал = 3 склада (совпадает с триггером update_warehouses_limit_on_plan_change).
+    assert update_args["plan_warehouses_limit"] == 3
     assert update_args["subscription_expires_at"] is None
 
 

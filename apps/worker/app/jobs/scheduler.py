@@ -55,8 +55,9 @@ _STUCK_SYNCING_TIMEOUT_MINUTES = 30
 _TVELO_RETENTION_DAYS = 220
 _EVENTS_RETENTION_DAYS = 100
 
-# Лимит складов для trial-плана (при откате из истёкшей подписки)
-_TRIAL_WAREHOUSES_LIMIT = 15
+# Лимит складов для trial-плана (при откате из истёкшей подписки).
+# Должен совпадать с триггером update_warehouses_limit_on_plan_change (trial=3).
+_TRIAL_WAREHOUSES_LIMIT = 3
 
 # Авто-повтор временных ошибок синка. Окно по возрасту last_sync_at:
 # - не раньше 2 мин после последней попытки (даём лимиту WB остыть и не
