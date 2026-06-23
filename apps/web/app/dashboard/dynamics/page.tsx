@@ -98,18 +98,28 @@ export default async function DynamicsPage({ searchParams }: {
   const lookbackIso = new Date(Date.now() - periodMeta.lookbackDays * 86400_000)
     .toISOString().slice(0, 10);
 
-  // Один запрос с фильтром по складу + по дате. БЕЗ пагинации — после фильтра данных немного.
-  const { data: rowsData, error: rowsErr } = await supabase
-    .from("tvelo_metrics")
-    .select("product_id,period_start,period_end,adjusted_velocity,products!inner(sku,product_name,seller_id,connection_id)")
-    .eq("products.seller_id", user.id)
-    .eq("products.connection_id", currentWarehouseId)
-    .gte("period_end", lookbackIso)
-    .order("period_end", { ascending: true });
-
-  const rows = (rowsData ?? []) as TveloRow[];
-  if (rowsErr) {
-    console.error("dynamics: query failed", rowsErr);
+  // Фильтр по складу + дате, С ПАГИНАЦИЕЙ: PostgREST режет ответ на 1000 строк,
+  // а при сортировке period_end ASC обрезались бы именно свежие бакеты (те, что
+  // рендерятся) → пустые/неверные тренды на крупном каталоге. Тянем страницами.
+  const PAGE = 1000;
+  const MAX_ROWS = 100_000; // предохранитель от OOM на гигантском каталоге
+  const rows: TveloRow[] = [];
+  for (let from = 0; from < MAX_ROWS; from += PAGE) {
+    const { data: rowsData, error: rowsErr } = await supabase
+      .from("tvelo_metrics")
+      .select("product_id,period_start,period_end,adjusted_velocity,products!inner(sku,product_name,seller_id,connection_id)")
+      .eq("products.seller_id", user.id)
+      .eq("products.connection_id", currentWarehouseId)
+      .gte("period_end", lookbackIso)
+      .order("period_end", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (rowsErr) {
+      console.error("dynamics: query failed", rowsErr);
+      break;
+    }
+    const batch = (rowsData ?? []) as TveloRow[];
+    rows.push(...batch);
+    if (batch.length < PAGE) break;
   }
 
   // Группировка по SKU. Сразу бакетизируем при вставке — экономит O(N×M) операций.

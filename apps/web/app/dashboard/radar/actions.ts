@@ -1,11 +1,18 @@
 "use server";
 
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import type { TablesUpdate } from "@/lib/database.types";
 import { revalidatePath } from "next/cache";
 
 // Server Actions для UI Radar. Все требуют авторизованного юзера —
 // RLS политика radar_queries_seller_all автоматически отфильтровывает
 // чужие записи. Тут только обновляем + лог в radar_actions.
+
+type Sb = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+
+// ID уходят в PostgREST-фильтр строкой — валидируем как UUID, чтобы мусорные
+// значения не искажали .not("id","in",(...)) и не ломали подсчёт лимита.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 async function getUser() {
   const sb = await createSupabaseServerClient();
@@ -15,7 +22,7 @@ async function getUser() {
 }
 
 async function logAction(
-  sb: any,
+  sb: Sb,
   sellerId: string,
   queryId: string | null,
   type: string,
@@ -35,7 +42,7 @@ async function logAction(
  * Проверка лимита брендов из тарифа.
  * Возвращает {limit, currentApproved}. Бросает если seller не найден.
  */
-async function getRadarLimitInfo(sb: any, userId: string) {
+async function getRadarLimitInfo(sb: Sb, userId: string) {
   const { data: seller } = await sb
     .from("sellers")
     .select("radar_brands_limit")
@@ -54,15 +61,35 @@ async function getRadarLimitInfo(sb: any, userId: string) {
 
 export async function actionToggleFavorite(queryId: string, value: boolean) {
   const { sb, user } = await getUser();
-  const updates: any = {
+
+  // Читаем текущее состояние, чтобы НЕ затирать статус вслепую. Раньше ветка
+  // value=false безусловно ставила 'new' → воскрешала archived и фабриковала
+  // подтверждённый сигнал из 'early'. Логика зеркалит API-роут queries/[id]/action.
+  const { data: q } = await sb
+    .from("radar_queries")
+    .select("status,present_in_wb,present_in_ozon")
+    .eq("id", queryId)
+    .eq("seller_id", user.id)
+    .maybeSingle();
+
+  const updates: TablesUpdate<"radar_queries"> = {
     is_favorite: value,
     last_updated_at: new Date().toISOString(),
-    status: value ? "watching" : "new",
   };
-  await sb.from("radar_queries")
+  if (value) {
+    // зажечь звезду = смотреть, но не воскрешать архив
+    if (q && q.status !== "archived") updates.status = "watching";
+  } else if (q?.status === "watching") {
+    // снять звезду из watching → вернуть в new/early по наличию подтверждений
+    updates.status = q.present_in_wb || q.present_in_ozon ? "new" : "early";
+  }
+
+  const { error } = await sb
+    .from("radar_queries")
     .update(updates)
     .eq("id", queryId)
     .eq("seller_id", user.id);
+  if (error) throw new Error(error.message);
 
   await logAction(sb, user.id, queryId, value ? "query_favorited" : "query_unfavorited");
   revalidatePath("/dashboard/radar");
@@ -70,7 +97,8 @@ export async function actionToggleFavorite(queryId: string, value: boolean) {
 
 export async function actionArchiveQuery(queryId: string) {
   const { sb, user } = await getUser();
-  await sb.from("radar_queries")
+  const { error } = await sb
+    .from("radar_queries")
     .update({
       status: "archived",
       is_favorite: false,
@@ -78,19 +106,27 @@ export async function actionArchiveQuery(queryId: string) {
     })
     .eq("id", queryId)
     .eq("seller_id", user.id);
+  if (error) throw new Error(error.message);
   await logAction(sb, user.id, queryId, "query_archived");
   revalidatePath("/dashboard/radar");
 }
 
 export async function actionUnarchiveQuery(queryId: string) {
   const { sb, user } = await getUser();
-  await sb.from("radar_queries")
-    .update({
-      status: "new",
-      last_updated_at: new Date().toISOString(),
-    })
+  // Восстанавливаем по наличию подтверждений (как в API-роуте), а не всегда 'new'.
+  const { data: q } = await sb
+    .from("radar_queries")
+    .select("present_in_wb,present_in_ozon")
+    .eq("id", queryId)
+    .eq("seller_id", user.id)
+    .maybeSingle();
+  const status = q && (q.present_in_wb || q.present_in_ozon) ? "new" : "early";
+  const { error } = await sb
+    .from("radar_queries")
+    .update({ status, last_updated_at: new Date().toISOString() })
     .eq("id", queryId)
     .eq("seller_id", user.id);
+  if (error) throw new Error(error.message);
   await logAction(sb, user.id, queryId, "query_unarchived");
   revalidatePath("/dashboard/radar");
 }
@@ -127,10 +163,12 @@ export async function actionApproveBrand(brandId: string) {
     }
   }
 
-  await sb.from("radar_brands")
+  const { error } = await sb
+    .from("radar_brands")
     .update({ status: "approved", updated_at: new Date().toISOString() })
     .eq("id", brandId)
     .eq("seller_id", user.id);
+  if (error) throw new Error(error.message);
   await logAction(sb, user.id, null, "brand_approved");
   revalidatePath("/dashboard/radar");
   revalidatePath("/dashboard/radar/brands");
@@ -138,10 +176,12 @@ export async function actionApproveBrand(brandId: string) {
 
 export async function actionExcludeBrand(brandId: string) {
   const { sb, user } = await getUser();
-  await sb.from("radar_brands")
+  const { error } = await sb
+    .from("radar_brands")
     .update({ status: "excluded", updated_at: new Date().toISOString() })
     .eq("id", brandId)
     .eq("seller_id", user.id);
+  if (error) throw new Error(error.message);
   await logAction(sb, user.id, null, "brand_excluded");
   revalidatePath("/dashboard/radar");
   revalidatePath("/dashboard/radar/brands");
@@ -154,10 +194,12 @@ export async function actionExcludeBrand(brandId: string) {
  */
 export async function actionDeleteBrand(brandId: string) {
   const { sb, user } = await getUser();
-  await sb.from("radar_brands")
+  const { error } = await sb
+    .from("radar_brands")
     .delete()
     .eq("id", brandId)
     .eq("seller_id", user.id);
+  if (error) throw new Error(error.message);
   await logAction(sb, user.id, null, "brand_deleted");
   revalidatePath("/dashboard/radar");
   revalidatePath("/dashboard/radar/brands");
@@ -174,13 +216,14 @@ export async function actionAddBrandManual(name: string) {
     throw new Error(`Превышен лимит брендов (${limit}). Перейдите на старший тариф.`);
   }
 
-  await sb.from("radar_brands").upsert({
+  const { error } = await sb.from("radar_brands").upsert({
     seller_id: user.id,
     name: trimmed,
     name_normalized: normalized,
     source: "manual",
     status: "approved",
   }, { onConflict: "seller_id,name_normalized" });
+  if (error) throw new Error(error.message);
   await logAction(sb, user.id, null, "brand_added_manual");
   revalidatePath("/dashboard/radar");
   revalidatePath("/dashboard/radar/brands");
@@ -195,15 +238,16 @@ export async function actionBulkUpdateBrands(
 ) {
   const { sb, user } = await getUser();
 
+  const allIds = [...new Set([...approvedIds, ...excludedIds])];
+  if (allIds.length === 0) return { changed: 0 };
+  if (!allIds.every((id) => UUID_RE.test(id))) throw new Error("invalid brand id");
+
   const { data: seller } = await sb
     .from("sellers")
     .select("radar_brands_limit")
     .eq("id", user.id)
     .maybeSingle();
   const limit = seller?.radar_brands_limit ?? 0;
-
-  const allIds = [...new Set([...approvedIds, ...excludedIds])];
-  if (allIds.length === 0) return { changed: 0 };
 
   const { count: otherApproved } = await sb
     .from("radar_brands")
@@ -221,16 +265,18 @@ export async function actionBulkUpdateBrands(
 
   const updatedAt = new Date().toISOString();
   if (approvedIds.length > 0) {
-    await sb.from("radar_brands")
+    const { error } = await sb.from("radar_brands")
       .update({ status: "approved", updated_at: updatedAt })
       .eq("seller_id", user.id)
       .in("id", approvedIds);
+    if (error) throw new Error(error.message);
   }
   if (excludedIds.length > 0) {
-    await sb.from("radar_brands")
+    const { error } = await sb.from("radar_brands")
       .update({ status: "excluded", updated_at: updatedAt })
       .eq("seller_id", user.id)
       .in("id", excludedIds);
+    if (error) throw new Error(error.message);
   }
 
   await logAction(sb, user.id, null, "brands_bulk_updated");
