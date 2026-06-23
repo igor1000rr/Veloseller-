@@ -469,7 +469,10 @@ _SYNC_STALE_THRESHOLD_HOURS = 30
 # Порог должен быть > 24ч, иначе ложный алерт каждый день. 30ч = пропущен
 # суточный синк (как 5-7 июня) + буфер ~6ч.
 # Антиспам: алерт о застрявшем синке шлём один раз на эпизод, при восстановлении — один раз.
-_sync_monitor_state = {"alerted": False}
+# Флаг «уже отправлен» живёт в БД (system_settings), а НЕ в памяти процесса: иначе
+# на нескольких воркер-репликах каждая держит своё состояние и шлёт дубли, плюс
+# состояние терялось бы при рестарте воркера.
+_SYNC_MONITOR_KEY = "sync_monitor_alerted"
 
 
 def _monitoring_chat_ids(sb) -> list[str]:
@@ -489,6 +492,43 @@ def _monitoring_chat_ids(sb) -> list[str]:
         str(r["telegram_chat_id"]) for r in rows
         if (r.get("email") or "").lower() in admin_emails and r.get("telegram_chat_id")
     ]
+
+
+def _get_sync_monitor_alerted(sb) -> bool:
+    """Читает общий (для всех реплик) флаг «алерт о застрявшем синке уже отправлен»."""
+    try:
+        res = (
+            sb.table("system_settings")
+            .select("value")
+            .eq("key", _SYNC_MONITOR_KEY)
+            .limit(1)
+            .execute()
+        )
+        rows = getattr(res, "data", None) or []
+        if not rows:
+            return False
+        return bool((rows[0].get("value") or {}).get("alerted", False))
+    except Exception:
+        # Fail-closed: не уверены в состоянии → считаем, что уже алертили (не спамим).
+        logger.warning("monitor: чтение флага алерта упало, считаю alerted=True")
+        return True
+
+
+def _set_sync_monitor_alerted(sb, value: bool) -> None:
+    """Пишет общий флаг алерта в system_settings (upsert по key)."""
+    try:
+        sb.table("system_settings").upsert(
+            {
+                "key": _SYNC_MONITOR_KEY,
+                "value": {"alerted": value},
+                "category": "monitoring",
+                "description": "Антиспам-флаг алерта о застрявшем синке (общий для всех реплик воркера)",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            on_conflict="key",
+        ).execute()
+    except Exception:
+        logger.warning("monitor: запись флага алерта (%s) упала", value)
 
 
 def _job_monitor_sync_freshness() -> None:
@@ -528,9 +568,10 @@ def _job_monitor_sync_freshness() -> None:
                 stale.append((c.get("name") or c.get("id"), f"{hrs}ч назад"))
 
         chat_ids = _monitoring_chat_ids(sb)
+        alerted = _get_sync_monitor_alerted(sb)
 
         if stale:
-            if not _sync_monitor_state["alerted"]:
+            if not alerted:
                 lines = [
                     "⚠️ <b>Veloseller: синк не отрабатывает</b>",
                     f"Складов без свежего синка (&gt;{_SYNC_STALE_THRESHOLD_HOURS}ч): <b>{len(stale)}</b>",
@@ -545,14 +586,14 @@ def _job_monitor_sync_freshness() -> None:
                         "sync stale (%d складов), но MONITORING_CHAT_ID/админ-телеграм не настроены",
                         len(stale),
                     )
-                _sync_monitor_state["alerted"] = True
+                _set_sync_monitor_alerted(sb, True)
                 logger.warning("sync freshness alert", extra={"stale_count": len(stale)})
         else:
-            if _sync_monitor_state["alerted"]:
+            if alerted:
                 for cid in chat_ids:
                     send_message(cid, "✅ <b>Veloseller: синк восстановился</b>\nВсе активные склады синхронизируются штатно.")
                 logger.info("sync freshness recovered")
-            _sync_monitor_state["alerted"] = False
+                _set_sync_monitor_alerted(sb, False)
     except Exception:
         logger.exception("monitor sync freshness job failed")
 
