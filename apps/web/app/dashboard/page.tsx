@@ -167,7 +167,7 @@ export default async function DashboardOverview({ searchParams }: {
 
   const { data: alerts } = await supabase
     .from("alerts")
-    .select("*")
+    .select("id,kind,message")
     .eq("seller_id", user.id)
     .is("acknowledged_at", null)
     .order("created_at", { ascending: false })

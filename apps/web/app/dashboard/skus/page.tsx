@@ -310,15 +310,35 @@ export default async function SkusPage({ searchParams }: {
   const productIds = (products ?? []).map((p: any) => p.product_id);
   const sparkData: Record<string, number[]> = {};
   if (productIds.length > 0) {
-    const { data: history } = await supabase
-      .from("tvelo_metrics")
-      .select("product_id,adjusted_velocity,period_end")
-      .in("product_id", productIds)
-      .order("period_end", { ascending: true });
-    for (const h of history ?? []) {
-      const arr = sparkData[(h as any).product_id] ?? [];
+    // Спарклайн = последние 7 точек по 30-дневному окну. Раньше тянулась ВСЯ
+    // история всех окон (7/30/90) без лимита: PostgREST резал на 1000 строк
+    // (ASC → терялись свежие точки), а смешение окон давало шумный тренд.
+    // Чиним: фильтр по недавней дате + только 30-дн окно, с пагинацией.
+    const sparkCutoff = new Date(Date.now() - 45 * 86400_000).toISOString().slice(0, 10);
+    const SPARK_PAGE = 1000;
+    const SPARK_MAX = 20_000;
+    type SparkRow = { product_id: string; adjusted_velocity: number | null; period_start: string; period_end: string };
+    const history: SparkRow[] = [];
+    for (let from = 0; from < SPARK_MAX; from += SPARK_PAGE) {
+      const { data } = await supabase
+        .from("tvelo_metrics")
+        .select("product_id,adjusted_velocity,period_start,period_end")
+        .in("product_id", productIds)
+        .gte("period_end", sparkCutoff)
+        .order("period_end", { ascending: true })
+        .range(from, from + SPARK_PAGE - 1);
+      const batch = (data ?? []) as SparkRow[];
+      history.push(...batch);
+      if (batch.length < SPARK_PAGE) break;
+    }
+    for (const h of history) {
+      const winDiff = Math.round(
+        (new Date(h.period_end).getTime() - new Date(h.period_start).getTime()) / 86400_000,
+      );
+      if (Math.abs(winDiff - 29) > 1) continue; // только 30-дн окно
+      const arr = sparkData[h.product_id] ?? [];
       arr.push(Number(h.adjusted_velocity));
-      sparkData[(h as any).product_id] = arr.slice(-7);
+      sparkData[h.product_id] = arr.slice(-7);
     }
   }
 
