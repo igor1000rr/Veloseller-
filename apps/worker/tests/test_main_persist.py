@@ -148,8 +148,8 @@ class TestPersistSnapshotsDedup:
                  "snapshot_time": "2026-05-19T12:00:00Z"},
             ]
 
-        monkeypatch.setattr("app.main.fetch_all", fake_fetch_all)
-        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+        monkeypatch.setattr("app.ingest_persist.fetch_all", fake_fetch_all)
+        monkeypatch.setattr("app.ingest_persist.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1", stock=10, price=100.0)]
         result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
@@ -166,8 +166,8 @@ class TestPersistSnapshotsDedup:
                  "snapshot_time": "2026-05-19T12:00:00Z"},
             ]
 
-        monkeypatch.setattr("app.main.fetch_all", fake_fetch_all)
-        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+        monkeypatch.setattr("app.ingest_persist.fetch_all", fake_fetch_all)
+        monkeypatch.setattr("app.ingest_persist.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1", stock=8, price=100.0)]
         result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
@@ -184,8 +184,8 @@ class TestPersistSnapshotsDedup:
                  "snapshot_time": "2026-05-19T12:00:00Z"},
             ]
 
-        monkeypatch.setattr("app.main.fetch_all", fake_fetch_all)
-        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+        monkeypatch.setattr("app.ingest_persist.fetch_all", fake_fetch_all)
+        monkeypatch.setattr("app.ingest_persist.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1", stock=10, price=120.0)]
         result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
@@ -196,8 +196,8 @@ class TestPersistSnapshotsDedup:
     def test_no_previous_snapshot_inserted(self, monkeypatch):
         mock_sb = self._setup_mock()
 
-        monkeypatch.setattr("app.main.fetch_all", lambda q: [])
-        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+        monkeypatch.setattr("app.ingest_persist.fetch_all", lambda q: [])
+        monkeypatch.setattr("app.ingest_persist.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1", stock=10, price=100.0)]
         result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
@@ -214,8 +214,8 @@ class TestPersistSnapshotsDedup:
                  "snapshot_time": "2026-05-19T12:00:00Z"},
             ]
 
-        monkeypatch.setattr("app.main.fetch_all", fake_fetch_all)
-        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+        monkeypatch.setattr("app.ingest_persist.fetch_all", fake_fetch_all)
+        monkeypatch.setattr("app.ingest_persist.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1", stock=10, price=100.008)]
         result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
@@ -226,8 +226,8 @@ class TestPersistSnapshotsDedup:
         mock_sb = MagicMock()
         mock_sb.table.return_value.upsert.return_value.execute.return_value = MagicMock()
         _setup_mock_for_select(mock_sb, [{"product_id": "pid-A", "sku": "A1"}])
-        monkeypatch.setattr("app.main.fetch_all", lambda q: [])
-        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+        monkeypatch.setattr("app.ingest_persist.fetch_all", lambda q: [])
+        monkeypatch.setattr("app.ingest_persist.get_supabase", lambda: mock_sb)
 
         snaps = [_mk_snap("A1"), _mk_snap("B2")]
         result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
@@ -253,11 +253,11 @@ class TestPersistSnapshotsPriceCarryForward:
     def test_unknown_price_carries_forward_last(self, monkeypatch):
         """Цена None + есть история → пишем последнюю известную, не 0."""
         mock_sb = self._setup_mock()
-        monkeypatch.setattr("app.main.fetch_all", lambda q: [
+        monkeypatch.setattr("app.ingest_persist.fetch_all", lambda q: [
             {"product_id": "pid-A", "stock_quantity": 10, "price": "100.00",
              "snapshot_time": "2026-05-19T12:00:00Z"},
         ])
-        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+        monkeypatch.setattr("app.ingest_persist.get_supabase", lambda: mock_sb)
 
         snaps = [SnapshotInput(sku="A1", stock_quantity=8, price=None)]
         result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
@@ -270,8 +270,8 @@ class TestPersistSnapshotsPriceCarryForward:
     def test_unknown_price_no_history_skipped(self, monkeypatch):
         """Цена None + нет истории → снапшот пропускается (не пишем фантомный 0)."""
         mock_sb = self._setup_mock()
-        monkeypatch.setattr("app.main.fetch_all", lambda q: [])
-        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+        monkeypatch.setattr("app.ingest_persist.fetch_all", lambda q: [])
+        monkeypatch.setattr("app.ingest_persist.get_supabase", lambda: mock_sb)
 
         snaps = [SnapshotInput(sku="A1", stock_quantity=8, price=None)]
         result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
@@ -282,11 +282,11 @@ class TestPersistSnapshotsPriceCarryForward:
     def test_unknown_price_same_stock_dedup(self, monkeypatch):
         """Цена None + тот же сток → carry-forward даёт ту же цену → дедуп."""
         mock_sb = self._setup_mock()
-        monkeypatch.setattr("app.main.fetch_all", lambda q: [
+        monkeypatch.setattr("app.ingest_persist.fetch_all", lambda q: [
             {"product_id": "pid-A", "stock_quantity": 10, "price": "100.00",
              "snapshot_time": "2026-05-19T12:00:00Z"},
         ])
-        monkeypatch.setattr("app.main.get_supabase", lambda: mock_sb)
+        monkeypatch.setattr("app.ingest_persist.get_supabase", lambda: mock_sb)
 
         snaps = [SnapshotInput(sku="A1", stock_quantity=10, price=None)]
         result = _persist_snapshots("seller-1", CONN_ID, SourceType.MARKETPLACE_API, snaps)
