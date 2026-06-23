@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/auth";
+import { isSensitiveConfigKey } from "@/lib/connection-secrets";
 
 /**
  * GET  /api/connections/[id]  — детали подключения (без секретов)
@@ -39,10 +40,11 @@ export async function GET(
   }
   if (!data)  return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  // Скрываем секреты в config, оставляем только non-sensitive
+  // Скрываем секреты в config (единый список из lib/connection-secrets —
+  // включает Shopify access_token, который раньше утекал), оставляем non-sensitive.
   const safeConfig: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(data.config ?? {})) {
-    if (["client_id", "api_key", "token", "_encrypted"].includes(k)) {
+    if (isSensitiveConfigKey(k)) {
       safeConfig[k] = typeof v === "string" && v.length > 0 ? "••••" : v;
     } else {
       safeConfig[k] = v;

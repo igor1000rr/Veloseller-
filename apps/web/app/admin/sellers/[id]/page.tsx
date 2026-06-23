@@ -51,7 +51,7 @@ export default async function SellerDetailPage({ params }: { params: Promise<{ i
   ] = await Promise.all([
     supabase.from("products").select("product_id", { count: "exact", head: true }).eq("seller_id", id),
     supabase.from("alerts").select("id", { count: "exact", head: true }).eq("seller_id", id).is("acknowledged_at", null),
-    supabase.from("data_connections").select("*").eq("seller_id", id).order("created_at", { ascending: false }),
+    supabase.from("data_connections").select("id,name,source,marketplace,status,last_sync_at,last_error,created_at").eq("seller_id", id).order("created_at", { ascending: false }),
     supabase.from("store_metrics").select("*").eq("seller_id", id).order("period_end", { ascending: false }).limit(1).maybeSingle(),
     supabase.from("alerts").select("id,kind,message,created_at,acknowledged_at,products(sku)").eq("seller_id", id)
       .order("created_at", { ascending: false }).limit(15),

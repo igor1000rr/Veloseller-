@@ -53,4 +53,16 @@ describe("lib/safe-redirect", () => {
     expect(safeRedirect("dashboard")).toBe("/dashboard");
     expect(safeRedirect("evil.com")).toBe("/dashboard");
   });
+
+  it("backslash-обход (WHATWG нормализует \\ → /) → fallback", () => {
+    // new URL("/\\evil.com", base) уводит на https://evil.com — раньше проходило.
+    expect(safeRedirect("/\\evil.com")).toBe("/dashboard");
+    expect(safeRedirect("/\\/evil.com")).toBe("/dashboard");
+    expect(safeRedirect("/\\\\evil.com")).toBe("/dashboard");
+    expect(safeRedirect("/path\\sub")).toBe("/dashboard");
+  });
+
+  it("backslash с кастомным fallback", () => {
+    expect(safeRedirect("/\\evil.com", "/login")).toBe("/login");
+  });
 });

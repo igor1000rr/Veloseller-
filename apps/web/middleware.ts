@@ -26,7 +26,7 @@ function commonCsp(sb: { https: string; wss: string }): string[] {
     "img-src 'self' data: blob: https:",
     "font-src 'self' data:",
     `connect-src 'self' ${sb.https} ${sb.wss} https://*.sentry.io https://*.ingest.sentry.io https://mc.yandex.ru https://mc.yandex.com wss://mc.yandex.ru wss://mc.yandex.com`,
-    "frame-src 'self' https://js.stripe.com https://hooks.stripe.com",
+    "frame-src 'self'",
     "form-action 'self' https://auth.robokassa.ru",
   ];
 }
@@ -57,13 +57,19 @@ export async function middleware(request: NextRequest) {
   let csp: string;
   if (isPrivate) {
     nonce = btoa(crypto.randomUUID());
+    // СТРОГО: только nonce + strict-dynamic. Раньше тут были ещё `https:` и
+    // `'unsafe-inline'` как фолбэк — но на strict-dynamic-браузерах они и так
+    // игнорируются, а на старых (CSP2, без strict-dynamic) именно они схлопывали
+    // политику до «любой inline + любой https-скрипт». Их удаление не ломает
+    // современные браузеры (strict-dynamic + nonce работает), а легаси делает
+    // строго безопаснее. Свои скрипты Next нонсит через x-nonce (см. ниже).
     csp = [
-      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https: 'unsafe-inline'`,
+      `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
       ...common,
     ].join("; ");
   } else {
     csp = [
-      "script-src 'self' 'unsafe-inline' https://js.stripe.com https://*.sentry.io https://mc.yandex.ru",
+      "script-src 'self' 'unsafe-inline' https://*.sentry.io https://mc.yandex.ru",
       ...common,
     ].join("; ");
   }

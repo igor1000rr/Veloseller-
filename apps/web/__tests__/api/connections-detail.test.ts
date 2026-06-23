@@ -1,7 +1,7 @@
 /**
  * GET/DELETE /api/connections/[id] — детали и удаление склада.
  *
- * GET маскирует секреты в config (api_key, client_id, token).
+ * GET маскирует секреты в config (api_key, client_id, token, Shopify access_token).
  * DELETE работает только над собственными складами (.eq seller_id).
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -88,6 +88,28 @@ describe("GET /api/connections/[id]", () => {
     const fullBody = JSON.stringify(body);
     expect(fullBody).not.toContain("sk_secret_token_abc");
     expect(fullBody).not.toContain("ozon_token_xyz");
+  });
+
+  it("маскирует Shopify access_token (раньше утекал — drift списков)", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
+    maybeSingleMock.mockResolvedValue({
+      data: {
+        id: "c2", name: "Shopify", source: "marketplace_api", marketplace: "shopify",
+        status: "active", last_sync_at: null, last_error: null,
+        created_at: "2026-01-01", updated_at: "2026-01-01",
+        config: {
+          shop: "myshop.myshopify.com",  // НЕ секретное — остаётся
+          access_token: "shpat_super_secret_value",
+        },
+      },
+      error: null,
+    });
+    const res = await get("c2");
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.config.access_token).toBe("••••");
+    expect(body.config.shop).toBe("myshop.myshopify.com");
+    expect(JSON.stringify(body)).not.toContain("shpat_super_secret_value");
   });
 });
 

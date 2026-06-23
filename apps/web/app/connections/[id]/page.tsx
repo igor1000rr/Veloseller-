@@ -6,6 +6,7 @@ import DeleteButton from "../DeleteButton";
 import RenameConnection from "../RenameConnection";
 import { ConnectionErrorHint } from "../ConnectionErrorHint";
 import { parseApiError } from "@/lib/error-parser";
+import { isSensitiveConfigKey } from "@/lib/connection-secrets";
 import { Icons } from "../../_components/Icons";
 import { t } from "@/lib/i18n";
 import { LOCALE } from "@/lib/features";
@@ -15,16 +16,15 @@ export const revalidate = 0;
 
 const LOC = LOCALE === "ru" ? "ru-RU" : "en-US";
 
-// БАГ 73: фильтруем sensitive поля из config перед отдачей в HTML
-const SENSITIVE_CONFIG_KEYS = new Set(["api_key", "token", "client_id", "password", "secret"]);
-
+// БАГ 73: фильтруем sensitive поля из config перед отдачей в HTML.
+// Список секретов — единый из lib/connection-secrets (включает Shopify access_token).
 const TRANSIENT_KINDS = ["rate_limit", "marketplace_down", "network"];
 
 function safeConfig(config: Record<string, any> | null): Record<string, string> {
   if (!config) return {};
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(config)) {
-    if (SENSITIVE_CONFIG_KEYS.has(k)) {
+    if (isSensitiveConfigKey(k)) {
       // Не отдаём даже зашифрованный текст — показываем флаг
       const hasValue = typeof v === "string" && v.length > 0;
       out[k] = hasValue ? t("connections.configMasked") : t("connections.configNotSet");

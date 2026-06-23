@@ -73,7 +73,8 @@ export async function PATCH(
     .eq("seller_id", userId);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("[radar-brand-update] DB error:", error.message);
+    return NextResponse.json({ error: "Не удалось обновить бренд" }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });
@@ -104,7 +105,8 @@ export async function DELETE(
     .eq("seller_id", userId);
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("[radar-brand-delete] DB error:", error.message);
+    return NextResponse.json({ error: "Не удалось удалить бренд" }, { status: 500 });
   }
 
   return NextResponse.json({ success: true });

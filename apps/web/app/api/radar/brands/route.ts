@@ -65,7 +65,8 @@ export async function POST(req: NextRequest) {
     .single();
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("[radar-brands-create] DB error:", error.message);
+    return NextResponse.json({ error: "Не удалось добавить бренд" }, { status: 500 });
   }
 
   return NextResponse.json({ brand: data });

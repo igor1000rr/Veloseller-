@@ -92,7 +92,8 @@ export async function POST(
     .eq("seller_id", userId);
 
   if (updateErr) {
-    return NextResponse.json({ error: updateErr.message }, { status: 500 });
+    console.error("[radar-query-action] DB error:", updateErr.message);
+    return NextResponse.json({ error: "Не удалось обновить запрос" }, { status: 500 });
   }
 
   // Запись в лог действий — не критичная операция, не валим запрос если упадёт

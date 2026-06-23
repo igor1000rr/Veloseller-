@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { encrypt, isEncryptionConfigured } from "@/lib/crypto";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireUser } from "@/lib/auth";
+import { SENSITIVE_KEYS_BY_KIND } from "@/lib/connection-secrets";
 import type { Json, Enums } from "@/lib/database.types";
 
 /**
@@ -20,14 +21,6 @@ import type { Json, Enums } from "@/lib/database.types";
  *
  * Backward compat: если warehouse_kind не пришёл, парсим из source+marketplace.
  */
-const SENSITIVE_KEYS_BY_KIND: Record<string, string[]> = {
-  ozon_fbo: ["client_id", "api_key"],
-  ozon_fbs: ["client_id", "api_key"],
-  wb_fbo:   ["token"],
-  wb_fbs:   ["token"],
-  shopify:  ["access_token"],
-};
-
 const ALLOWED_WAREHOUSE_KINDS = new Set([
   "ozon_fbo", "ozon_fbs", "wb_fbo", "wb_fbs", "google_sheet", "shopify",
 ]);

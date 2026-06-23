@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
 import { requireUser, jsonError } from "@/lib/auth";
 import { getSelectedWarehouse } from "@/lib/warehouse";
+import { csvEscape } from "@/lib/csv";
 import type { Enums } from "@/lib/database.types";
 
 export const dynamic = "force-dynamic";
@@ -365,12 +366,8 @@ export async function GET(req: NextRequest) {
   ];
 
   const sep = isExcel ? ";" : ",";
-  const escape = (v: any): string => {
-    if (v == null) return "";
-    const s = String(v);
-    if (s.includes(sep) || s.includes('"') || s.includes("\n")) return `"${s.replace(/"/g, '""')}"`;
-    return s;
-  };
+  // Единый csvEscape: структурное экранирование + нейтрализация formula-injection.
+  const escape = (v: unknown): string => csvEscape(v, sep);
 
   const lines: string[] = [headers.join(sep)];
   let writtenCount = 0;
