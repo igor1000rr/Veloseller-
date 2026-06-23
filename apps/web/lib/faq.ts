@@ -31,7 +31,7 @@ const FAQ_RU: FaqItem[] = [
   },
   {
     q: 'Чем TVelo лучше обычного расчёта скорости продаж в Excel?',
-    a: 'Обычный подход sales/days неверно учитывает периоды, когда товар был out-of-stock. TVelo = sales / in_stock_days. Разница может очень сильно влиять на расчёт закупки и других показателей склада.',
+    a: 'Обычный расчёт скорости продаж: Продажи/Дни неверно учитывает периоды, когда товара не было на складе. Наш расчёт реальной скорости продаж TVelo: Продажи/Дни, когда товар был на складе. Разница может очень сильно влиять на расчёт закупки и других показателей склада.',
   },
   {
     q: 'Есть ли триал? Каждая ли тарифная опция бесплатна?',
@@ -58,7 +58,7 @@ const FAQ_EN: FaqItem[] = [
   },
   {
     q: 'Why is TVelo better than a plain sales-velocity formula in Excel?',
-    a: 'The usual sales/days approach miscounts the periods when an item was out of stock. TVelo = sales / in-stock days. The difference can drastically change purchase planning and other warehouse metrics.',
+    a: 'The usual sales-velocity calc, Sales / Days, miscounts the periods when an item was out of stock. Our real sales-velocity metric, TVelo: Sales / in-stock days. The difference can drastically change purchase planning and other warehouse metrics.',
   },
   {
     q: 'Is there a free trial?',
