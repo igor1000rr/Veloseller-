@@ -156,45 +156,30 @@ export function SkuAnalysisChart({ data, changelogByDate, events }: { data: Char
     dateLabel: chartLabel(d.date, period),
   }));
 
-  // Оверлей событий: компактная «дорожка» по верхней кромке графика (Игорь 20.06).
-  // Все события лежат в узкой фиксированной полосе сверху и не расползаются по полю.
-  // Пересекающиеся по времени упаковываются в под-ряды (greedy interval coloring),
-  // высота полосы не растёт (до LANE_MAX_ROWS рядов). x привязан к меткам
-  // существующих точек (ось категориальная), y — на скрытой шкале band (1 = верх).
-  const LANE_TOP = 0.99;
-  const LANE_ROW_GAP = 0.055;
-  const LANE_MAX_ROWS = 3;
-  const eventSegments: { id: string; title: string; comment: string; startLabel: string; endLabel: string; y: number }[] = [];
-  let laneRows = 0;
-  {
-    const visible = calEvents
-      .map((ev) => {
-        const end = ev.endDate ?? ev.startDate;
-        const inRange = formatted.filter((p) => p.date >= ev.startDate && p.date <= end);
-        if (inRange.length === 0) return null;
-        return { ev, startLabel: inRange[0].dateLabel, endLabel: inRange[inRange.length - 1].dateLabel, end };
-      })
-      .filter((x): x is NonNullable<typeof x> => x !== null)
-      .sort((a, b) => a.ev.startDate.localeCompare(b.ev.startDate));
-    const rowEnds: string[] = [];
-    for (const v of visible) {
-      let row = rowEnds.findIndex((lastEnd) => lastEnd < v.ev.startDate);
-      if (row === -1) { row = rowEnds.length; rowEnds.push(v.end); }
-      else rowEnds[row] = v.end;
-      const r = Math.min(row, LANE_MAX_ROWS - 1);
-      laneRows = Math.max(laneRows, r + 1);
-      eventSegments.push({
-        id: v.ev.id,
-        title: v.ev.title,
-        comment: v.ev.comment ?? "",
-        startLabel: v.startLabel,
-        endLabel: v.endLabel,
-        y: LANE_TOP - r * LANE_ROW_GAP,
-      });
-    }
-  }
+  // Оверлей событий: ОДНА горизонтальная дорожка по верхней кромке графика (Игорь 23.06).
+  // Раньше пересекающиеся события упаковывались в под-ряды (до 3) и при большом их числе
+  // превращались в кашу. Теперь все события — на одной линии: непересекающиеся идут
+  // отдельными отрезками, пересекающиеся визуально сливаются в одну полосу (какие именно
+  // события активны в конкретной точке — видно в тултипе). x привязан к меткам существующих
+  // точек (ось категориальная), y — на скрытой шкале band (1 = верх).
+  const LANE_Y = 0.99;
+  const eventSegments = calEvents
+    .map((ev) => {
+      const end = ev.endDate ?? ev.startDate;
+      const inRange = formatted.filter((p) => p.date >= ev.startDate && p.date <= end);
+      if (inRange.length === 0) return null;
+      return {
+        id: ev.id,
+        title: ev.title,
+        comment: ev.comment ?? "",
+        startLabel: inRange[0].dateLabel,
+        endLabel: inRange[inRange.length - 1].dateLabel,
+        y: LANE_Y,
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null);
   const hasEvents = eventSegments.length > 0;
-  const laneBottom = LANE_TOP - (Math.max(laneRows, 1) - 1) * LANE_ROW_GAP - 0.025;
+  const laneBottom = LANE_Y - 0.03;
 
   // Для каждого события — средняя TVelo до и после (по дням с наличием в видимом
   // окне). Отвечает на вопрос «сработало ли событие» (реклама/акция) — аналогично
