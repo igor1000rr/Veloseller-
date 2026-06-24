@@ -4,23 +4,23 @@ import { Icons } from '@/app/_components/Icons';
 import { SITE_URL } from '@/lib/features';
 import LandingHeader from '@/app/_landing/Header';
 import { Eyebrow } from '@/app/_landing/ui';
-import LostRevenueCalculator from '@/app/_components/LostRevenueCalculator';
+import ReorderPointCalculator from '@/app/_components/ReorderPointCalculator';
 
-const PATH = '/kalkulyator-poteryannoy-vyruchki';
-const TITLE = 'Калькулятор потерянной выручки из-за out-of-stock';
+const PATH = '/kalkulyator-tochki-dozakaza';
+const TITLE = 'Калькулятор точки дозаказа и страхового запаса';
 const DESCRIPTION =
-  'Бесплатный калькулятор: посчитайте, сколько выручки вы теряете из-за нулевых остатков на Wildberries и Ozon. Введите продажи в день, цену и дни без остатка — увидите потери за месяц и год.';
+  'Бесплатный калькулятор точки дозаказа (reorder point) и страхового запаса (safety stock) для Wildberries и Ozon. Введите продажи в день, срок поставки и буфер — узнайте, при каком остатке заказывать поставку.';
 
 export const metadata: Metadata = {
   title: TITLE,
   description: DESCRIPTION,
   keywords: [
-    'калькулятор потерянной выручки',
-    'потери на out-of-stock',
-    'цена стокаута',
-    'недополученная выручка маркетплейс',
-    'out of stock калькулятор',
-    'потерянная выручка wildberries',
+    'калькулятор точки дозаказа',
+    'reorder point калькулятор',
+    'калькулятор safety stock',
+    'страховой запас расчёт',
+    'когда заказывать поставку',
+    'точка дозаказа wildberries',
   ],
   alternates: { canonical: PATH },
   openGraph: {
@@ -36,39 +36,39 @@ export const metadata: Metadata = {
 
 const RELATED = [
   {
-    slug: 'out-of-stock-poteryannaya-vyruchka-ozon-wildberries',
-    title: 'Out-of-stock и потерянная выручка: как считать и не терять',
+    slug: 'tochka-dozakaza-reorder-point-wildberries-ozon',
+    title: 'Точка дозаказа: когда заказывать поставку',
   },
   {
     slug: 'minimalnyy-ostatok-safety-stock-wildberries-ozon',
     title: 'Минимальный остаток (safety stock): сколько держать',
   },
   {
-    slug: 'tochka-dozakaza-reorder-point-wildberries-ozon',
-    title: 'Точка дозаказа: когда заказывать поставку',
-  },
-  {
     slug: 'dni-pokrytiya-ostatka-marketplace',
     title: 'Дни покрытия: на сколько хватит остатка',
+  },
+  {
+    slug: 'prognoz-sprosa-marketplace-metody',
+    title: 'Прогноз спроса: простые рабочие методы',
   },
 ];
 
 const FAQ = [
   {
-    q: 'Как считается потерянная выручка из-за out-of-stock?',
-    a: 'Потерянные продажи = средние продажи в день (когда товар в наличии) × число дней без остатка. Потерянная выручка = потерянные продажи × цена за единицу. Калькулятор делает это автоматически и пересчитывает на месяц и год.',
+    q: 'Как рассчитать точку дозаказа?',
+    a: 'Точка дозаказа = средние продажи в день × срок поставки + страховой запас. Как только остаток падает до этого уровня, нужно заказывать поставку — новая партия успеет прийти до того, как закончится текущая.',
   },
   {
-    q: 'Почему этих потерь не видно в кабинете Wildberries или Ozon?',
-    a: 'В кабинете отражаются только состоявшиеся продажи. Когда товара нет в наличии, продажи не происходят — и строки об упущенном спросе нигде не появляется. Поэтому потери из-за нулевых остатков незаметны без отдельного расчёта.',
+    q: 'Что такое страховой запас (safety stock)?',
+    a: 'Это буфер на случай всплеска спроса или задержки поставки. В калькуляторе он задан в днях: страховой запас в штуках = продажи в день × число дней буфера. Чем выше непредсказуемость спроса и срока, тем больше буфер.',
   },
   {
-    q: 'Как уменьшить потери из-за нулевых остатков?',
-    a: 'Держать страховой запас (safety stock), заказывать поставку по точке дозаказа и получать алерты до того, как товар уйдёт в ноль. Тогда продажи не прерываются, а позиции карточки не проседают.',
+    q: 'Чем точка дозаказа на FBO отличается от FBS?',
+    a: 'На FBO срок поставки длиннее — добавляются логистика до склада маркетплейса и приёмка по квоте, поэтому точка дозаказа выше и заказывать нужно раньше. На FBS lead time короче и буфер можно держать меньше.',
   },
 ];
 
-export default function LostRevenueCalculatorPage() {
+export default function ReorderPointCalculatorPage() {
   const breadcrumbLd = {
     '@context': 'https://schema.org',
     '@type': 'BreadcrumbList',
@@ -106,66 +106,56 @@ export default function LostRevenueCalculatorPage() {
 
           <Eyebrow>Бесплатный инструмент</Eyebrow>
           <h1 className="mt-3 font-display text-[28px] sm:text-4xl md:text-5xl tracking-tight font-medium leading-[1.1]">
-            Калькулятор потерянной выручки из-за out-of-stock
+            Калькулятор точки дозаказа и страхового запаса
           </h1>
           <p className="mt-5 md:mt-6 text-ink-muted text-base md:text-lg leading-relaxed">
-            Каждый день, что товар в нуле, — это не пауза, а прямой минус к выручке и позициям карточки.
-            Подвигайте ползунки и увидите, сколько вы теряете на нулевых остатках на Wildberries и Ozon.
+            Главный вопрос пополнения — не «сколько», а «когда» заказывать. Подвигайте ползунки и узнайте,
+            при каком остатке оформлять поставку, чтобы не уйти в ноль и не заморозить деньги в излишках.
           </p>
 
           <div className="mt-8 md:mt-10">
-            <LostRevenueCalculator />
+            <ReorderPointCalculator />
           </div>
 
           <h2 className="font-display text-2xl md:text-3xl mt-14 mb-4 tracking-tight font-medium">
             Как это считается
           </h2>
-          <p className="my-4 text-ink-soft leading-relaxed text-[15px] md:text-base">
-            Логика простая и прозрачная — никакой магии:
-          </p>
           <div className="my-6 font-mono text-sm md:text-[15px] bg-bg-soft border border-line rounded-lg px-5 py-4 text-ink-soft tabular space-y-1">
-            <div>Потерянные продажи = Продажи в день × Дни без остатка</div>
-            <div>Потерянная выручка = Потерянные продажи × Цена</div>
+            <div>Страховой запас = Продажи в день × Дни буфера</div>
+            <div>Точка дозаказа = Продажи в день × Срок поставки + Страховой запас</div>
           </div>
           <p className="my-4 text-ink-soft leading-relaxed text-[15px] md:text-base">
-            Важная тонкость: продажи в день нужно брать по дням, когда товар был{' '}
-            <Link href="/news/out-of-stock-poteryannaya-vyruchka-ozon-wildberries" className="text-lime-deep underline decoration-lime-deep/30 underline-offset-2">в наличии</Link>,
-            а не по календарю. Если делить на все дни месяца, дни простоя занижают скорость — и потери кажутся
-            меньше, чем есть. Это основа методики реальной скорости продаж.
+            Идея проста: к моменту, когда текущий запас закончится, новая партия уже должна приехать. Поэтому
+            заказываем не «когда выглядит мало», а когда остаток дошёл до рассчитанной точки. Подробный разбор —
+            в статье про{' '}
+            <Link href="/news/tochka-dozakaza-reorder-point-wildberries-ozon" className="text-lime-deep underline decoration-lime-deep/30 underline-offset-2">точку дозаказа</Link>.
           </p>
 
           <h2 className="font-display text-2xl md:text-3xl mt-12 mb-4 tracking-tight font-medium">
-            Почему out-of-stock дороже, чем кажется
+            Что важно учесть
           </h2>
           <ul className="my-5 space-y-2 pl-6 list-disc marker:text-lime-deep text-ink-soft leading-relaxed text-[15px] md:text-base">
-            <li>Прямые потери выручки — спрос был, а продажи не случилось.</li>
-            <li>Просадка позиций: карточка с нулём теряет в ранжировании, и после возврата товара продажи восстанавливаются не сразу.</li>
-            <li>Потерянные клиенты уходят к конкуренту и часто не возвращаются.</li>
-            <li>Слитая реклама: оплаченные клики ведут на товар, которого нет в наличии.</li>
+            <li>Срок поставки — это полное время: производство + доставка + приёмка маркетплейсом, а не только логистика.</li>
+            <li>Продажи в день берите по дням, когда товар был в наличии, — иначе скорость занижена и точка выйдет слишком низкой.</li>
+            <li>На FBO буфер обычно больше из-за лимитов приёмки и более длинного lead time.</li>
+            <li>Чем выше непредсказуемость спроса, тем больше{' '}
+              <Link href="/news/minimalnyy-ostatok-safety-stock-wildberries-ozon" className="text-lime-deep underline decoration-lime-deep/30 underline-offset-2">страховой запас</Link>.
+            </li>
           </ul>
           <p className="my-4 text-ink-soft leading-relaxed text-[15px] md:text-base">
-            Защита системная: держать{' '}
-            <Link href="/news/minimalnyy-ostatok-safety-stock-wildberries-ozon" className="text-lime-deep underline decoration-lime-deep/30 underline-offset-2">страховой запас</Link>,
-            заказывать поставку по{' '}
-            <Link href="/news/tochka-dozakaza-reorder-point-wildberries-ozon" className="text-lime-deep underline decoration-lime-deep/30 underline-offset-2">точке дозаказа</Link>{' '}
-            и следить за{' '}
-            <Link href="/news/dni-pokrytiya-ostatka-marketplace" className="text-lime-deep underline decoration-lime-deep/30 underline-offset-2">днями покрытия</Link>,
-            чтобы вовремя пополнять остаток.
-          </p>
-          <p className="my-4 text-ink-soft leading-relaxed text-[15px] md:text-base">
-            Рассчитать, при каком остатке заказывать поставку, можно в{' '}
-            <Link href="/kalkulyator-tochki-dozakaza" className="text-lime-deep underline decoration-lime-deep/30 underline-offset-2">калькуляторе точки дозаказа</Link>.
+            Заодно прикиньте, сколько уже стоят простои, в{' '}
+            <Link href="/kalkulyator-poteryannoy-vyruchki" className="text-lime-deep underline decoration-lime-deep/30 underline-offset-2">калькуляторе потерянной выручки</Link>.
           </p>
 
           <div className="mt-14 md:mt-16 relative overflow-hidden rounded-2xl border-2 border-lime-deep/30 bg-gradient-to-br from-lime-soft via-paper to-paper p-6 md:p-10">
             <div className="absolute -right-10 -top-10 size-40 rounded-full bg-lime/30 blur-2xl" />
             <div className="relative">
               <h3 className="font-display text-xl md:text-2xl tracking-tight font-medium leading-tight">
-                Не считайте потери вручную — пусть это делает Veloseller
+                Veloseller считает точку дозаказа по каждому SKU автоматически
               </h3>
               <p className="mt-3 text-ink-muted text-sm md:text-base leading-relaxed max-w-xl">
-                Подключите Wildberries или Ozon по API — сервис сам считает потерянную выручку по каждому SKU,
-                реальную скорость продаж с учётом дней без остатка и предупреждает о риске нуля заранее.
+                Подключите Wildberries или Ozon по API — сервис держит точку дозаказа и страховой запас по
+                каждому товару и складу с учётом реальной скорости продаж и срока поставки, и шлёт алерт, когда пора заказывать.
               </p>
               <div className="mt-5 flex flex-wrap gap-3">
                 <Link
