@@ -16,6 +16,8 @@ Marketplace API (marketplace-api.wildberries.ru) — май 2026, multi-warehous
 """
 from __future__ import annotations
 import logging
+import threading
+import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -50,6 +52,39 @@ CARDS_PAGE_SIZE = 100
 MAX_CARDS_PAGES = 1000
 # FBS stocks API ограничение на размер batch'а SKUs
 FBS_STOCKS_BATCH = 1000
+
+# WB Statistics /supplier/stocks: жёсткий лимит ~1 запрос / 60 с НА АККАУНТ.
+# FBO (fetch_snapshots) и FBS (fetch_fbs_snapshots) одного аккаунта — это РАЗНЫЕ
+# data_connections, поэтому per-connection sync-лок их НЕ сериализует: в ночном
+# батче они дёргали /supplier/stocks почти одновременно и сталкивались в
+# 60-секундном окне → 429 → авто-пауза FBO (инцидент 24.06.2026, где здоровые
+# FBO-склады вешались в ручную паузу). Глобальный per-token трокл гарантирует
+# ≥61 с между вызовами stocks ОДНОГО токена. Worker однопроцессный (systemd-юнит
+# veloseller-worker, uvicorn без --workers), поэтому threading.Lock достаточно.
+_STOCKS_MIN_INTERVAL_SEC = 61.0
+_stocks_next_allowed: dict[str, float] = {}
+_stocks_throttle_lock = threading.Lock()
+
+
+def _throttle_stocks(token: str) -> None:
+    """Блокирует поток до момента, когда снова можно дёрнуть /supplier/stocks
+    этим токеном (≥_STOCKS_MIN_INTERVAL_SEC между вызовами одного токена).
+
+    Слот резервируется атомарно под локом (без сна — лок держится микросекунды),
+    сам sleep — вне лока, чтобы разные токены не блокировали друг друга.
+    """
+    interval = _STOCKS_MIN_INTERVAL_SEC
+    if interval <= 0:
+        return
+    key = token or ""
+    with _stocks_throttle_lock:
+        now = time.monotonic()
+        start_at = max(now, _stocks_next_allowed.get(key, 0.0))
+        _stocks_next_allowed[key] = start_at + interval
+    wait = start_at - time.monotonic()
+    if wait > 0:
+        logger.info("WB /supplier/stocks throttle: ждём %.0fс (лимит 1 req/60s на аккаунт)", wait)
+        time.sleep(wait)
 
 
 def _fetch_card_data(cli: httpx.Client, token: str, with_skus: bool = False) -> tuple[dict[str, str], dict[str, list[str]], dict[str, str], dict[str, str]]:
@@ -265,6 +300,7 @@ def fetch_snapshots(token: str) -> list[SnapshotInput]:
             resp.raise_for_status()
             return resp.json() or []
 
+        _throttle_stocks(token)
         rows = with_retry(_stocks_call, base_delay=60.0, max_delay=300.0)
         names_by_vendor = _fetch_card_names(cli, token)
         commission_map = _fetch_wb_commission(cli, token)
@@ -443,6 +479,7 @@ def fetch_fbs_snapshots(token: str) -> list[SnapshotInput]:
                                headers={"Authorization": token})
                 resp.raise_for_status()
                 return resp.json() or []
+            _throttle_stocks(token)
             rows = with_retry(_stocks_call, base_delay=60.0, max_delay=300.0)
             for r in rows:
                 vendor = (r.get("supplierArticle") or "").strip()

@@ -181,22 +181,9 @@ def _job_sync_active_connections() -> None:
         logger.exception("Cron sync_active_connections failed: %s", e)
 
 
-def _is_transient_sync_error(msg) -> bool:
-    """Временная ли ошибка синка (имеет смысл авто-повтор).
-
-    rate-limit (429, WB Statistics API 1 req/60s), 5xx маркетплейса, сеть/timeout.
-    Жёсткие (401/403 токен/права, валидация) сюда НЕ попадают — повтор с теми
-    же кривыми ключами бесполезен.
-    """
-    if not msg:
-        return False
-    m = str(msg).lower()
-    markers = (
-        "429", "too many requests", "rate limit",
-        "502", "503", "504", "bad gateway", "service unavailable",
-        "timeout", "timed out", "econnrefused", "temporarily",
-    )
-    return any(marker in m for marker in markers)
+# Классификатор транзиентных ошибок переехал в app.ingest_persist
+# (is_transient_sync_error) — единый источник правды с авто-паузой: склад,
+# который НЕ паузим, обязан быть ровно тем, который повторяет этот джоб.
 
 
 def _job_retry_transient_errors() -> None:
@@ -224,7 +211,8 @@ def _job_retry_transient_errors() -> None:
             .lt("last_sync_at", min_age)
             .gt("last_sync_at", max_age)
         )
-        retryable = [c for c in conns if _is_transient_sync_error(c.get("last_error"))]
+        from app.ingest_persist import is_transient_sync_error
+        retryable = [c for c in conns if is_transient_sync_error(c.get("last_error"))]
         if not retryable:
             return
         logger.info("transient-retry: %d connections", len(retryable))

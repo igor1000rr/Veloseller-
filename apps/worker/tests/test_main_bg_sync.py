@@ -53,6 +53,87 @@ class TestMarkConnectionSynced:
         assert payload["last_error"] == "API rate limit"
 
 
+class TestAutoPauseOnlyOnPersistent:
+    """Фикс 24.06.2026: транзиентные ошибки (429-лимит WB Statistics, 5xx, сеть)
+    НЕ паузят склад — из paused его достаёт лишь РУЧНОЕ включение, тогда как
+    'error' сам поднимается джобом retry-transient вне пика. Стойкие ошибки
+    (токен/права/лимит тарифа) по-прежнему паузят после порога.
+    """
+
+    @staticmethod
+    def _mark(error, cur_failures):
+        from app import ingest_persist
+
+        sb = MagicMock()
+        sb.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
+            data={"failure_count": cur_failures}
+        )
+        payloads = []
+
+        def fake_update(p):
+            payloads.append(p)
+            chain = MagicMock()
+            chain.eq.return_value.execute.return_value = MagicMock(data=[])
+            return chain
+
+        sb.table.return_value.update.side_effect = fake_update
+
+        notif = []
+        with patch(
+            "app.ingest_persist._send_sync_error_notifications",
+            side_effect=lambda *a, **k: notif.append(a),
+        ):
+            ingest_persist._mark_connection_synced(sb, "c", error=error)
+        return payloads[0], notif
+
+    def test_transient_429_at_threshold_stays_error(self):
+        """failure_count достигает порога, но 429 транзиентен → 'error', не 'paused'."""
+        payload, notif = self._mark("Client error '429 Too Many Requests'", cur_failures=2)
+        assert payload["failure_count"] == 3
+        assert payload["status"] == "error"
+        # транзиент не спамим пер-фейл уведомлениями (саморазрешается ретраем)
+        assert notif == []
+
+    def test_persistent_error_at_threshold_pauses(self):
+        """Стойкая ошибка (битый токен) на пороге → 'paused' + уведомление."""
+        payload, notif = self._mark("401 Unauthorized: invalid token", cur_failures=2)
+        assert payload["failure_count"] == 3
+        assert payload["status"] == "paused"
+        assert len(notif) == 1
+
+    def test_persistent_below_threshold_is_error_and_notifies(self):
+        payload, notif = self._mark("403 Forbidden", cur_failures=0)
+        assert payload["failure_count"] == 1
+        assert payload["status"] == "error"
+        assert len(notif) == 1
+
+    def test_plan_limit_is_persistent_and_pauses(self):
+        """Ozon P0001 «SKU limit reached» — стойкая (не транзиент) → паузит,
+        а не ретраится вечно."""
+        payload, _ = self._mark(
+            "SKU limit reached: plan allows up to 2000 SKUs (current: 3354).", cur_failures=2
+        )
+        assert payload["status"] == "paused"
+
+
+class TestIsTransientSyncError:
+    def test_transient_markers(self):
+        from app.ingest_persist import is_transient_sync_error
+
+        assert is_transient_sync_error("Client error '429 Too Many Requests'")
+        assert is_transient_sync_error("503 Service Unavailable")
+        assert is_transient_sync_error("502 Bad Gateway")
+        assert is_transient_sync_error("Read timeout")
+
+    def test_persistent_and_empty_not_transient(self):
+        from app.ingest_persist import is_transient_sync_error
+
+        assert not is_transient_sync_error("401 Unauthorized")
+        assert not is_transient_sync_error("SKU limit reached: plan allows up to 2000")
+        assert not is_transient_sync_error(None)
+        assert not is_transient_sync_error("")
+
+
 class TestRunOzonSyncBg:
     """БАГ 85: BG executor должен обрабатывать ошибки и НИКОГДА не бросать."""
 

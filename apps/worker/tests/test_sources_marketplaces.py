@@ -19,6 +19,38 @@ import pytest
 from app.sources import ozon, wildberries
 
 
+class TestStocksThrottle:
+    """Per-token трокл /supplier/stocks (фикс 24.06.2026): ≥61с между вызовами
+    ОДНОГО токена, разные токены друг друга не блокируют. Время/sleep подменены —
+    реального сна нет. (autouse-фикстура обнуляет интервал — здесь явно возвращаем.)
+    """
+
+    def test_same_token_spaced_other_token_free(self, monkeypatch):
+        wildberries._stocks_next_allowed.clear()
+        monkeypatch.setattr(wildberries, "_STOCKS_MIN_INTERVAL_SEC", 60.0)
+        fake = {"t": 1000.0}
+        monkeypatch.setattr(wildberries.time, "monotonic", lambda: fake["t"])
+        sleeps = []
+        monkeypatch.setattr(wildberries.time, "sleep", lambda s: sleeps.append(s))
+
+        wildberries._throttle_stocks("A")          # первый вызов токена A — без ожидания
+        assert sleeps == []
+        wildberries._throttle_stocks("A")          # повтор A сразу → ждём ~60с
+        assert len(sleeps) == 1
+        assert abs(sleeps[0] - 60.0) < 0.001
+        wildberries._throttle_stocks("B")          # токен B независим → без ожидания
+        assert len(sleeps) == 1
+
+    def test_zero_interval_disables_throttle(self, monkeypatch):
+        wildberries._stocks_next_allowed.clear()
+        monkeypatch.setattr(wildberries, "_STOCKS_MIN_INTERVAL_SEC", 0.0)
+        sleeps = []
+        monkeypatch.setattr(wildberries.time, "sleep", lambda s: sleeps.append(s))
+        wildberries._throttle_stocks("A")
+        wildberries._throttle_stocks("A")
+        assert sleeps == []
+
+
 # ============== OZON ==============
 
 def _ozon_resp(json_data: dict, status: int = 200):

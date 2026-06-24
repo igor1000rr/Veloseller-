@@ -25,6 +25,27 @@ _DEDUP_WINDOW_HOURS = 20
 SYNC_FAILURE_AUTO_PAUSE_THRESHOLD = 3
 SYNC_ERROR_NOTIFY_COOLDOWN_HOURS = 24
 
+# Маркеры ВРЕМЕННЫХ (транзиентных) ошибок синка: rate-limit (429, WB Statistics
+# /supplier/stocks 1 req/60s), 5xx маркетплейса, сеть/timeout. Жёсткие ошибки
+# (401/403 токен/права, превышение лимита тарифа, валидация) сюда НЕ попадают —
+# повтор с теми же условиями бесполезен и ведёт к авто-паузе после порога.
+# Единый источник правды И для авто-паузы (_mark_connection_synced), И для джоба
+# авто-повтора (scheduler._job_retry_transient_errors): склад, который мы НЕ паузим,
+# обязан быть ровно тем, который повторяет retry-transient.
+_TRANSIENT_ERROR_MARKERS = (
+    "429", "too many requests", "rate limit",
+    "502", "503", "504", "bad gateway", "service unavailable",
+    "timeout", "timed out", "econnrefused", "temporarily",
+)
+
+
+def is_transient_sync_error(msg: object) -> bool:
+    """Временная ли ошибка синка (имеет смысл авто-повтор, а не авто-пауза)."""
+    if not msg:
+        return False
+    m = str(msg).lower()
+    return any(marker in m for marker in _TRANSIENT_ERROR_MARKERS)
+
 
 def _ozon_kind_from_warehouse(warehouse_kind: Optional[str]) -> Optional[str]:
     if warehouse_kind == "ozon_fbo":
@@ -280,7 +301,16 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
         cur_failures = 0
 
     new_failures = cur_failures + 1
-    auto_paused = new_failures >= SYNC_FAILURE_AUTO_PAUSE_THRESHOLD
+    # Авто-пауза ТОЛЬКО на стойких (не-транзиентных) ошибках: протухший токен,
+    # нет прав, превышен лимит тарифа, валидация. Транзиентные (429-лимит WB
+    # Statistics 1 req/60s, 5xx, сеть) НЕ паузим: из paused склад достаётся лишь
+    # РУЧНЫМ включением, тогда как 'error' сам поднимается джобом retry-transient
+    # вне пиковой нагрузки. Инцидент 24.06.2026: ночной батч 02:00 UTC ловил 429
+    # на /supplier/stocks и вешал здоровые FBO-склады в ручную паузу — хотя вне
+    # пика тот же синк проходит с первой попытки. Реально застрявший склад
+    # (>30ч без успешного синка) ловит _job_monitor_sync_freshness отдельно.
+    transient = is_transient_sync_error(error)
+    auto_paused = (new_failures >= SYNC_FAILURE_AUTO_PAUSE_THRESHOLD) and not transient
     new_status = "paused" if auto_paused else "error"
 
     sb.table("data_connections").update({
@@ -294,10 +324,15 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
         "connection_id": connection_id,
         "failure_count": new_failures,
         "auto_paused": auto_paused,
+        "transient": transient,
         "status": new_status,
     })
 
-    _send_sync_error_notifications(sb, connection_id, error, new_failures, auto_paused)
+    # Транзиентные ошибки не спамим пер-фейл уведомлениями — они саморазрешаются
+    # ретраем; шлём только по стойким (где нужно ручное вмешательство). Застрявший
+    # транзиент >30ч поймает мониторинг свежести синка отдельным алертом.
+    if not transient:
+        _send_sync_error_notifications(sb, connection_id, error, new_failures, auto_paused)
 
 
 def _try_acquire_sync_lock(sb, connection_id: str) -> bool:
