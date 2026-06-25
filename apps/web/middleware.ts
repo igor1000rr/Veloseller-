@@ -31,6 +31,48 @@ function commonCsp(sb: { https: string; wss: string }): string[] {
   ];
 }
 
+// ВРЕМЕННАЯ диагностика инцидента «после подключения складов выкидывает на /login».
+// На каждом редиректе приватный→/login пишем в debug_auth_events: какие куки пришли,
+// есть ли auth-кука Supabase и ошибку getUser(). Это разводит «кука пропала» vs
+// «токен невалиден». Активна только при заданном SUPABASE_SERVICE_ROLE_KEY (в тестах
+// его нет → выключено). bulletproof: любые ошибки глушим, есть таймаут. УДАЛИТЬ после.
+async function logAuthBounce(
+  path: string,
+  cookieNames: string,
+  sbAuthCookie: boolean,
+  authError: string | null,
+  ua: string | null,
+): Promise<void> {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 800);
+  try {
+    await fetch(`${url}/rest/v1/debug_auth_events`, {
+      method: "POST",
+      headers: {
+        apikey: key,
+        authorization: `Bearer ${key}`,
+        "content-type": "application/json",
+        prefer: "return=minimal",
+      },
+      body: JSON.stringify({
+        path,
+        cookie_names: cookieNames,
+        sb_auth_cookie: sbAuthCookie,
+        auth_error: authError,
+        ua,
+      }),
+      signal: ctrl.signal,
+    });
+  } catch {
+    /* диагностика — глушим всё, чтобы не влиять на middleware */
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
 
@@ -104,9 +146,19 @@ export async function middleware(request: NextRequest) {
     },
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user }, error: authErr } = await supabase.auth.getUser();
 
   if (isPrivate && !user) {
+    // ВРЕМЕННО (диагностика): фиксируем, ПОЧЕМУ нет юзера на приватном роуте.
+    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      const names = request.cookies.getAll().map((c) => c.name);
+      const sbAuth = names.some((n) => n.includes("auth-token"));
+      try {
+        await logAuthBounce(path, names.join(","), sbAuth, authErr?.message ?? null, request.headers.get("user-agent"));
+      } catch {
+        /* no-op */
+      }
+    }
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("redirect", path);
