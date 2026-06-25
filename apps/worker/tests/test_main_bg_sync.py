@@ -61,12 +61,12 @@ class TestAutoPauseOnlyOnPersistent:
     """
 
     @staticmethod
-    def _mark(error, cur_failures):
+    def _mark(error, cur_failures, error_since=None):
         from app import ingest_persist
 
         sb = MagicMock()
         sb.table.return_value.select.return_value.eq.return_value.single.return_value.execute.return_value = MagicMock(
-            data={"failure_count": cur_failures}
+            data={"failure_count": cur_failures, "error_since": error_since}
         )
         payloads = []
 
@@ -114,6 +114,25 @@ class TestAutoPauseOnlyOnPersistent:
             "SKU limit reached: plan allows up to 2000 SKUs (current: 3354).", cur_failures=2
         )
         assert payload["status"] == "paused"
+
+    def test_transient_persisting_over_6h_notifies_once(self):
+        """Транзиентная ошибка, висящая дольше 6ч (error_since в прошлом), шлёт
+        одно уведомление — но склад остаётся 'error', не 'paused'."""
+        from datetime import datetime, timezone, timedelta
+
+        old = (datetime.now(timezone.utc) - timedelta(hours=7)).isoformat()
+        payload, notif = self._mark("Client error '429 Too Many Requests'", cur_failures=20, error_since=old)
+        assert payload["status"] == "error"   # транзиент не паузит даже при fc=21
+        assert len(notif) == 1                 # эпизод >6ч → одно уведомление
+
+    def test_transient_fresh_episode_no_notify(self):
+        """Свежий транзиентный эпизод (<6ч) уведомлений не шлёт."""
+        from datetime import datetime, timezone, timedelta
+
+        recent = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        payload, notif = self._mark("503 Service Unavailable", cur_failures=5, error_since=recent)
+        assert payload["status"] == "error"
+        assert notif == []
 
 
 class TestIsTransientSyncError:

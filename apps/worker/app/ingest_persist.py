@@ -24,6 +24,12 @@ _DEDUP_WINDOW_HOURS = 20
 
 SYNC_FAILURE_AUTO_PAUSE_THRESHOLD = 3
 SYNC_ERROR_NOTIFY_COOLDOWN_HOURS = 24
+# Транзиентные ошибки (429/5xx/сеть) не паузят склад и не шлют пер-фейл уведомления.
+# Но если такой эпизод тянется дольше этого порога — шлём ОДНО уведомление (склад
+# реально не синкается полдня, юзеру стоит знать). Кулдаун (error_notified_at)
+# не даёт повторов. Порог < окна retry-transient (6ч), чтобы успеть до того, как
+# джоб перестанет ретраить по возрасту last_sync_at.
+TRANSIENT_NOTIFY_AFTER_HOURS = 6
 
 # Маркеры ВРЕМЕННЫХ (транзиентных) ошибок синка: rate-limit (429, WB Statistics
 # /supplier/stocks 1 req/60s), 5xx маркетплейса, сеть/timeout. Жёсткие ошибки
@@ -276,7 +282,8 @@ def _send_sync_error_notifications(
 
 
 def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None) -> None:
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat()
 
     if error is None:
         sb.table("data_connections").update({
@@ -285,20 +292,25 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
             "last_error": None,
             "failure_count": 0,
             "error_notified_at": None,
+            "error_since": None,
         }).eq("id", connection_id).execute()
         return
 
+    cur_failures = 0
+    prev_error_since = None
     try:
         cur_res = (
             sb.table("data_connections")
-            .select("failure_count")
+            .select("failure_count,error_since")
             .eq("id", connection_id)
             .single()
             .execute()
         )
-        cur_failures = int((cur_res.data or {}).get("failure_count") or 0)
+        _cur = cur_res.data or {}
+        cur_failures = int(_cur.get("failure_count") or 0)
+        prev_error_since = _cur.get("error_since")
     except Exception:
-        cur_failures = 0
+        pass
 
     new_failures = cur_failures + 1
     # Авто-пауза ТОЛЬКО на стойких (не-транзиентных) ошибках: протухший токен,
@@ -313,12 +325,26 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
     auto_paused = (new_failures >= SYNC_FAILURE_AUTO_PAUSE_THRESHOLD) and not transient
     new_status = "paused" if auto_paused else "error"
 
-    sb.table("data_connections").update({
+    # error_since — момент начала текущего непрерывного эпизода ошибок. Ставим при
+    # входе в ошибку (failure_count 0→1) либо если его ещё нет; на последующих
+    # неудачах НЕ перезаписываем. last_sync_at для этого не годится — он обновляется
+    # на КАЖДОЙ попытке (в т.ч. неуспешной), поэтому «как давно висит» по нему не понять.
+    update_payload = {
         "last_sync_at": now_iso,
         "status": new_status,
         "last_error": error,
         "failure_count": new_failures,
-    }).eq("id", connection_id).execute()
+    }
+    if cur_failures == 0 or not prev_error_since:
+        update_payload["error_since"] = now_iso
+        episode_start = now_dt
+    else:
+        try:
+            episode_start = datetime.fromisoformat(str(prev_error_since).replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            episode_start = now_dt
+
+    sb.table("data_connections").update(update_payload).eq("id", connection_id).execute()
 
     logger.warning("sync failure tracked", extra={
         "connection_id": connection_id,
@@ -328,11 +354,18 @@ def _mark_connection_synced(sb, connection_id: str, error: Optional[str] = None)
         "status": new_status,
     })
 
-    # Транзиентные ошибки не спамим пер-фейл уведомлениями — они саморазрешаются
-    # ретраем; шлём только по стойким (где нужно ручное вмешательство). Застрявший
-    # транзиент >30ч поймает мониторинг свежести синка отдельным алертом.
+    # Уведомления:
+    # - стойкие ошибки (токен/права/лимит тарифа): шлём — нужна реакция человека.
+    # - транзиентные (429/5xx/сеть): молчим, ПОКА эпизод не висит дольше порога
+    #   (TRANSIENT_NOTIFY_AFTER_HOURS). Дольше — одно письмо/Telegram (кулдаун
+    #   error_notified_at в _send_* защищает от повтора). Так не спамим по
+    #   саморазрешающимся блипам, но предупреждаем о реально затяжной проблеме.
     if not transient:
         _send_sync_error_notifications(sb, connection_id, error, new_failures, auto_paused)
+    else:
+        episode_hours = (now_dt - episode_start).total_seconds() / 3600.0
+        if episode_hours >= TRANSIENT_NOTIFY_AFTER_HOURS:
+            _send_sync_error_notifications(sb, connection_id, error, new_failures, False)
 
 
 def _try_acquire_sync_lock(sb, connection_id: str) -> bool:
