@@ -36,13 +36,16 @@ function commonCsp(sb: { https: string; wss: string }): string[] {
 // есть ли auth-кука Supabase и ошибку getUser(). Это разводит «кука пропала» vs
 // «токен невалиден». Активна только при заданном SUPABASE_SERVICE_ROLE_KEY (в тестах
 // его нет → выключено). bulletproof: любые ошибки глушим, есть таймаут. УДАЛИТЬ после.
-async function logAuthBounce(
-  path: string,
-  cookieNames: string,
-  sbAuthCookie: boolean,
-  authError: string | null,
-  ua: string | null,
-): Promise<void> {
+async function logAuthBounce(fields: {
+  path: string;
+  cookieNames: string;
+  sbAuthCookie: boolean;
+  sbChunks: number;
+  cookieBytes: number;
+  referer: string | null;
+  authError: string | null;
+  ua: string | null;
+}): Promise<void> {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return;
@@ -58,11 +61,14 @@ async function logAuthBounce(
         prefer: "return=minimal",
       },
       body: JSON.stringify({
-        path,
-        cookie_names: cookieNames,
-        sb_auth_cookie: sbAuthCookie,
-        auth_error: authError,
-        ua,
+        path: fields.path,
+        cookie_names: fields.cookieNames,
+        sb_auth_cookie: fields.sbAuthCookie,
+        sb_chunks: fields.sbChunks,
+        cookie_bytes: fields.cookieBytes,
+        referer: fields.referer,
+        auth_error: fields.authError,
+        ua: fields.ua,
       }),
       signal: ctrl.signal,
     });
@@ -150,11 +156,23 @@ export async function middleware(request: NextRequest) {
 
   if (isPrivate && !user) {
     // ВРЕМЕННО (диагностика): фиксируем, ПОЧЕМУ нет юзера на приватном роуте.
+    // sbChunks разводит «куки вообще нет» (0) vs «чанки sb-...-auth-token есть,
+    // но getUser их не принял» (>0 + auth_error). cookieBytes ловит обрезку
+    // больших чанк-кук буфером nginx. referer — с какой страницы прилетел bounce.
     if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
       const names = request.cookies.getAll().map((c) => c.name);
-      const sbAuth = names.some((n) => n.includes("auth-token"));
+      const sbChunks = names.filter((n) => n.includes("auth-token")).length;
       try {
-        await logAuthBounce(path, names.join(","), sbAuth, authErr?.message ?? null, request.headers.get("user-agent"));
+        await logAuthBounce({
+          path,
+          cookieNames: names.join(","),
+          sbAuthCookie: sbChunks > 0,
+          sbChunks,
+          cookieBytes: (request.headers.get("cookie") ?? "").length,
+          referer: request.headers.get("referer"),
+          authError: authErr?.message ?? null,
+          ua: request.headers.get("user-agent"),
+        });
       } catch {
         /* no-op */
       }
