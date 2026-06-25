@@ -36,7 +36,9 @@ function commonCsp(sb: { https: string; wss: string }): string[] {
 // есть ли auth-кука Supabase и ошибку getUser(). Это разводит «кука пропала» vs
 // «токен невалиден». Активна только при заданном SUPABASE_SERVICE_ROLE_KEY (в тестах
 // его нет → выключено). bulletproof: любые ошибки глушим, есть таймаут. УДАЛИТЬ после.
-async function logAuthBounce(fields: {
+async function logAuthEvent(fields: {
+  outcome: string;
+  userId: string | null;
   path: string;
   host: string | null;
   cookieNames: string;
@@ -62,6 +64,8 @@ async function logAuthBounce(fields: {
         prefer: "return=minimal",
       },
       body: JSON.stringify({
+        outcome: fields.outcome,
+        user_id: fields.userId,
         path: fields.path,
         host: fields.host,
         cookie_names: fields.cookieNames,
@@ -173,30 +177,38 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user }, error: authErr } = await supabase.auth.getUser();
 
-  if (isPrivate && !user) {
-    // ВРЕМЕННО (диагностика): фиксируем, ПОЧЕМУ нет юзера на приватном роуте.
-    // sbChunks разводит «куки вообще нет» (0) vs «чанки sb-...-auth-token есть,
-    // но getUser их не принял» (>0 + auth_error). cookieBytes ловит обрезку
-    // больших чанк-кук буфером nginx. referer — с какой страницы прилетел bounce.
-    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
-      const names = request.cookies.getAll().map((c) => c.name);
-      const sbChunks = names.filter((n) => n.includes("auth-token")).length;
-      try {
-        await logAuthBounce({
-          path,
-          host: hostHeader || null,
-          cookieNames: names.join(","),
-          sbAuthCookie: sbChunks > 0,
-          sbChunks,
-          cookieBytes: (request.headers.get("cookie") ?? "").length,
-          referer: request.headers.get("referer"),
-          authError: authErr?.message ?? null,
-          ua: request.headers.get("user-agent"),
-        });
-      } catch {
-        /* no-op */
-      }
+  // ВРЕМЕННО (диагностика инцидента логина): пишем КАЖДЫЙ заход на приватный
+  // роут — и успех (outcome=ok), и вылет (outcome=bounce). Это даёт трассу сессии
+  // по хостам/времени и разводит причины БЕЗ воспроизведения:
+  //   • «ok на host A → bounce на host B» (по user_id/referer) = кросс-хост;
+  //   • sb_chunks падает 1→0 на том же хосте = кука пропала (гонка записи/чистка);
+  //   • sb_chunks>0 + auth_error = токен отвергнут (ротация/просрочка).
+  // Успех шлём fire-and-forget (не ждём — без задержки страницы), вылет ждём (редок).
+  // УДАЛИТЬ вместе с таблицей debug_auth_events после фикса.
+  if (isPrivate && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const names = request.cookies.getAll().map((c) => c.name);
+    const sbChunks = names.filter((n) => n.includes("auth-token")).length;
+    const ev = {
+      outcome: user ? "ok" : "bounce",
+      userId: user?.id ?? null,
+      path,
+      host: hostHeader || null,
+      cookieNames: names.join(","),
+      sbAuthCookie: sbChunks > 0,
+      sbChunks,
+      cookieBytes: (request.headers.get("cookie") ?? "").length,
+      referer: request.headers.get("referer"),
+      authError: authErr?.message ?? null,
+      ua: request.headers.get("user-agent"),
+    };
+    if (user) {
+      void logAuthEvent(ev); // успех — fire-and-forget
+    } else {
+      try { await logAuthEvent(ev); } catch { /* no-op */ }
     }
+  }
+
+  if (isPrivate && !user) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("redirect", path);
