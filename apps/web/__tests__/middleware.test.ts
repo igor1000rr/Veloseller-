@@ -42,6 +42,48 @@ beforeEach(() => {
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = "test-anon-key";
 });
 
+describe("middleware — канонизация хоста www→апекс", () => {
+  // За nginx публичный хост приходит в заголовке Host (не в request.url).
+  function reqWithHost(url: string, host: string): NextRequest {
+    return new NextRequest(new URL(url), { headers: { host } });
+  }
+
+  it("www.veloseller.ru/dashboard → 308 на апекс, путь сохранён", async () => {
+    mockUser(null);
+    const res = await middleware(reqWithHost("https://www.veloseller.ru/dashboard", "www.veloseller.ru"));
+    expect(res.status).toBe(308);
+    expect(res.headers.get("location")).toBe("https://veloseller.ru/dashboard");
+  });
+
+  it("www → апекс сохраняет query-параметры", async () => {
+    mockUser(null);
+    const res = await middleware(reqWithHost("https://www.veloseller.ru/news?a=1&b=2", "www.veloseller.ru"));
+    expect(res.status).toBe(308);
+    expect(res.headers.get("location")).toBe("https://veloseller.ru/news?a=1&b=2");
+  });
+
+  it("www.veloseller.com → апекс того же TLD (.com)", async () => {
+    mockUser(null);
+    const res = await middleware(reqWithHost("https://www.veloseller.com/login", "www.veloseller.com"));
+    expect(res.status).toBe(308);
+    expect(res.headers.get("location")).toBe("https://veloseller.com/login");
+  });
+
+  it("канонизация срабатывает ДО auth — даже на публичном пути", async () => {
+    mockUser({ id: "user-123" });
+    const res = await middleware(reqWithHost("https://www.veloseller.ru/", "www.veloseller.ru"));
+    expect(res.status).toBe(308);
+    expect(res.headers.get("location")).toBe("https://veloseller.ru/");
+  });
+
+  it("апекс (без www) НЕ канонизируется — идёт в обычную auth-логику", async () => {
+    mockUser(null);
+    const res = await middleware(reqWithHost("https://veloseller.ru/dashboard", "veloseller.ru"));
+    expect(res.status).toBe(307); // bounce на /login, а не 308
+    expect(res.headers.get("location")).toContain("/login");
+  });
+});
+
 describe("middleware — приватные пути без авторизации", () => {
   it("/dashboard → redirect /login с redirect параметром", async () => {
     mockUser(null);

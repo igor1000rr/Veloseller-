@@ -38,6 +38,7 @@ function commonCsp(sb: { https: string; wss: string }): string[] {
 // его нет → выключено). bulletproof: любые ошибки глушим, есть таймаут. УДАЛИТЬ после.
 async function logAuthBounce(fields: {
   path: string;
+  host: string | null;
   cookieNames: string;
   sbAuthCookie: boolean;
   sbChunks: number;
@@ -62,6 +63,7 @@ async function logAuthBounce(fields: {
       },
       body: JSON.stringify({
         path: fields.path,
+        host: fields.host,
         cookie_names: fields.cookieNames,
         sb_auth_cookie: fields.sbAuthCookie,
         sb_chunks: fields.sbChunks,
@@ -81,6 +83,23 @@ async function logAuthBounce(fields: {
 
 export async function middleware(request: NextRequest) {
   const path = request.nextUrl.pathname;
+
+  // Канонизация хоста: www.* → апекс (308, сохраняя путь+query). Кука сессии
+  // host-only (без Domain) — сессия, выданная на veloseller.ru, НЕ отправляется
+  // браузером на www.veloseller.ru, и наоборот. Любой переход между хостами =
+  // тихий логаут на каждом запросе (инцидент «после складов постоянно выкидывает
+  // на /login»). Канонизируем www→апекс, чтобы все .ru-переходы жили на одном
+  // хосте и одной куке. Публичный хост берём из Host-заголовка: за nginx
+  // request.url резолвится во внутренний 127.0.0.1:3000 (origin недостоверен),
+  // тогда как путь/query достоверны.
+  const hostHeader = (request.headers.get("host") ?? "").toLowerCase();
+  if (hostHeader.startsWith("www.")) {
+    const apex = hostHeader.slice(4).split(":")[0];
+    if (apex) {
+      const target = new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, `https://${apex}`);
+      return NextResponse.redirect(target, 308);
+    }
+  }
 
   // Приватные (динамические) app-разделы — там данные юзера и Next рендерит
   // per-request, поэтому работает СТРОГИЙ nonce-CSP (script-src strict-dynamic).
@@ -165,6 +184,7 @@ export async function middleware(request: NextRequest) {
       try {
         await logAuthBounce({
           path,
+          host: hostHeader || null,
           cookieNames: names.join(","),
           sbAuthCookie: sbChunks > 0,
           sbChunks,
