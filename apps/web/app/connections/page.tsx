@@ -175,10 +175,14 @@ function StatusBadge({ status, failureCount, errorKind }: { status: string | nul
     error:    { label: t("connections.status.error"),    cls: "text-rose border-rose/30 bg-rose/10" },
   };
   let s = map[status || ""] || map.pending;
-  if (status === "error" && errorKind && TRANSIENT[errorKind]) {
-    s = { label: TRANSIENT[errorKind], cls: "text-orange border-orange/40 bg-orange/10" };
+  const isTransient = status === "error" && !!errorKind && !!TRANSIENT[errorKind];
+  if (isTransient) {
+    s = { label: TRANSIENT[errorKind!], cls: "text-orange border-orange/40 bg-orange/10" };
   }
-  const showCount = (status === "error" || status === "paused") && failureCount > 0;
+  // Счётчик "N/3" показываем только там, где порог авто-паузы реально действует:
+  // paused или НЕ-транзиентная ошибка. Транзиентные (лимит API / МП лежит / сеть)
+  // после фикса воркера НЕ паузятся на 3 — для них "14/3" вводил бы в заблуждение.
+  const showCount = (status === "paused" || (status === "error" && !isTransient)) && failureCount > 0;
   return (
     <span className={`inline-flex items-center font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border font-semibold ${s.cls}`}>
       {s.label}{showCount && ` · ${failureCount}/3`}

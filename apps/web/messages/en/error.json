@@ -15,7 +15,7 @@
   "error.rateLimit.title": "Rate limit exceeded",
   "error.rateLimit.message": "Too many requests in a short time. Wait a minute and try again.",
   "error.rateLimitWb.title": "Wildberries is throttling requests",
-  "error.rateLimitWb.message": "Wildberries refreshes stock roughly once a minute — this is normal. Your current data is already saved, nothing is lost. Wait about a minute before syncing again: repeated clicks only extend the limit.",
+  "error.rateLimitWb.message": "Wildberries refreshes stock roughly once a minute — this is normal. Your current data is already saved, nothing is lost. Wait about a minute before syncing again: repeated clicks only extend the limit. If the limit persists, the same Wildberries API key may be in use by another service — data will catch up once the limit frees.",
   "error.network.title": "Couldn't reach the server",
   "error.network.message": "Check your internet connection. If it's stable, our worker may be temporarily unavailable. Try again in a minute.",
   "error.validation.title": "Check the fields",
