@@ -137,11 +137,18 @@ def _run_connection_sync(sb, conn) -> None:
         # Неизвестный источник — ничего не делаем (как старый continue).
         return
     _persist_via_main(conn["seller_id"], conn["id"], conn["source"], snaps)
+    # Паритет с ingest_persist._mark_connection_synced(error=None): успех ОБЯЗАН
+    # обнулять весь трекинг ошибок, включая error_since и error_notified_at. Иначе
+    # после восстановления через крон (ночной sync / retry-transient) эти поля
+    # висят от прошлого эпизода: error_since остаётся «древним», а стухший
+    # error_notified_at может подавить уведомление о СЛЕДУЮЩЕЙ ошибке.
     sb.table("data_connections").update({
         "last_sync_at": datetime.now(timezone.utc).isoformat(),
         "status": "active",
         "last_error": None,
         "failure_count": 0,
+        "error_since": None,
+        "error_notified_at": None,
     }).eq("id", conn["id"]).execute()
 
 

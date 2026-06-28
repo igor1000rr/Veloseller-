@@ -13,6 +13,45 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 
+class TestCronSyncSuccessResetsErrorTracking:
+    """Паритет с ingest_persist._mark_connection_synced(error=None): крон-успех
+    (_run_connection_sync) ОБЯЗАН обнулять весь трекинг ошибок — error_since и
+    error_notified_at в том числе. Иначе после восстановления через крон (ночной
+    sync / retry-transient) эти поля висят от прошлого эпизода: error_since
+    «древний», а стухший error_notified_at может подавить алерт следующей ошибки.
+    """
+
+    def test_success_clears_error_since_and_notified_at(self, monkeypatch):
+        from app.jobs import scheduler
+
+        payloads = []
+
+        def fake_update(p):
+            payloads.append(p)
+            chain = MagicMock()
+            # лок: .eq().neq().execute().data truthy; успех-пометка: .eq().execute()
+            chain.eq.return_value.neq.return_value.execute.return_value = MagicMock(data=[{"id": "c1"}])
+            chain.eq.return_value.execute.return_value = MagicMock(data=[{"id": "c1"}])
+            return chain
+
+        sb = MagicMock()
+        sb.table.return_value.update.side_effect = fake_update
+
+        monkeypatch.setattr(scheduler.google_sheet, "fetch_snapshots", lambda *a, **k: [])
+        monkeypatch.setattr(scheduler, "_persist_via_main", lambda *a, **k: None)
+
+        conn = {"id": "c1", "seller_id": "s1", "source": "google_sheet",
+                "config": {"sheet_url": "https://example.com/s"}}
+        scheduler._run_connection_sync(sb, conn)
+
+        # успех-пометка — единственный update со status='active' (лок ставит 'syncing')
+        success = next(p for p in payloads if p.get("status") == "active")
+        assert success["error_since"] is None
+        assert success["error_notified_at"] is None
+        assert success["failure_count"] == 0
+        assert success["last_error"] is None
+
+
 class TestCronSyncFailureNotifies:
     """P1-фикс: крон-путь при ошибке синка ДЕЛЕГИРУЕТ в общий
     ingest_persist._mark_connection_synced (инкремент failure_count + авто-пауза
