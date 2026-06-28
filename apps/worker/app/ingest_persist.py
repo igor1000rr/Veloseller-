@@ -40,6 +40,11 @@ TRANSIENT_NOTIFY_AFTER_HOURS = 6
 # обязан быть ровно тем, который повторяет retry-transient.
 _TRANSIENT_ERROR_MARKERS = (
     "429", "too many requests", "rate limit",
+    # 5xx маркетплейса — серверный сбой на ИХ стороне, не наш: повторяем, не паузим.
+    # 500 ловим по фразе "internal server error" (httpx: "Server error '500 ...'"),
+    # а НЕ по голому "500" — иначе ложно-транзиентным стал бы лимит тарифа вида
+    # "plan allows up to 500 SKUs" (он персистентный, обязан паузить).
+    "internal server error",
     "502", "503", "504", "bad gateway", "service unavailable",
     "timeout", "timed out", "econnrefused", "temporarily",
 )

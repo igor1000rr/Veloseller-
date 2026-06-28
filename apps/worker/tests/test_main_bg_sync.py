@@ -143,12 +143,19 @@ class TestIsTransientSyncError:
         assert is_transient_sync_error("503 Service Unavailable")
         assert is_transient_sync_error("502 Bad Gateway")
         assert is_transient_sync_error("Read timeout")
+        # 500 маркетплейса (Ozon /v1/analytics/stocks) — серверный сбой = транзиент
+        assert is_transient_sync_error(
+            "Server error '500 Internal Server Error' for url "
+            "'https://api-seller.ozon.ru/v1/analytics/stocks'"
+        )
 
     def test_persistent_and_empty_not_transient(self):
         from app.ingest_persist import is_transient_sync_error
 
         assert not is_transient_sync_error("401 Unauthorized")
         assert not is_transient_sync_error("SKU limit reached: plan allows up to 2000")
+        # голое число 500 в лимите тарифа НЕ должно стать транзиентным (паузим)
+        assert not is_transient_sync_error("SKU limit reached: plan allows up to 500 SKUs")
         assert not is_transient_sync_error(None)
         assert not is_transient_sync_error("")
 
