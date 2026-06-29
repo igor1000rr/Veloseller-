@@ -120,6 +120,50 @@ class TestBuildXlsx:
         # SHEET_ORDER: critical_stock раньше dead_inventory
         assert wb.sheetnames.index("Критический остаток") < wb.sheetnames.index("Замороженные остатки")
 
+    def test_sku_sheets_split_per_warehouse(self):
+        """Решение заказчика 29.06: склады НЕ смешиваются. Один и тот же SKU на
+        разных складах → отдельные листы, а не одна таблица с «дублями»."""
+        from openpyxl import load_workbook
+        from app.jobs.reports import _build_xlsx
+
+        rows_frozen = [
+            {"coverage_days": 200, "adjusted_velocity": 0.1, "current_stock": 30,
+             "current_price": 1000,
+             "products": {"sku": "B", "product_name": "Товар B", "connection_id": "c-ozon"}},
+            {"coverage_days": 200, "adjusted_velocity": 0.1, "current_stock": 30,
+             "current_price": 2000,
+             "products": {"sku": "B", "product_name": "Товар B", "connection_id": "c-wb"}},
+        ]
+        wh = {"c-ozon": "OZON FBS", "c-wb": "WB FBS"}
+        result = _build_xlsx({"dead_inventory": rows_frozen}, currency="RUB", wh_names=wh)
+        wb = load_workbook(io.BytesIO(result))
+        # Два склада → два отдельных листа, без общего "Замороженные остатки".
+        assert any("OZON FBS" in s for s in wb.sheetnames)
+        assert any("WB FBS" in s for s in wb.sheetnames)
+        assert "Замороженные остатки" not in wb.sheetnames
+
+    def test_frozen_sheet_excludes_zero_money_rows(self):
+        """В листе замороженных денег строки с нулевой заморозкой (нет цены —
+        напр. WB FBS) не показываются: это не «замороженные деньги», а фантом-дубли."""
+        from openpyxl import load_workbook
+        from app.jobs.reports import _build_xlsx
+
+        rows = [
+            {"coverage_days": 200, "adjusted_velocity": 0.1, "current_stock": 30,
+             "current_price": 1000,
+             "products": {"sku": "REAL", "product_name": "С ценой", "connection_id": "c1"}},
+            {"coverage_days": 200, "adjusted_velocity": 0.1, "current_stock": 30,
+             "current_price": 0,
+             "products": {"sku": "ZERO", "product_name": "Без цены", "connection_id": "c1"}},
+        ]
+        result = _build_xlsx({"dead_inventory": rows}, currency="RUB", wh_names={"c1": "OZON FBS"})
+        wb = load_workbook(io.BytesIO(result))
+        sheet = [s for s in wb.sheetnames if "OZON FBS" in s][0]
+        ws = wb[sheet]
+        skus = [ws.cell(row=r, column=1).value for r in range(3, ws.max_row + 1)]
+        assert "REAL" in skus
+        assert "ZERO" not in skus
+
     def test_lost_sales_sheet_has_correct_columns(self):
         """underestimated_sku теперь "Потерянные продажи" с колонками:
         SKU / Название / TVelo / OOS дней / Потеряно ₽

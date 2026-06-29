@@ -119,7 +119,7 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             threshold = int(params.get("coverage_days_threshold", 7))
             res = (
                 sb.table("tvelo_metrics")
-                .select("coverage_days,current_stock,adjusted_velocity,products!inner(sku,product_name,seller_id)")
+                .select("coverage_days,current_stock,adjusted_velocity,products!inner(sku,product_name,seller_id,connection_id)")
                 .eq("products.seller_id", seller_id)
                 .eq("period_start", period_start)
                 .eq("period_end", period_end)
@@ -138,7 +138,7 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             threshold = int(params.get("coverage_days_threshold", 3))
             res = (
                 sb.table("tvelo_metrics")
-                .select("coverage_days,current_stock,current_price,adjusted_velocity,products!inner(sku,product_name,seller_id)")
+                .select("coverage_days,current_stock,current_price,adjusted_velocity,products!inner(sku,product_name,seller_id,connection_id)")
                 .eq("products.seller_id", seller_id)
                 .eq("period_start", period_start)
                 .eq("period_end", period_end)
@@ -157,7 +157,7 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             threshold = int(params.get("coverage_days_threshold", 180))
             res = (
                 sb.table("tvelo_metrics")
-                .select("coverage_days,adjusted_velocity,current_stock,current_price,inventory_segment,products!inner(sku,product_name,seller_id)")
+                .select("coverage_days,adjusted_velocity,current_stock,current_price,inventory_segment,products!inner(sku,product_name,seller_id,connection_id)")
                 .eq("products.seller_id", seller_id)
                 .eq("period_start", period_start)
                 .eq("period_end", period_end)
@@ -172,7 +172,7 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             threshold = int(params.get("stockout_days_threshold", 3))
             res = (
                 sb.table("tvelo_metrics")
-                .select("stockout_days,adjusted_velocity,coverage_days,products!inner(sku,product_name,seller_id)")
+                .select("stockout_days,adjusted_velocity,coverage_days,products!inner(sku,product_name,seller_id,connection_id)")
                 .eq("products.seller_id", seller_id)
                 .eq("period_start", period_start)
                 .eq("period_end", period_end)
@@ -188,7 +188,7 @@ def _fetch_sku_rows(sb, seller_id: str, kind: str, params: dict) -> list[dict]:
             # Колонки Александра: SKU / Название / TVelo / OOS дней / Потеряно ₽
             res = (
                 sb.table("tvelo_metrics")
-                .select("adjusted_velocity,median_30d_velocity,stockout_days,current_price,products!inner(sku,product_name,seller_id),underestimated_sku")
+                .select("adjusted_velocity,median_30d_velocity,stockout_days,current_price,products!inner(sku,product_name,seller_id,connection_id),underestimated_sku")
                 .eq("products.seller_id", seller_id)
                 .eq("period_start", period_start)
                 .eq("period_end", period_end)
@@ -230,6 +230,14 @@ def _row_product(r: dict) -> tuple[str, str]:
     if isinstance(p, list):
         p = p[0] if p else {}
     return (p.get("sku") or "—", p.get("product_name") or "—")
+
+
+def _row_warehouse_id(r: dict) -> Optional[str]:
+    """connection_id товара из встроенного products — для разбивки отчёта по складам."""
+    p = r.get("products") or {}
+    if isinstance(p, list):
+        p = p[0] if p else {}
+    return p.get("connection_id")
 
 
 def _calc_lost_revenue(r: dict) -> float:
@@ -360,15 +368,19 @@ def _build_sheet_weekly_summary(wb, rows: list[dict], currency: str) -> None:
     ws.sheet_view.showGridLines = False
 
 
-def _build_sheet_lost_sales(wb, rows: list[dict], currency: str) -> None:
+def _build_sheet_lost_sales(wb, rows: list[dict], currency: str,
+                            sheet_name: Optional[str] = None, warehouse: Optional[str] = None) -> None:
     """Потерянные продажи (kind=underestimated_sku).
 
     Александр 01.06.2026: SKU / Название / TVelo / OOS дней / Потеряно ₽
     """
-    ws = wb.create_sheet(_sheet_name("underestimated_sku"))
+    ws = wb.create_sheet(sheet_name or _sheet_name("underestimated_sku"))
 
-    # Подзаголовок-описание
-    ws.append(["Товар продаётся быстро, нет в наличии. Каждый день — недополученная выручка."])
+    # Подзаголовок-описание (с пометкой склада — отчёт разбит по складам)
+    desc = "Товар продаётся быстро, нет в наличии. Каждый день — недополученная выручка."
+    if warehouse:
+        desc = f"Склад: {warehouse}. " + desc
+    ws.append([desc])
     from openpyxl.styles import Font
     ws["A1"].font = Font(italic=True, color="64748B", size=10)
     ws.merge_cells("A1:E1")
@@ -391,14 +403,18 @@ def _build_sheet_lost_sales(wb, rows: list[dict], currency: str) -> None:
     ws.freeze_panes = "A3"
 
 
-def _build_sheet_critical_stock(wb, rows: list[dict], currency: str) -> None:
+def _build_sheet_critical_stock(wb, rows: list[dict], currency: str,
+                                sheet_name: Optional[str] = None, warehouse: Optional[str] = None) -> None:
     """Критический остаток.
 
     Александр 01.06.2026: SKU / Название / TVelo / Остаток / Покрытие / Рекомендуемая закупка 30 дней
     """
-    ws = wb.create_sheet(_sheet_name("critical_stock"))
+    ws = wb.create_sheet(sheet_name or _sheet_name("critical_stock"))
 
-    ws.append(["Мало товара на складе. Срочно нужна поставка."])
+    desc = "Мало товара на складе. Срочно нужна поставка."
+    if warehouse:
+        desc = f"Склад: {warehouse}. " + desc
+    ws.append([desc])
     from openpyxl.styles import Font
     ws["A1"].font = Font(italic=True, color="64748B", size=10)
     ws.merge_cells("A1:F1")
@@ -424,14 +440,18 @@ def _build_sheet_critical_stock(wb, rows: list[dict], currency: str) -> None:
     ws.freeze_panes = "A3"
 
 
-def _build_sheet_frozen_stock(wb, rows: list[dict], currency: str) -> None:
+def _build_sheet_frozen_stock(wb, rows: list[dict], currency: str,
+                              sheet_name: Optional[str] = None, warehouse: Optional[str] = None) -> None:
     """Замороженные остатки (kind=dead_inventory).
 
     Александр 01.06.2026: SKU / Название / Остаток / TVelo / Покрытие / Заморожено ₽
     """
-    ws = wb.create_sheet(_sheet_name("dead_inventory"))
+    ws = wb.create_sheet(sheet_name or _sheet_name("dead_inventory"))
 
-    ws.append(["Низкая скорость продаж. Деньги заморожены в товаре. Расчёт по средней скорости TVelo за 30 дней."])
+    desc = "Низкая скорость продаж. Деньги заморожены в товаре. Расчёт по средней скорости TVelo за 30 дней."
+    if warehouse:
+        desc = f"Склад: {warehouse}. " + desc
+    ws.append([desc])
     from openpyxl.styles import Font
     ws["A1"].font = Font(italic=True, color="64748B", size=10)
     ws.merge_cells("A1:F1")
@@ -455,50 +475,99 @@ def _build_sheet_frozen_stock(wb, rows: list[dict], currency: str) -> None:
     ws.freeze_panes = "A3"
 
 
-def _build_sheet_for_kind(wb, kind: str, rows: list[dict], currency: str) -> None:
+def _build_sheet_for_kind(wb, kind: str, rows: list[dict], currency: str,
+                          sheet_name: Optional[str] = None, warehouse: Optional[str] = None) -> None:
     """Dispatch на правильный билдер по kind."""
     if kind == "weekly_report":
         _build_sheet_weekly_summary(wb, rows, currency)
     elif kind == "underestimated_sku":
-        _build_sheet_lost_sales(wb, rows, currency)
+        _build_sheet_lost_sales(wb, rows, currency, sheet_name, warehouse)
     elif kind == "critical_stock":
-        _build_sheet_critical_stock(wb, rows, currency)
+        _build_sheet_critical_stock(wb, rows, currency, sheet_name, warehouse)
     elif kind == "dead_inventory":
-        _build_sheet_frozen_stock(wb, rows, currency)
+        _build_sheet_frozen_stock(wb, rows, currency, sheet_name, warehouse)
     # Остальные kinds в Excel не идут (см. KINDS_IN_XLSX).
 
 
-def _build_xlsx(kind_rows: dict[str, list[dict]], currency: str) -> bytes:
+# Короткие лейблы листов для разбивки по складам: полное название + имя склада
+# не влезают в лимит Excel (31 символ), поэтому для per-склад листов — сокращения.
+_KIND_SHORT_LABELS: dict[str, str] = {
+    "underestimated_sku": "Потери",
+    "critical_stock":     "Критич.",
+    "dead_inventory":     "Заморож.",
+}
+
+
+def _unique_sheet_title(wb, base: str) -> str:
+    """Имя листа Excel: обрезаем до 31 символа и гарантируем уникальность в книге."""
+    title = base[:31]
+    if title not in wb.sheetnames:
+        return title
+    i = 2
+    while True:
+        suffix = f" {i}"
+        candidate = base[:31 - len(suffix)] + suffix
+        if candidate not in wb.sheetnames:
+            return candidate
+        i += 1
+
+
+def _build_xlsx(kind_rows: dict[str, list[dict]], currency: str,
+                wh_names: Optional[dict[str, str]] = None) -> bytes:
     """Собирает xlsx из набора kind→rows.
 
-    Порядок листов жёстко SHEET_ORDER. kinds которых нет в KINDS_IN_XLSX
-    игнорируются — Александр попросил убрать дубли (low_stock, repeated_stockout)
-    и sync_error (теперь отдельным email).
+    Склады НЕ смешиваются (решение заказчика 29.06): SKU-листы разбиваются по
+    складам — отдельный лист на каждый склад ("<kind> · <Склад>"). Один и тот же
+    товар на разных складах больше не выглядит дублем в одной таблице. Сводка
+    (weekly_report) остаётся одна — это роллап по магазину, а не список SKU.
+    Если у строк нет connection_id (нет инфы о складе) — лист один со старым
+    именем (бэк-совместимость).
 
-    weekly_report — особый случай: лист «Сводка по складу» генерится только
-    если на него явно подписан seller (kind присутствует в kind_rows). Если
-    rows пуст, но kind в kind_rows есть — лист всё равно делается с прочерками
-    (HEAD-страница как индикатор "метрик ещё нет").
+    Порядок листов — SHEET_ORDER. kinds не из KINDS_IN_XLSX игнорируются.
+    weekly_report генерится даже без данных (HEAD-страница «метрик ещё нет»).
     """
     from openpyxl import Workbook
     wb = Workbook()
     if "Sheet" in wb.sheetnames:
         del wb["Sheet"]
 
+    names = wh_names or {}
     has_data = False
     for kind in SHEET_ORDER:
-        if kind not in KINDS_IN_XLSX:
-            continue
-        if kind not in kind_rows:
-            # На этот kind seller не подписан — лист не нужен.
+        if kind not in KINDS_IN_XLSX or kind not in kind_rows:
             continue
         rows = kind_rows.get(kind) or []
-        # Для SKU-листов: пустые rows → пропуск.
-        # Для weekly_report (HEAD-страница): генерим даже без данных — будут прочерки.
-        if not rows and kind != "weekly_report":
+
+        if kind == "weekly_report":
+            _build_sheet_for_kind(wb, kind, rows, currency)
+            has_data = True
             continue
-        _build_sheet_for_kind(wb, kind, rows, currency)
-        has_data = True
+
+        # «Замороженные деньги»: строки с нулём (например WB FBS без цены) — это
+        # НЕ замороженные деньги, в этот лист не идут (раньше плодили фантом-дубли).
+        if kind == "dead_inventory":
+            rows = [r for r in rows if _calc_frozen_money(r) > 0]
+        if not rows:
+            continue
+
+        # Разбивка по складам — склады не смешиваем.
+        groups: dict[Optional[str], list[dict]] = defaultdict(list)
+        for r in rows:
+            groups[_row_warehouse_id(r)].append(r)
+
+        if list(groups.keys()) == [None]:
+            # Нет инфы о складе (edge/тесты) — один лист со старым названием.
+            _build_sheet_for_kind(wb, kind, rows, currency)
+            has_data = True
+            continue
+
+        short = _KIND_SHORT_LABELS.get(kind, _sheet_name(kind))
+        for cid in sorted(groups, key=lambda c: (names.get(c or "") or str(c or ""))):
+            label = names.get(cid or "") or "Склад"
+            title = _unique_sheet_title(wb, f"{short} · {label}")
+            _build_sheet_for_kind(wb, kind, groups[cid], currency,
+                                  sheet_name=title, warehouse=label)
+            has_data = True
 
     if not has_data:
         ws = wb.create_sheet("Пусто")
@@ -615,6 +684,21 @@ def _record_history(
             logger.exception("failed to upsert report_history seller=%s", seller_id)
 
 
+def _warehouse_names(sb, seller_id: str) -> dict[str, str]:
+    """connection_id → имя склада (для разбивки отчёта по складам). Ошибки глушим."""
+    try:
+        res = (
+            sb.table("data_connections")
+            .select("id,name")
+            .eq("seller_id", seller_id)
+            .execute()
+        )
+        return {row["id"]: (row.get("name") or "Склад") for row in (res.data or [])}
+    except Exception:
+        logger.exception("warehouse names fetch failed seller=%s", seller_id)
+        return {}
+
+
 def dispatch_daily_reports() -> None:
     try:
         sb = get_supabase()
@@ -722,7 +806,8 @@ def dispatch_daily_reports() -> None:
                 continue
 
             try:
-                xlsx_bytes = _build_xlsx(kind_rows, currency)
+                wh_names = _warehouse_names(sb, seller_id)
+                xlsx_bytes = _build_xlsx(kind_rows, currency, wh_names)
             except Exception:
                 logger.exception("xlsx build failed seller=%s", seller_id)
                 _record_history(sb, seller_id, today_dow, kinds, channel,
