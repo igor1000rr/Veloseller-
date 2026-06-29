@@ -23,11 +23,21 @@ export default async function ConnectionsPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const [connectionsRes, sellerRes] = await Promise.all([
+  const [connectionsRes, sellerRes, covRes] = await Promise.all([
     supabase.from("data_connections").select(LIST_COLUMNS).eq("seller_id", user.id).order("created_at", { ascending: false }),
     supabase.from("sellers").select("plan, plan_warehouses_limit").eq("id", user.id).maybeSingle(),
+    // Покрытие ценами по WB-складам. RPC новая — ещё не в сген. типах БД, поэтому cast.
+    (supabase.rpc as any)("wb_price_coverage"),
   ]);
   const connections = connectionsRes.data;
+  // Если у WB-склада есть остатки, но почти нет цен — у токена нет категории
+  // «Цены и скидки» (WB не отдаёт цены) → «заморожено»/потери = 0. Подсказываем.
+  const priceCoverage = new Map<string, { stocked: number; priced: number }>(
+    (((covRes as any)?.data as any[]) ?? []).map((r) => [
+      r.connection_id as string,
+      { stocked: Number(r.stocked) || 0, priced: Number(r.stocked_priced) || 0 },
+    ]),
+  );
   const limit = sellerRes.data?.plan_warehouses_limit ?? 15;
   const current = connections?.length ?? 0;
   const atLimit = current >= limit;
@@ -84,6 +94,9 @@ export default async function ConnectionsPage() {
             const isPaused = c.status === "paused";
             const parsed = c.last_error ? parseApiError(c.last_error) : null;
             const autoRetry = !!parsed && TRANSIENT_KINDS.includes(parsed.kind) && c.status !== "paused";
+            const cov = priceCoverage.get(c.id);
+            // Подсказка о цене: есть остатки (≥5), но <10% из них с ценой.
+            const lowPrice = !!cov && cov.stocked >= 5 && cov.priced / cov.stocked < 0.1;
             return (
               <div key={c.id} className={`rounded-2xl border p-5 md:p-6 hover:shadow-sm transition ${
                 isPaused ? "border-orange/40 bg-orange/[0.02]" : "border-line bg-paper"
@@ -134,6 +147,9 @@ export default async function ConnectionsPage() {
                   </div>
                 </div>
                 {parsed && <ConnectionErrorHint parsed={parsed} autoRetry={autoRetry} />}
+                {lowPrice && cov && (
+                  <PriceCoverageHint unpriced={cov.stocked - cov.priced} stocked={cov.stocked} href={`/connections/${c.id}`} />
+                )}
               </div>
             );
           })
@@ -156,6 +172,22 @@ export default async function ConnectionsPage() {
         )}
       </div>
     </>
+  );
+}
+
+/** Подсказка: у WB-склада есть остатки, но нет цен → токен без категории «Цены и скидки». */
+function PriceCoverageHint({ unpriced, stocked, href }: { unpriced: number; stocked: number; href: string }) {
+  return (
+    <div className="mt-3 rounded-xl border border-orange/30 bg-orange/5 p-4 flex items-start gap-2.5">
+      <span className="text-base leading-none mt-0.5 shrink-0">🔑</span>
+      <div className="flex-1 min-w-0">
+        <div className="text-sm font-semibold text-orange">{t("connections.priceHint.title")}</div>
+        <p className="mt-1 text-sm text-ink-soft">{t("connections.priceHint.body", { unpriced, stocked })}</p>
+        <Link href={href} className="mt-2 inline-block text-sm font-semibold text-ink underline hover:no-underline">
+          {t("connections.priceHint.action")} →
+        </Link>
+      </div>
+    </div>
   );
 }
 
