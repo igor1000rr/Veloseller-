@@ -19,6 +19,7 @@ from __future__ import annotations
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 
 from app.sources import ozon
@@ -42,6 +43,41 @@ def _mock_client(responses: list):
 
 
 _EMPTY_NAMES = {"items": []}
+
+
+class TestRaiseIncludesBody:
+    """_raise(resp) — сохраняет тип httpx.HTTPStatusError, но добавляет тело Ozon.
+
+    Зачем: голый resp.raise_for_status() даёт лишь «Client error '400 Bad Request'»
+    без причины. Ozon кладёт причину (битый Client-Id, не тот тип ключа, лимит) в
+    body — её и надо донести до last_error, чтобы продавец понял, что чинить.
+    """
+
+    @staticmethod
+    def _resp(status: int, body: str) -> httpx.Response:
+        req = httpx.Request("POST", f"{ozon.BASE}/v3/product/list")
+        return httpx.Response(status_code=status, request=req, text=body)
+
+    def test_success_is_noop(self):
+        # 2xx — ничего не поднимаем, синк продолжается.
+        ozon._raise(self._resp(200, '{"result": {}}'))
+
+    def test_400_raises_with_body(self):
+        body = '{"code": 3, "message": "Client-Id or Api-Key not found"}'
+        with pytest.raises(httpx.HTTPStatusError) as ei:
+            ozon._raise(self._resp(400, body))
+        msg = str(ei.value)
+        # Причина Ozon видна в сообщении (попадёт в last_error).
+        assert "Client-Id or Api-Key not found" in msg
+        assert "400" in msg
+        # Тип не изменился — логика ретраев/классификации не ломается.
+        assert ei.value.response.status_code == 400
+
+    def test_body_truncated(self):
+        # Очень длинное тело обрезаем (last_error не должен распухать).
+        with pytest.raises(httpx.HTTPStatusError) as ei:
+            ozon._raise(self._resp(500, "x" * 5000))
+        assert len(str(ei.value)) < 1000
 
 
 class TestStockQtyFilter:

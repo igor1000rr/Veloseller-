@@ -62,6 +62,28 @@ def _headers(client_id: str, api_key: str) -> dict[str, str]:
     return {"Client-Id": client_id, "Api-Key": api_key, "Content-Type": "application/json"}
 
 
+def _raise(resp: httpx.Response) -> None:
+    """raise_for_status с телом ответа Ozon в сообщении.
+
+    Ozon кладёт реальную причину 4xx/5xx в body (code/message): битый Client-Id,
+    не тот тип ключа (Performance вместо Seller API), превышен лимит и т.п. Голый
+    httpx raise_for_status даёт лишь «Client error '400 Bad Request'» без причины —
+    продавец видит ошибку, но не понимает, что чинить. Сохраняем тип ошибки
+    (httpx.HTTPStatusError), чтобы логика ретраев/классификации транзиентности не
+    менялась; добавляем только текст причины (обрезанный)."""
+    if resp.is_success:
+        return
+    try:
+        body = (resp.text or "").strip().replace("\n", " ")[:400]
+    except Exception:
+        body = ""
+    raise httpx.HTTPStatusError(
+        f"Ozon {resp.status_code} {resp.reason_phrase} for {resp.request.url}: {body}",
+        request=resp.request,
+        response=resp,
+    )
+
+
 def _decimal(v) -> Decimal:
     """Безопасное преобразование значения в Decimal с fallback на 0."""
     if v is None or v == "":
@@ -118,7 +140,7 @@ def _fetch_ozon_category_tree(cli: httpx.Client, client_id: str, api_key: str) -
                 headers=_headers(client_id, api_key),
                 json={},
             )
-            resp.raise_for_status()
+            _raise(resp)
             return resp.json()
 
         data = with_retry(_call)
@@ -178,7 +200,7 @@ def _fetch_ozon_attributes(cli: httpx.Client, client_id: str, api_key: str, prod
                     headers=_headers(client_id, api_key),
                     json={"filter": {"product_id": b, "visibility": "ALL"}, "limit": 1000, "last_id": lid},
                 )
-                resp.raise_for_status()
+                _raise(resp)
                 return resp.json()
 
             try:
@@ -260,7 +282,7 @@ def _fetch_product_names(cli: httpx.Client, client_id: str, api_key: str, offer_
                 headers=_headers(client_id, api_key),
                 json={"offer_id": b},
             )
-            resp.raise_for_status()
+            _raise(resp)
             return resp.json()
 
         try:
@@ -326,7 +348,7 @@ def _fetch_fbo_product_info(cli: httpx.Client, client_id: str, api_key: str, pro
                 headers=_headers(client_id, api_key),
                 json={"product_id": b},
             )
-            resp.raise_for_status()
+            _raise(resp)
             return resp.json()
 
         data = with_retry(_info_call)
@@ -372,7 +394,7 @@ def _fetch_fbo_analytics_qty(cli: httpx.Client, client_id: str, api_key: str, sk
                 headers=_headers(client_id, api_key),
                 json={"skus": b},
             )
-            resp.raise_for_status()
+            _raise(resp)
             return resp.json()
 
         data = with_retry(_analytics_call)
@@ -420,7 +442,7 @@ def _fetch_snapshots_fbo(client_id: str, api_key: str, page_size: int = 1000) ->
                     headers=_headers(client_id, api_key),
                     json={"filter": {"visibility": "ALL"}, "last_id": lid, "limit": page_size},
                 )
-                resp.raise_for_status()
+                _raise(resp)
                 return resp.json()
 
             data = with_retry(_list_call).get("result", {})
@@ -483,7 +505,7 @@ def _fetch_snapshots_fbo(client_id: str, api_key: str, page_size: int = 1000) ->
                             "limit": 1000,
                         },
                     )
-                    resp.raise_for_status()
+                    _raise(resp)
                     return resp.json()
 
                 try:
@@ -583,7 +605,7 @@ def fetch_snapshots(
                     headers=_headers(client_id, api_key),
                     json={"filter": {"visibility": "ALL"}, "last_id": lid, "limit": page_size},
                 )
-                resp.raise_for_status()
+                _raise(resp)
                 return resp.json()
 
             data = with_retry(_list_call).get("result", {})
@@ -632,7 +654,7 @@ def fetch_snapshots(
                             "limit": 1000,
                         },
                     )
-                    resp.raise_for_status()
+                    _raise(resp)
                     return resp.json()
 
                 data = with_retry(_stocks_call)
@@ -683,7 +705,7 @@ def fetch_snapshots(
                             "limit": 1000,
                         },
                     )
-                    resp.raise_for_status()
+                    _raise(resp)
                     return resp.json()
 
                 try:
