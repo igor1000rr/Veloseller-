@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import date, datetime, timedelta, timezone
 from statistics import median as _median
@@ -197,12 +198,53 @@ def _write_changelog(sb, seller_id, product_id, aggregates, period_start, period
     return len(rows)
 
 
+# Кулдаун переоткрытия (anti-churn): отакнутый «хронический» алерт не
+# пересоздаём сразу следующим пересчётом — иначе селлер бесконечно акает одно и
+# то же и в итоге просто перестаёт разгребать список (так и накопились десятки
+# тысяч unack). Для срочных типов (critical/low_stock) кулдаун НЕ применяем —
+# по ним повторное напоминание уместно.
+_REALERT_COOLDOWN_KINDS = {"dead_inventory", "repeated_stockout", "underestimated_sku"}
+
+
+def _realert_cooldown_days() -> int:
+    """Окно кулдауна в днях (env ALERT_REALERT_COOLDOWN_DAYS, деф. 14; 0 = выкл)."""
+    try:
+        return int(os.getenv("ALERT_REALERT_COOLDOWN_DAYS", "14"))
+    except ValueError:
+        return 14
+
+
+def _in_realert_cooldown(sb, seller_id, product_id, kind) -> bool:
+    """True — если (seller, product, kind) отакнули недавно и он ещё в кулдауне.
+
+    Вызывается только когда ОТКРЫТОГО алерта нет (иначе бы обновили его выше),
+    т.е. все строки этого ключа уже acked. `.gte` по acknowledged_at сам
+    отсекает NULL-строки (SQL-семантика), так что попадают только свежие ack.
+    """
+    if kind not in _REALERT_COOLDOWN_KINDS:
+        return False
+    days = _realert_cooldown_days()
+    if days <= 0:
+        return False
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    recent = (
+        sb.table("alerts").select("id")
+        .eq("seller_id", seller_id).eq("product_id", product_id).eq("kind", kind)
+        .gte("acknowledged_at", cutoff)
+        .limit(1).execute()
+    )
+    return bool(recent.data)
+
+
 def _upsert_or_skip_alert(sb, seller_id, product_id, kind, message, payload):
     existing = sb.table("alerts").select("id").eq("seller_id", seller_id).eq(
         "product_id", product_id
     ).eq("kind", kind).is_("acknowledged_at", "null").limit(1).execute()
     if existing.data:
         execute_minimal(sb.table("alerts").update({"message": message, "payload": payload}).eq("id", existing.data[0]["id"]))
+        return False
+    # Anti-churn: недавно отакнутый хронический алерт не воскрешаем сразу.
+    if _in_realert_cooldown(sb, seller_id, product_id, kind):
         return False
     try:
         execute_minimal(sb.table("alerts").insert({
