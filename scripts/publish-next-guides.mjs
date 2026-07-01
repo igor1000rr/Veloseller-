@@ -14,7 +14,9 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(__dirname, '..');
@@ -53,6 +55,21 @@ function toEntry(g, dateStr) {
   return `  {\n${lines.join('\n')}\n  },`;
 }
 
+function parseCheck(newSrc) {
+  // Финальная страховка: убедиться, что итоговый posts.ts парсится как массив
+  // и slug'и уникальны — до записи и git. Собираем CommonJS во временный файл.
+  const tmp = join(tmpdir(), `posts_check_${process.pid}.cjs`);
+  const js = newSrc.replace(/import type[^\n]*\n/, '').replace(/export const posts:[^=]*=/, 'const posts =') + '\nmodule.exports = posts;';
+  writeFileSync(tmp, js);
+  const req = createRequire(import.meta.url);
+  delete req.cache[tmp];
+  const parsed = req(tmp);
+  if (!Array.isArray(parsed)) throw new Error('posts.ts после вставки не распарсился в массив');
+  const slugs = parsed.map((p) => p.slug);
+  if (new Set(slugs).size !== slugs.length) throw new Error('после вставки появились дубли slug');
+  return parsed.length;
+}
+
 function validate(g) {
   for (const f of REQUIRED) if (g[f] === undefined || g[f] === null || g[f] === '') throw new Error(`гайд ${g.slug || '?'}: нет поля ${f}`);
   if (!CATS.has(g.category)) throw new Error(`гайд ${g.slug}: плохая категория ${g.category}`);
@@ -88,6 +105,9 @@ function main() {
   const slugs = batch.map((g) => g.slug);
   console.log(`Публикуем ${batch.length}: ${slugs.join(', ')}`);
   console.log(`В очереди останется: ${queue.length}`);
+
+  const total = parseCheck(newSrc);
+  console.log(`Проверка парсинга ок: всего гайдов после вставки — ${total}`);
 
   if (DRY) { console.log('\n[DRY_RUN] Вставляемый блок:\n' + block); return; }
 
