@@ -9,6 +9,8 @@ import base64
 import html
 import logging
 import os
+import random
+import time
 from typing import Optional
 
 logger = logging.getLogger("veloseller.notifications")
@@ -47,6 +49,90 @@ def _extract_resend_msg_id(response) -> Optional[str]:
         except Exception:
             return None
     return None
+
+
+# ─── Ретраи транзиентных сбоев Resend ───────────────────────────────
+#
+# Resend периодически рвёт keep-alive соединение до отдачи ответа
+# («ResendError: Request failed: ('Connection aborted.',
+# RemoteDisconnected('Remote end closed connection without response'))»),
+# из-за чего отчёты падали пачками. Такие сетевые сбои (а также 429/5xx)
+# ретраятся с экспоненциальным бэкоффом + джиттером. Постоянные ошибки
+# (битый ключ, 4xx кроме 429, невалидный payload) пробрасываются сразу.
+_TRANSIENT_RESEND_MARKERS = (
+    "connection aborted",
+    "remote end closed",
+    "remotedisconnected",
+    "connection reset",
+    "connection refused",
+    "broken pipe",
+    "timed out",
+    "timeout",
+    "temporarily unavailable",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+    "eof occurred",
+    "max retries exceeded",
+    "try again",
+)
+_TRANSIENT_RESEND_TYPE_NAMES = (
+    "ConnectionError",
+    "ConnectionResetError",
+    "ConnectTimeout",
+    "ReadTimeout",
+    "Timeout",
+    "ProtocolError",
+    "ChunkedEncodingError",
+    "RemoteDisconnected",
+    "IncompleteRead",
+    "SSLError",
+)
+
+
+def _is_transient_resend_error(exc: BaseException) -> bool:
+    """True, если сбой Resend имеет смысл ретраить (сеть / 429 / 5xx)."""
+    if isinstance(exc, (ConnectionError, TimeoutError)):
+        return True
+    if type(exc).__name__ in _TRANSIENT_RESEND_TYPE_NAMES:
+        return True
+    # Resend SDK кладёт HTTP-статус в status_code/code, если он есть.
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(exc, "code", None)
+    if isinstance(status, int) and (status == 429 or 500 <= status < 600):
+        return True
+    # Резолвим по тексту — Resend оборачивает исходный requests-сбой в строку.
+    msg = str(exc).lower()
+    return any(marker in msg for marker in _TRANSIENT_RESEND_MARKERS)
+
+
+def _resend_send(payload: dict):
+    """`resend.Emails.send(payload)` с ретраями на транзиентных сбоях.
+
+    Настройка через env: RESEND_MAX_ATTEMPTS (по умолч. 4),
+    RESEND_BACKOFF_BASE_SEC (по умолч. 1.0).
+    """
+    import resend
+
+    max_attempts = max(1, int(os.getenv("RESEND_MAX_ATTEMPTS", "4")))
+    backoff_base = float(os.getenv("RESEND_BACKOFF_BASE_SEC", "1.0"))
+
+    attempt = 0
+    while True:
+        attempt += 1
+        try:
+            return resend.Emails.send(payload)
+        except Exception as exc:  # noqa: BLE001 — решение о ретрае ниже
+            if attempt >= max_attempts or not _is_transient_resend_error(exc):
+                raise
+            delay = backoff_base * (2 ** (attempt - 1)) + random.uniform(0, 0.4)
+            logger.warning(
+                "resend transient error (attempt %d/%d), retry in %.1fs: %s: %s",
+                attempt, max_attempts, delay,
+                type(exc).__name__, str(exc)[:200],
+            )
+            time.sleep(delay)
 
 
 def send_alert_digest(to_email: str, seller_name: Optional[str], alerts: list[dict]) -> bool:
@@ -97,7 +183,7 @@ def send_alert_digest(to_email: str, seller_name: Optional[str], alerts: list[di
 </body></html>"""
 
     try:
-        resend.Emails.send({
+        _resend_send({
             "from": from_email,
             "to": [to_email],
             "subject": f"Veloseller: {len(alerts)} новых уведомлений",
@@ -174,7 +260,7 @@ def send_sync_error_notification(
 </body></html>"""
 
     try:
-        resend.Emails.send({
+        _resend_send({
             "from": from_email,
             "to": [to_email],
             "subject": subject,
@@ -228,7 +314,7 @@ def send_weekly_report_email(
 </body></html>"""
 
     try:
-        resend.Emails.send({
+        _resend_send({
             "from": from_email,
             "to": [to_email],
             "subject": "Veloseller — еженедельный отчёт",
@@ -304,7 +390,7 @@ def send_report_email(
 </body></html>"""
 
     try:
-        response = resend.Emails.send({
+        response = _resend_send({
             "from": from_email,
             "to": [to_email],
             "subject": subject,
@@ -390,7 +476,7 @@ def send_monthly_report_email(
 </body></html>"""
 
     try:
-        response = resend.Emails.send({
+        response = _resend_send({
             "from": from_email,
             "to": [to_email],
             "subject": subject,

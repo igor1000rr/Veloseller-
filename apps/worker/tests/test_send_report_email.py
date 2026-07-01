@@ -163,3 +163,84 @@ class TestSendReportEmail:
         assert success is False
         assert err is not None
         assert "no message id" in err
+
+
+class TestResendRetry:
+    """Ретраи транзиентных сбоев Resend (RemoteDisconnected и т.п.).
+
+    Причина: в проде отчёты падали пачками с
+    «ResendError: Request failed: ('Connection aborted.',
+    RemoteDisconnected('Remote end closed connection without response'))» —
+    keep-alive рвётся до ответа. Такой сбой должен ретраиться.
+    """
+
+    _PARAMS = dict(
+        to_email="u@e.com", seller_name="I",
+        kinds=["critical_stock"], sku_counts={"critical_stock": 1},
+        xlsx_bytes=b"x", filename="f.xlsx",
+    )
+
+    # Реальный текст ошибки из прода (report_history.error_message).
+    _REMOTE_DISCONNECT = (
+        "Request failed: ('Connection aborted.', "
+        "RemoteDisconnected('Remote end closed connection without response'))"
+    )
+
+    def test_transient_error_retried_then_succeeds(self, monkeypatch):
+        """Первый вызов — обрыв соединения, второй — успех. Итог: (True, None)."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_123")
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = [
+            Exception(self._REMOTE_DISCONNECT),   # транзиентный сбой
+            {"id": "resend-ok"},                  # ретрай успешен
+        ]
+        with patch.dict("sys.modules", {"resend": mock_resend}), \
+                patch("app.notifications.time.sleep") as mock_sleep:
+            from app.notifications import send_report_email
+            result = send_report_email(**self._PARAMS)
+        assert result == (True, None)
+        assert mock_resend.Emails.send.call_count == 2
+        assert mock_sleep.called  # был бэкофф между попытками
+
+    def test_transient_error_exhausts_attempts(self, monkeypatch):
+        """Постоянный сетевой обрыв → все попытки исчерпаны → (False, err)."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_123")
+        monkeypatch.setenv("RESEND_MAX_ATTEMPTS", "3")
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = ConnectionResetError("Connection aborted")
+        with patch.dict("sys.modules", {"resend": mock_resend}), \
+                patch("app.notifications.time.sleep"):
+            from app.notifications import send_report_email
+            success, err = send_report_email(**self._PARAMS)
+        assert success is False
+        assert err is not None
+        assert mock_resend.Emails.send.call_count == 3  # ровно RESEND_MAX_ATTEMPTS
+
+    def test_non_transient_error_not_retried(self, monkeypatch):
+        """Постоянная ошибка (напр. невалидный ключ) НЕ ретраится — сразу fail."""
+        monkeypatch.setenv("RESEND_API_KEY", "re_test_123")
+        mock_resend = MagicMock()
+        mock_resend.Emails.send.side_effect = Exception("Invalid API key provided")
+        with patch.dict("sys.modules", {"resend": mock_resend}), \
+                patch("app.notifications.time.sleep") as mock_sleep:
+            from app.notifications import send_report_email
+            success, err = send_report_email(**self._PARAMS)
+        assert success is False
+        assert "Invalid API key" in err
+        assert mock_resend.Emails.send.call_count == 1  # без ретраев
+        assert not mock_sleep.called
+
+    def test_is_transient_classifier(self, monkeypatch):
+        """Юнит на классификатор: сеть/429/5xx — транзиентно; 4xx — нет."""
+        from app.notifications import _is_transient_resend_error as tr
+        assert tr(Exception(self._REMOTE_DISCONNECT)) is True
+        assert tr(ConnectionResetError("boom")) is True
+        assert tr(TimeoutError("slow")) is True
+
+        class _Http(Exception):
+            def __init__(self, code):
+                self.status_code = code
+        assert tr(_Http(503)) is True
+        assert tr(_Http(429)) is True
+        assert tr(_Http(400)) is False
+        assert tr(Exception("Invalid API key")) is False
