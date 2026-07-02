@@ -1,0 +1,80 @@
+name: Content drip
+
+# Автопубликация SEO-гайдов из очереди (apps/web/lib/news/queue.json) по таймеру.
+# LLM НЕ нужен: scripts/publish-next-guides.mjs перекладывает N готовых гайдов
+# из очереди в posts.ts (с датой сегодня), коммитит и пушит в main встроенным
+# GITHUB_TOKEN. Затем ЭТОТ ЖЕ workflow деплоит через существующий DEPLOY_SSH_KEY
+# (не трогаем deploy.yml и его пиннинг на CI-SHA; новых секретов не нужно).
+#
+# Управление:
+#   - темп: cron ниже (по умолчанию раз в день) и PUBLISH_COUNT (по умолчанию 2)
+#   - вручную: вкладка Actions → Content drip → Run workflow (можно задать count)
+#   - стоп: отключить workflow в Actions или удалить этот файл
+#   - когда очередь пуста — прогон просто ничего не делает (нужно пополнить queue.json)
+
+on:
+  schedule:
+    - cron: '19 8 * * *'   # ежедневно ~08:19 UTC (~11:19 МСК)
+  workflow_dispatch:
+    inputs:
+      count:
+        description: 'Сколько гайдов опубликовать за этот прогон'
+        required: false
+        default: '2'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: content-drip
+  cancel-in-progress: false
+
+jobs:
+  drip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Публикуем следующие гайды из очереди
+        id: pub
+        env:
+          PUBLISH_COUNT: ${{ github.event.inputs.count || '2' }}
+        run: |
+          git config user.name "veloseller-content-bot"
+          git config user.email "bot@veloseller.ru"
+          before=$(git rev-parse HEAD)
+          node scripts/publish-next-guides.mjs
+          after=$(git rev-parse HEAD)
+          if [ "$before" != "$after" ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+            echo "Нечего публиковать — очередь пуста или всё уже опубликовано."
+          fi
+
+      - name: Деплой на VPS (pull main + rebuild) — только если что-то опубликовали
+        if: steps.pub.outputs.published == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" 'bash -s' << 'EOF'
+            set -euo pipefail
+            cd /opt/veloseller
+            git fetch origin main
+            git reset --hard origin/main
+            chmod +x /opt/veloseller/deploy/*.sh || true
+            sudo bash /opt/veloseller/deploy/finalize.sh
+            echo "content-drip deploy OK ($(git rev-parse --short HEAD))"
+          EOF
