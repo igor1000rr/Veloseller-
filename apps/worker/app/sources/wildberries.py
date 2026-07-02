@@ -50,8 +50,12 @@ PRICES_PAGE_LIMIT = 1000
 
 CARDS_PAGE_SIZE = 100
 MAX_CARDS_PAGES = 1000
-# FBS stocks API ограничение на размер batch'а SKUs
-FBS_STOCKS_BATCH = 1000
+# FBS stocks API: POST /api/v3/stocks/{warehouseId} с телом {"skus": [...]}.
+# Батч 1000 начал ловить у WB «414 / JSON could not be generated / URI too long»
+# на крупных FBS-каталогах (тысячи баркодов = размеры×товары) — гейтвей WB
+# отклоняет слишком большое тело запроса. Снизили до 100 с большим запасом;
+# запрос дешёвый и без жёсткого rate-limit, лишние батчи некритичны.
+FBS_STOCKS_BATCH = 100
 
 # WB Statistics /supplier/stocks: жёсткий лимит ~1 запрос / 60 с НА АККАУНТ.
 # FBO (fetch_snapshots) и FBS (fetch_fbs_snapshots) одного аккаунта — это РАЗНЫЕ
