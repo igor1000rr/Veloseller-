@@ -404,13 +404,116 @@ def _run_shopify_sync_bg(connection_id: str, seller_id: str, shop: str, access_t
         logger.exception("shopify sync failed (bg)", extra={"connection_id": connection_id})
 
 
-@app.post("/ingest/csv", dependencies=[Depends(require_worker_secret)])
-async def ingest_csv(seller_id: str, file: UploadFile = File(...)) -> dict:
-    raise HTTPException(
-        410,
-        "CSV upload через этот endpoint устарел. "
-        "Создайте склад типа 'CSV' через /connections/new и загружайте файлы туда.",
-    )
+@app.post("/ingest/csv/{connection_id}", dependencies=[Depends(require_worker_secret)])
+async def ingest_csv(connection_id: str, file: UploadFile = File(...)) -> dict:
+    """Загрузка остатков/цен CSV-файлом в склад типа csv.
+
+    Синхронно (файл уже в памяти): parse_csv → _persist_snapshots(csv_upload).
+    seller_id берём из записи склада, а не из запроса — не доверяем клиенту.
+    Каждая загрузка = новый набор снапшотов; движок сам считает движение
+    остатков (sales_like/replenishment_like) между загрузками, как и у API-складов.
+    """
+    sb = get_supabase()
+    conn = sb.table("data_connections").select("*").eq("id", connection_id).single().execute()
+    if not conn.data:
+        raise HTTPException(404, "Connection not found")
+    seller_id = conn.data["seller_id"]
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Файл пустой")
+    try:
+        snapshots = csv_upload.parse_csv(raw)
+    except UnicodeDecodeError:
+        raise HTTPException(
+            400,
+            "Не удалось прочитать файл как текст. Похоже, это Excel (.xlsx). "
+            "Сохраните таблицу как CSV (UTF-8) и загрузите снова.",
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    if not _try_acquire_sync_lock(sb, connection_id):
+        return {"started": False, "status": "running", "message": "Загрузка уже идёт или склад на паузе"}
+    try:
+        inserted = _persist_snapshots(seller_id, connection_id, SourceType.CSV_UPLOAD, snapshots)
+        _mark_connection_synced(sb, connection_id)
+    except Exception as e:
+        _mark_connection_synced(sb, connection_id, error=str(e)[:500])
+        logger.exception("csv ingest failed", extra={"connection_id": connection_id})
+        raise HTTPException(500, "Не удалось сохранить данные из файла")
+    logger.info("csv ingested", extra={
+        "connection_id": connection_id, "parsed": len(snapshots), "inserted": inserted,
+    })
+    return {"ok": True, "parsed": len(snapshots), "inserted": inserted}
+
+
+@app.post("/ingest/manual/{connection_id}", dependencies=[Depends(require_worker_secret)])
+async def ingest_manual(connection_id: str, request: Request) -> dict:
+    """Ручной режим: приём остатков/цен, введённых в кабинете вручную.
+
+    Тело: {"items": [{"sku","product_name"?,"stock_quantity","price"}...]}.
+    Персистим как снапшоты source=manual — тот же движок движения остатков.
+    Правки «Продажи −N / Пополнения +N» веб-слой превращает в новый остаток и
+    шлёт сюда обычным набором items (никакой отдельной таблицы движений — дельты
+    выводятся из соседних снапшотов, как и везде).
+    """
+    sb = get_supabase()
+    conn = sb.table("data_connections").select("*").eq("id", connection_id).single().execute()
+    if not conn.data:
+        raise HTTPException(404, "Connection not found")
+    seller_id = conn.data["seller_id"]
+
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "Невалидный JSON")
+    items = (body or {}).get("items")
+    if not isinstance(items, list) or not items:
+        raise HTTPException(400, "Поле items обязательно (непустой список товаров)")
+    if len(items) > 50_000:
+        raise HTTPException(400, "Слишком много позиций за один запрос (максимум 50 000)")
+
+    from decimal import Decimal, InvalidOperation
+    snapshots: list[SnapshotInput] = []
+    seen: dict[str, SnapshotInput] = {}
+    for i, it in enumerate(items):
+        if not isinstance(it, dict):
+            raise HTTPException(400, f"Позиция {i}: ожидается объект")
+        sku = str(it.get("sku") or "").strip()
+        if not sku:
+            raise HTTPException(400, f"Позиция {i}: пустой sku")
+        try:
+            stock = int(it.get("stock_quantity"))
+        except (TypeError, ValueError):
+            raise HTTPException(400, f"Позиция {sku}: невалидный stock_quantity")
+        if stock < 0:
+            raise HTTPException(400, f"Позиция {sku}: отрицательный остаток")
+        price_raw = it.get("price")
+        try:
+            price = Decimal(str(price_raw)) if price_raw not in (None, "") else Decimal("0")
+        except (InvalidOperation, ValueError):
+            raise HTTPException(400, f"Позиция {sku}: невалидная цена")
+        if price < 0:
+            raise HTTPException(400, f"Позиция {sku}: отрицательная цена")
+        name = str(it.get("product_name") or "").strip() or None
+        # Дедуп внутри запроса — последняя запись по sku побеждает.
+        seen[sku] = SnapshotInput(sku=sku, product_name=name, stock_quantity=stock, price=price)
+    snapshots = list(seen.values())
+
+    if not _try_acquire_sync_lock(sb, connection_id):
+        return {"started": False, "status": "running", "message": "Обновление уже идёт или склад на паузе"}
+    try:
+        inserted = _persist_snapshots(seller_id, connection_id, SourceType.MANUAL, snapshots)
+        _mark_connection_synced(sb, connection_id)
+    except Exception as e:
+        _mark_connection_synced(sb, connection_id, error=str(e)[:500])
+        logger.exception("manual ingest failed", extra={"connection_id": connection_id})
+        raise HTTPException(500, "Не удалось сохранить данные")
+    logger.info("manual ingested", extra={
+        "connection_id": connection_id, "items": len(snapshots), "inserted": inserted,
+    })
+    return {"ok": True, "parsed": len(snapshots), "inserted": inserted}
 
 
 @app.post("/ingest/google-sheet/{connection_id}", dependencies=[Depends(require_worker_secret)])

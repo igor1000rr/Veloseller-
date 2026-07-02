@@ -64,6 +64,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!isAllowedUploadFile(file)) {
     return NextResponse.json({ error: "Поддерживаются только файлы CSV или Excel (.csv, .xlsx, .xls)" }, { status: 400 });
   }
+  // Пока парсим только CSV-текст. Excel-файлы (.xlsx/.xls — бинарный формат)
+  // явно отклоняем с подсказкой, а не отдаём воркеру на UnicodeDecodeError.
+  const lowerName = (file.name || "").toLowerCase();
+  if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+    return NextResponse.json({
+      error: "Пока поддерживается только CSV. В Excel: Файл → Сохранить как → CSV (UTF-8) и загрузите снова."
+    }, { status: 400 });
+  }
 
   const worker = getWorkerConfig();
   if (!worker) {
@@ -74,7 +82,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const workerForm = new FormData();
   workerForm.append("file", file);
 
-  const result = await callWorker(worker, `/ingest/csv?seller_id=${user.id}`, {
+  const result = await callWorker(worker, `/ingest/csv/${id}`, {
     method: "POST",
     body: workerForm,
     timeoutMs: WORKER_TIMEOUT_MS,

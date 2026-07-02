@@ -23,6 +23,8 @@ import type { Json, Enums } from "@/lib/database.types";
  */
 const ALLOWED_WAREHOUSE_KINDS = new Set([
   "ozon_fbo", "ozon_fbs", "wb_fbo", "wb_fbs", "google_sheet", "shopify",
+  // Источники без интеграций (новая концепция «расчёт по движению остатков»):
+  "csv", "manual",
 ]);
 
 // Backward compat для legacy запросов от старого UI
@@ -49,6 +51,10 @@ function deriveSourceAndMarketplace(kind: string): { source: Enums<"source_type"
       return { source: "marketplace_api", marketplace: "shopify" };
     case "google_sheet":
       return { source: "google_sheet", marketplace: null };
+    case "csv":
+      return { source: "csv_upload", marketplace: null };
+    case "manual":
+      return { source: "manual", marketplace: null };
     default:
       return { source: "manual", marketplace: null };
   }

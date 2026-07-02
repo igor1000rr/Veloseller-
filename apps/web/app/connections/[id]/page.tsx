@@ -4,6 +4,8 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import SyncButton from "../SyncButton";
 import DeleteButton from "../DeleteButton";
 import RenameConnection from "../RenameConnection";
+import CsvUpload from "./CsvUpload";
+import ManualEntry from "./ManualEntry";
 import { ConnectionErrorHint } from "../ConnectionErrorHint";
 import { parseApiError } from "@/lib/error-parser";
 import { isSensitiveConfigKey } from "@/lib/connection-secrets";
@@ -83,6 +85,47 @@ export default async function ConnectionDetailPage({
     : { data: [] };
   const productById = new Map((products ?? []).map((p) => [p.product_id, p]));
 
+  // Ручной режим: список всех товаров склада с текущим остатком/ценой (последний снапшот).
+  // Только для source=manual — иначе лишние запросы не делаем.
+  const MANUAL_LIMIT = 500;
+  let manualItems: { productId: string; sku: string; productName: string | null; stock: number; price: number }[] = [];
+  let manualTruncated = false;
+  if (conn.source === "manual") {
+    const { data: allProducts } = await supabase
+      .from("products")
+      .select("product_id, sku, product_name")
+      .eq("connection_id", id)
+      .order("sku", { ascending: true })
+      .limit(MANUAL_LIMIT + 1);
+    const prods = allProducts ?? [];
+    manualTruncated = prods.length > MANUAL_LIMIT;
+    const shown = prods.slice(0, MANUAL_LIMIT);
+    if (shown.length > 0) {
+      const ids = shown.map((p) => p.product_id);
+      // Последний снапшот на товар: тянем свежие строки по этим товарам и берём первый на product_id.
+      const { data: snaps } = await supabase
+        .from("inventory_snapshots")
+        .select("product_id, stock_quantity, price, snapshot_time")
+        .in("product_id", ids)
+        .order("snapshot_time", { ascending: false })
+        .limit(5000);
+      const latest = new Map<string, { stock_quantity: number; price: number }>();
+      for (const s of snaps ?? []) {
+        if (!latest.has(s.product_id)) latest.set(s.product_id, { stock_quantity: s.stock_quantity, price: Number(s.price) });
+      }
+      manualItems = shown.map((p) => {
+        const l = latest.get(p.product_id);
+        return {
+          productId: p.product_id,
+          sku: p.sku,
+          productName: p.product_name,
+          stock: l?.stock_quantity ?? 0,
+          price: l?.price ?? 0,
+        };
+      });
+    }
+  }
+
   return (
     <>
       <Link href={"/connections"} className="inline-flex items-center gap-1.5 text-sm text-ink-muted hover:text-lime-deep transition mb-4">
@@ -127,6 +170,12 @@ export default async function ConnectionDetailPage({
 
       {/* Подсказка по последней ошибке синка */}
       {parsed && <ConnectionErrorHint parsed={parsed} className="mb-6" autoRetry={autoRetry} />}
+
+      {/* Источники без интеграций: загрузка CSV / ручной ввод */}
+      {conn.source === "csv_upload" && <CsvUpload connectionId={conn.id} />}
+      {conn.source === "manual" && (
+        <ManualEntry connectionId={conn.id} initialItems={manualItems} truncated={manualTruncated} />
+      )}
 
       {/* Config (с замаскированными sensitive значениями) */}
       <div className="mb-6 rounded-2xl border border-line bg-paper p-5 md:p-6">
@@ -225,7 +274,8 @@ function StatusBadgeFull({ status, errorKind }: { status: string | null; errorKi
 }
 
 function sourceLabel(source: string, marketplace: string | null): string {
-  if (source === "csv_upload") return "CSV upload";
+  if (source === "csv_upload") return "CSV-файл";
+  if (source === "manual") return "Ручной режим";
   if (source === "google_sheet") return "Google Sheet";
   if (source === "feed") return "YML feed";
   if (source === "marketplace_api") {

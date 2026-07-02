@@ -133,6 +133,9 @@ export default function SyncButton({ connectionId, source, warehouseKind, market
   if (source === "csv_upload") {
     return <span className="text-sm text-ink-hush font-mono">{t("connections.sync.csvOnly")}</span>;
   }
+  if (source === "manual") {
+    return <span className="text-sm text-ink-hush font-mono">{t("connections.sync.manualOnly")}</span>;
+  }
 
   const remainingMs = Math.max(0, cooldownUntil - nowTs);
   const cooling = remainingMs > 0 && !polling && !loading;

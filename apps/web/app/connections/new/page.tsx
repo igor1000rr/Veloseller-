@@ -32,7 +32,7 @@ import { t } from "@/lib/i18n";
  * Ozon/WB, их карточки, PairSuggestModal и WipPanel остаются на русском —
  * на EN-сборке этот код не выполняется.
  */
-type WarehouseKind = "ozon_fbo" | "ozon_fbs" | "wb_fbo" | "wb_fbs" | "google_sheet" | "shopify";
+type WarehouseKind = "ozon_fbo" | "ozon_fbs" | "wb_fbo" | "wb_fbs" | "google_sheet" | "shopify" | "csv" | "manual";
 
 type WarehouseMeta = {
   kind: WarehouseKind;
@@ -84,6 +84,19 @@ const WAREHOUSES: WarehouseMeta[] = [
     title: "Shopify",
     text: t("connections.new.cardText.shopify"),
     dot: "#95BF47", status: "ready",
+  },
+  // Источники без интеграций (новая концепция «расчёт по движению остатков»).
+  {
+    kind: "csv",
+    title: "CSV-файл",
+    text: t("connections.new.cardText.csv"),
+    dot: "#6b7280", status: "ready",
+  },
+  {
+    kind: "manual",
+    title: "Ручной режим",
+    text: t("connections.new.cardText.manual"),
+    dot: "#f59e0b", status: "ready",
   },
 ];
 
@@ -220,6 +233,7 @@ function WipPanel({ warehouse, onCancel }: { warehouse: WarehouseMeta; onCancel:
 }
 
 function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: () => void; onDone: () => void }) {
+  const router = useRouter();
   const [name, setName] = useState("");
   const [modalError, setModalError] = useState<ParsedError | null>(null);
   const [loading, setLoading] = useState(false);
@@ -237,6 +251,11 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
   const isWbFbs = kind === "wb_fbs";
   const isSheet = kind === "google_sheet";
   const isShopify = kind === "shopify";
+  const isCsv = kind === "csv";
+  const isManual = kind === "manual";
+  // csv/manual — источники без интеграций: секретов нет, «первого синка» нет.
+  // После создания ведём сразу в карточку склада, где грузят CSV / вводят вручную.
+  const isNoIntegration = isCsv || isManual;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -266,6 +285,7 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
       } else if (isShopify) {
         config = { shop: shop.trim(), access_token: accessToken.trim() };
       }
+      // csv/manual: config пустой — данные придут отдельно (загрузка/ручной ввод).
 
       const createRes = await fetch("/api/connections", {
         method: "POST",
@@ -286,6 +306,13 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
         return;
       }
       const conn = await createRes.json() as { id: string };
+
+      // Источники без интеграций: нет «первого синка» — сразу в карточку склада,
+      // где пользователь грузит CSV или добавляет товары вручную.
+      if (isNoIntegration) {
+        router.push(`/connections/${conn.id}`);
+        return;
+      }
 
       const res = await fetch(`/api/connections/${conn.id}/sync`, { method: "POST" });
       if (!res.ok) {
@@ -314,6 +341,8 @@ function KindForm({ kind, onCancel, onDone }: { kind: WarehouseKind; onCancel: (
         {isWb && <WbInstructions isFbs={isWbFbs} />}
         {isSheet && <SheetInstructions />}
         {isShopify && <ShopifyInstructions />}
+        {isCsv && <CsvInstructions />}
+        {isManual && <ManualInstructions />}
 
         <div>
           <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">
@@ -643,5 +672,58 @@ function warehouseTitle(kind: WarehouseKind): string {
     wb_fbs:       "Wildberries FBS",
     google_sheet: "Google Sheet",
     shopify:      "Shopify",
+    csv:          "CSV-файл",
+    manual:       "Ручной режим",
   } as const)[kind];
+}
+
+function CsvInstructions() {
+  return (
+    <div className="rounded-xl border border-line bg-bg-soft p-4 md:p-5 text-sm">
+      <h3 className="font-display text-base font-medium text-ink mb-3">Как это работает</h3>
+      <p className="text-ink-soft mb-2">
+        Склад из CSV-файла — без API и интеграций. Выгрузите остатки и цены из любой системы
+        учёта (1С, МойСклад, Excel) и загружайте файл сюда: раз в день, неделю или когда удобно.
+      </p>
+      <p className="text-ink-muted mb-2">
+        Каждая загрузка — новый срез. Сервис сам считает движение остатков между загрузками:
+        скорость продаж, точку дозаказа, замороженный товар и потерянную выручку — как и по маркетплейсам.
+      </p>
+      <div className="mt-3">
+        <div className="font-medium text-ink mb-1">Формат файла (первая строка — заголовки):</div>
+        <code className="block bg-paper border border-line rounded px-2 py-1 mt-1 font-mono text-[11px] text-ink-soft break-all">
+          sku,product_name,stock_quantity,price
+        </code>
+        <ul className="list-disc list-inside space-y-0.5 text-ink-muted mt-2 text-[13px]">
+          <li><b>sku</b> — артикул (обязательно)</li>
+          <li><b>stock_quantity</b> — остаток, штук (обязательно)</li>
+          <li><b>price</b> — цена, ₽ (обязательно)</li>
+          <li><b>product_name</b> — наименование (необязательно)</li>
+        </ul>
+        <p className="mt-2 text-[11px] text-ink-hush">
+          Разделитель — запятая или точка с запятой, кодировка UTF-8. Excel: «Сохранить как → CSV UTF-8».
+          Сначала создайте склад — затем на его странице появится кнопка загрузки файла.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ManualInstructions() {
+  return (
+    <div className="rounded-xl border border-line bg-bg-soft p-4 md:p-5 text-sm">
+      <h3 className="font-display text-base font-medium text-ink mb-3">Как это работает</h3>
+      <p className="text-ink-soft mb-2">
+        Ручной режим — для тех, у кого нет ни API, ни выгрузок: добавляйте товары и отмечайте
+        остатки прямо в кабинете. Подходит для продаж офлайн, в соцсетях, на нескольких площадках сразу.
+      </p>
+      <p className="text-ink-muted mb-2">
+        Добавили товар с текущим остатком — дальше отмечаете <b>продажи (−)</b> и <b>пополнения (+)</b>,
+        а сервис считает скорость продаж, точку дозаказа и замороженные деньги по движению остатков.
+      </p>
+      <p className="text-[11px] text-ink-hush">
+        Сначала создайте склад — затем на его странице добавляйте товары и вводите остатки.
+      </p>
+    </div>
+  );
 }

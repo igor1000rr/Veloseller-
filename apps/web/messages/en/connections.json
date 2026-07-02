@@ -95,5 +95,8 @@
   "connections.new.err.limit.title": "Warehouse limit reached",
   "connections.new.err.limit.message": "Your plan allows {limit} warehouses. Upgrade your plan in the «Plans & billing» section.",
   "connections.new.err.createFailed": "Couldn't create the warehouse",
-  "connections.new.err.firstSyncFailed": "The first sync failed"
+  "connections.new.err.firstSyncFailed": "The first sync failed",
+  "connections.new.cardText.csv": "Upload stock and prices from a CSV file — any accounting system or Excel. No API, no integrations.",
+  "connections.new.cardText.manual": "Enter stock manually right in the dashboard: sales and restocks. No exports, no integrations.",
+  "connections.sync.manualOnly": "updated manually"
 }

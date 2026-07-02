@@ -231,6 +231,9 @@ function warehouseLabel(warehouseKind: string | null, source: string, marketplac
       wb_fbo:       "Wildberries FBO",
       wb_fbs:       "Wildberries FBS",
       google_sheet: "Google Sheet",
+      shopify:      "Shopify",
+      csv:          "CSV-файл",
+      manual:       "Ручной режим",
     }[warehouseKind] || warehouseKind;
   }
   if (source === "csv_upload") return "CSV upload";

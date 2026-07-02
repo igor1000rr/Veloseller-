@@ -76,24 +76,112 @@ class TestWorkerSecret:
         assert r.status_code == 500
 
 
-class TestIngestCsvDeprecated:
-    def test_returns_410_on_valid_request(self, monkeypatch):
-        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        r = client.post(
-            f"/ingest/csv?seller_id={VALID_UUID}",
-            files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
-        )
-        assert r.status_code == 410
-        detail = r.json()["detail"]
-        assert "устарел" in detail or "deprecated" in detail.lower()
+class TestIngestCsv:
+    """Восстановленный CSV-endpoint: connection-scoped, parse_csv → _persist_snapshots(csv_upload)."""
 
-    def test_returns_410_even_with_invalid_payload(self, monkeypatch):
+    def test_404_when_no_connection(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
-        r = client.post(
-            "/ingest/csv?seller_id=not-a-uuid",
-            files={"file": ("test.csv", b"garbage\n", "text/csv")},
-        )
-        assert r.status_code == 410
+        mock_sb = _mock_supabase_for_connection(None)
+        with patch("app.main.get_supabase", return_value=mock_sb):
+            r = client.post(
+                "/ingest/csv/conn-none",
+                files={"file": ("test.csv", b"sku,stock_quantity,price\nA1,10,100\n", "text/csv")},
+            )
+        assert r.status_code == 404
+
+    def test_400_when_empty_file(self, monkeypatch):
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = _mock_supabase_for_connection({"id": "conn-c", "seller_id": VALID_UUID, "config": {}})
+        with patch("app.main.get_supabase", return_value=mock_sb):
+            r = client.post("/ingest/csv/conn-c", files={"file": ("empty.csv", b"", "text/csv")})
+        assert r.status_code == 400
+
+    def test_400_on_binary_xlsx_like(self, monkeypatch):
+        """Бинарь (xlsx) → UnicodeDecodeError → дружелюбная 400, а не 500."""
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = _mock_supabase_for_connection({"id": "conn-c", "seller_id": VALID_UUID, "config": {}})
+        with patch("app.main.get_supabase", return_value=mock_sb):
+            r = client.post(
+                "/ingest/csv/conn-c",
+                files={"file": ("book.xlsx", b"\xff\xfe\x00\x01\x02\x03PK\x03\x04", "application/octet-stream")},
+            )
+        assert r.status_code == 400
+        assert "CSV" in r.json()["detail"]
+
+    def test_200_parses_and_persists(self, monkeypatch):
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = _mock_supabase_for_connection({"id": "conn-c", "seller_id": VALID_UUID, "config": {}})
+        from app.schemas import SourceType
+        persist = MagicMock(return_value=2)
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.main._try_acquire_sync_lock", return_value=True), \
+             patch("app.main._persist_snapshots", persist), \
+             patch("app.main._mark_connection_synced"):
+            r = client.post(
+                "/ingest/csv/conn-c",
+                files={"file": ("t.csv", b"sku,stock_quantity,price\nA1,10,100\nB2,5,50\n", "text/csv")},
+            )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["parsed"] == 2
+        assert body["inserted"] == 2
+        # source обязан быть csv_upload; seller_id взят из записи склада
+        args = persist.call_args.args
+        assert args[0] == VALID_UUID
+        assert args[1] == "conn-c"
+        assert args[2] == SourceType.CSV_UPLOAD
+
+
+class TestIngestManual:
+    """Ручной режим: JSON items → _persist_snapshots(manual)."""
+
+    def test_404_when_no_connection(self, monkeypatch):
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = _mock_supabase_for_connection(None)
+        with patch("app.main.get_supabase", return_value=mock_sb):
+            r = client.post("/ingest/manual/conn-none", json={"items": [{"sku": "A1", "stock_quantity": 3, "price": 10}]})
+        assert r.status_code == 404
+
+    def test_400_when_no_items(self, monkeypatch):
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = _mock_supabase_for_connection({"id": "conn-m", "seller_id": VALID_UUID, "config": {}})
+        with patch("app.main.get_supabase", return_value=mock_sb):
+            r = client.post("/ingest/manual/conn-m", json={"items": []})
+        assert r.status_code == 400
+
+    def test_400_on_bad_stock(self, monkeypatch):
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = _mock_supabase_for_connection({"id": "conn-m", "seller_id": VALID_UUID, "config": {}})
+        with patch("app.main.get_supabase", return_value=mock_sb):
+            r = client.post("/ingest/manual/conn-m", json={"items": [{"sku": "A1", "stock_quantity": -1, "price": 10}]})
+        assert r.status_code == 400
+
+    def test_200_persists_manual(self, monkeypatch):
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = _mock_supabase_for_connection({"id": "conn-m", "seller_id": VALID_UUID, "config": {}})
+        from app.schemas import SourceType
+        persist = MagicMock(return_value=1)
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.main._try_acquire_sync_lock", return_value=True), \
+             patch("app.main._persist_snapshots", persist), \
+             patch("app.main._mark_connection_synced"):
+            r = client.post(
+                "/ingest/manual/conn-m",
+                json={"items": [{"sku": "A1", "product_name": "Тестовый", "stock_quantity": 7, "price": "99.90"}]},
+            )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["inserted"] == 1
+        args = persist.call_args.args
+        assert args[0] == VALID_UUID
+        assert args[2] == SourceType.MANUAL
+        # проверим, что item сконвертился в SnapshotInput корректно
+        snaps = args[3]
+        assert len(snaps) == 1
+        assert snaps[0].sku == "A1"
+        assert snaps[0].stock_quantity == 7
 
 
 def _mock_supabase_for_connection(connection_data):

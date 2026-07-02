@@ -96,5 +96,8 @@
   "connections.new.err.limit.title": "Лимит складов достигнут",
   "connections.new.err.limit.message": "Ваш тариф позволяет {limit} складов. Обновите тариф в разделе «Тарифы и оплата».",
   "connections.new.err.createFailed": "Не удалось создать склад",
-  "connections.new.err.firstSyncFailed": "Первая синхронизация не прошла"
+  "connections.new.err.firstSyncFailed": "Первая синхронизация не прошла",
+  "connections.new.cardText.csv": "Загрузка остатков и цен CSV-файлом из любой системы учёта, 1С или Excel. Без API и интеграций.",
+  "connections.new.cardText.manual": "Ручной ввод остатков прямо в кабинете: продажи и пополнения. Без выгрузок и интеграций.",
+  "connections.sync.manualOnly": "обновляется вручную"
 }

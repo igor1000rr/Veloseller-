@@ -71,11 +71,21 @@ describe("POST /api/connections/[id]/upload-csv", () => {
       .mockResolvedValueOnce({ ok: true });
     const res = await callUpload(new File(["sku,qty\nA,1"], "data.csv"), { id: "c1" });
     expect(res.status).toBe(200);
-    expect(fetchMock.mock.calls[0][0]).toBe("http://worker:8001/ingest/csv?seller_id=u1");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://worker:8001/ingest/csv/c1");
     expect(fetchMock.mock.calls[0][1].headers["X-Worker-Secret"]).toBe("test-secret");
     expect(updateMock).toHaveBeenCalledWith(expect.objectContaining({
       status: "active", last_error: null,
     }));
+  });
+
+  it("400 если .xlsx — просим сохранить как CSV", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
+    maybeSingleMock.mockResolvedValue({ data: { id: "c1", source: "csv_upload", seller_id: "u1" } });
+    const fetchMock = global.fetch as any;
+    const res = await callUpload(new File(["PK...binary"], "book.xlsx"), { id: "c1" });
+    expect(res.status).toBe(400);
+    // Воркер не должен вызываться — отклоняем до него
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("если worker вернул ошибку — пробрасываем", async () => {
