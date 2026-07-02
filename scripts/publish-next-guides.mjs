@@ -116,10 +116,13 @@ function main() {
 
   if (NO_GIT) { console.log('[NO_GIT] Файлы записаны, git пропущен.'); return; }
 
-  const msg = `feat(web): +${batch.length} SEO-гайда — ${slugs.join(', ')}\n\nАвтопубликация из очереди контента.\n\nCo-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`;
+  // Отдельные -m дают чистые абзацы без буквальных \n в заголовке.
+  const subject = `feat(web): +${batch.length} SEO-гайда — ${slugs.join(', ')}`;
+  const body = 'Автопубликация из очереди контента.';
+  const trailer = 'Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>';
   const run = (cmd) => execSync(cmd, { cwd: REPO, stdio: 'inherit' });
   run('git add apps/web/lib/news/posts.ts apps/web/lib/news/queue.json');
-  run(`git commit -m ${JSON.stringify(msg)}`);
+  run(`git commit -m ${JSON.stringify(subject)} -m ${JSON.stringify(body)} -m ${JSON.stringify(trailer)}`);
   // ретраи пуша при сетевых сбоях
   let ok = false;
   for (const wait of [0, 2, 4, 8, 16]) {
