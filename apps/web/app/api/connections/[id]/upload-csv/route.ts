@@ -64,12 +64,12 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!isAllowedUploadFile(file)) {
     return NextResponse.json({ error: "Поддерживаются только файлы CSV или Excel (.csv, .xlsx, .xls)" }, { status: 400 });
   }
-  // Пока парсим только CSV-текст. Excel-файлы (.xlsx/.xls — бинарный формат)
-  // явно отклоняем с подсказкой, а не отдаём воркеру на UnicodeDecodeError.
+  // Поддерживаем CSV и современный Excel .xlsx (worker парсит через openpyxl).
+  // Старый бинарный .xls не поддерживаем — просим пересохранить.
   const lowerName = (file.name || "").toLowerCase();
-  if (lowerName.endsWith(".xlsx") || lowerName.endsWith(".xls")) {
+  if (lowerName.endsWith(".xls") && !lowerName.endsWith(".xlsx")) {
     return NextResponse.json({
-      error: "Пока поддерживается только CSV. В Excel: Файл → Сохранить как → CSV (UTF-8) и загрузите снова."
+      error: "Старый формат .xls не поддерживается. В Excel: Файл → Сохранить как → .xlsx или CSV (UTF-8)."
     }, { status: 400 });
   }
 

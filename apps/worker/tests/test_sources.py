@@ -4,8 +4,44 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from app.sources.csv_upload import parse_csv
+from app.sources.csv_upload import parse_csv, parse_xlsx
 from app.sources._http import with_retry
+
+
+class TestParseXlsx:
+    def _xlsx(self, rows):
+        from openpyxl import Workbook
+        import io
+        wb = Workbook(); ws = wb.active
+        for r in rows:
+            ws.append(r)
+        buf = io.BytesIO(); wb.save(buf)
+        return buf.getvalue()
+
+    def test_basic(self):
+        data = self._xlsx([
+            ["sku", "product_name", "stock_quantity", "price"],
+            ["A1", "Товар A", 10, 100.5],
+            ["B2", None, 5, 200],
+        ])
+        snaps = parse_xlsx(data)
+        assert len(snaps) == 2
+        assert snaps[0].sku == "A1" and snaps[0].product_name == "Товар A"
+        assert snaps[0].stock_quantity == 10 and float(snaps[0].price) == 100.5
+        assert snaps[1].sku == "B2" and snaps[1].product_name is None
+
+    def test_skips_empty_rows_and_needs_columns(self):
+        data = self._xlsx([
+            ["sku", "stock_quantity", "price"],
+            [None, None, None],
+            ["A1", 3, 50],
+        ])
+        snaps = parse_xlsx(data)
+        assert len(snaps) == 1 and snaps[0].sku == "A1"
+
+    def test_corrupt_raises_valueerror(self):
+        with pytest.raises(ValueError):
+            parse_xlsx(b"\x00\x01not a real xlsx")
 
 
 class TestParseCsv:

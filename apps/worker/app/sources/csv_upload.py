@@ -100,3 +100,42 @@ def parse_csv(content: bytes | str) -> list[SnapshotInput]:
         )
 
     return list(seen_skus.values())
+
+
+def parse_xlsx(content: bytes) -> list[SnapshotInput]:
+    """Разбор Excel .xlsx (первый лист) через конвертацию в CSV → parse_csv.
+
+    Переиспользуем всю валидацию/дедуп/обработку BOM из parse_csv, не дублируя
+    логику. openpyxl уже в зависимостях воркера. Читаем в read_only + data_only
+    (кэшированные значения формул), первая непустая строка = заголовки.
+    """
+    from openpyxl import load_workbook  # локальный импорт — не тянем при обычном CSV
+
+    try:
+        wb = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    except Exception as e:
+        raise ValueError(f"Не удалось открыть .xlsx: {e}")
+    try:
+        ws = wb.active
+        if ws is None:
+            raise ValueError("В книге нет активного листа")
+        out = io.StringIO()
+        writer = csv.writer(out)
+        wrote = 0
+        for row in ws.iter_rows(values_only=True):
+            if row is None:
+                continue
+            cells = ["" if c is None else str(c) for c in row]
+            if not any(c.strip() for c in cells):
+                continue  # пропускаем полностью пустые строки
+            writer.writerow(cells)
+            wrote += 1
+            if wrote > MAX_ROWS + 1:  # +1 на заголовок; parse_csv добьёт точный лимит
+                break
+    finally:
+        wb.close()
+
+    text = out.getvalue()
+    if not text.strip():
+        raise ValueError("Файл .xlsx пустой — нет строк с данными")
+    return parse_csv(text)

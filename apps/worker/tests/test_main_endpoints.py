@@ -96,8 +96,8 @@ class TestIngestCsv:
             r = client.post("/ingest/csv/conn-c", files={"file": ("empty.csv", b"", "text/csv")})
         assert r.status_code == 400
 
-    def test_400_on_binary_xlsx_like(self, monkeypatch):
-        """Бинарь (xlsx) → UnicodeDecodeError → дружелюбная 400, а не 500."""
+    def test_400_on_corrupt_xlsx(self, monkeypatch):
+        """Битый .xlsx → дружелюбная 400 (ValueError из parse_xlsx), а не 500."""
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
         mock_sb = _mock_supabase_for_connection({"id": "conn-c", "seller_id": VALID_UUID, "config": {}})
         with patch("app.main.get_supabase", return_value=mock_sb):
@@ -106,7 +106,40 @@ class TestIngestCsv:
                 files={"file": ("book.xlsx", b"\xff\xfe\x00\x01\x02\x03PK\x03\x04", "application/octet-stream")},
             )
         assert r.status_code == 400
-        assert "CSV" in r.json()["detail"]
+        assert "xlsx" in r.json()["detail"].lower()
+
+    def test_400_on_legacy_xls(self, monkeypatch):
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = _mock_supabase_for_connection({"id": "conn-c", "seller_id": VALID_UUID, "config": {}})
+        with patch("app.main.get_supabase", return_value=mock_sb):
+            r = client.post("/ingest/csv/conn-c", files={"file": ("old.xls", b"\xd0\xcf\x11\xe0stuff", "application/vnd.ms-excel")})
+        assert r.status_code == 400
+        assert ".xls" in r.json()["detail"]
+
+    def test_200_parses_real_xlsx(self, monkeypatch):
+        monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")
+        mock_sb = _mock_supabase_for_connection({"id": "conn-c", "seller_id": VALID_UUID, "config": {}})
+        from openpyxl import Workbook
+        import io as _io
+        wb = Workbook(); ws = wb.active
+        ws.append(["sku", "product_name", "stock_quantity", "price"])
+        ws.append(["A1", "Товар A", 10, 100])
+        ws.append(["B2", "Товар B", 5, 50.5])
+        buf = _io.BytesIO(); wb.save(buf)
+        from app.schemas import SourceType
+        persist = MagicMock(return_value=2)
+        with patch("app.main.get_supabase", return_value=mock_sb), \
+             patch("app.main._try_acquire_sync_lock", return_value=True), \
+             patch("app.main._persist_snapshots", persist), \
+             patch("app.main._mark_connection_synced"):
+            r = client.post(
+                "/ingest/csv/conn-c",
+                files={"file": ("t.xlsx", buf.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+            )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["parsed"] == 2
+        assert persist.call_args.args[2] == SourceType.CSV_UPLOAD
 
     def test_200_parses_and_persists(self, monkeypatch):
         monkeypatch.setattr("app.main.settings.worker_secret", "dev-secret-replace-me")

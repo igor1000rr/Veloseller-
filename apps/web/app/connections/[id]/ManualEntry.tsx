@@ -1,9 +1,53 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ErrorModal } from "../../_components/ErrorModal";
 import { parseApiError, type ParsedError } from "@/lib/error-parser";
+
+type BulkItem = { sku: string; product_name: string | null; price: number; stock_quantity: number };
+
+/**
+ * Парсит массовую вставку: строка на товар, разделители — таб (вставка из Excel),
+ * запятая или точка с запятой. 4 колонки: артикул, наименование, цена, остаток.
+ * Если колонок 3 — наименование опускаем (артикул, цена, остаток).
+ * Первую строку пропускаем, если она похожа на заголовок (нет числа в цене/остатке).
+ */
+function parseBulk(text: string): { items: BulkItem[]; errors: string[] } {
+  const items: BulkItem[] = [];
+  const errors: string[] = [];
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const seen = new Map<string, BulkItem>();
+  lines.forEach((line, idx) => {
+    const sep = line.includes("\t") ? "\t" : line.includes(";") ? ";" : ",";
+    const cols = line.split(sep).map((c) => c.trim());
+    let sku = "", pname: string | null = null, priceStr = "", stockStr = "";
+    if (cols.length >= 4) {
+      [sku, pname, priceStr, stockStr] = [cols[0], cols[1] || null, cols[2], cols[3]];
+    } else if (cols.length === 3) {
+      [sku, priceStr, stockStr] = [cols[0], cols[1], cols[2]];
+    } else {
+      errors.push(`строка ${idx + 1}: нужно 3–4 колонки (артикул, [наименование], цена, остаток)`);
+      return;
+    }
+    if (!sku) { errors.push(`строка ${idx + 1}: пустой артикул`); return; }
+    const price = Number((priceStr || "0").replace(",", ".").replace(/\s/g, ""));
+    const stock = parseInt((stockStr || "").replace(/\s/g, ""), 10);
+    if (Number.isNaN(price) || price < 0) {
+      // Возможно это строка-заголовок — на первой строке молча пропускаем
+      if (idx === 0) return;
+      errors.push(`строка ${idx + 1} (${sku}): цена не число`);
+      return;
+    }
+    if (Number.isNaN(stock) || stock < 0) {
+      if (idx === 0) return;
+      errors.push(`строка ${idx + 1} (${sku}): остаток не целое ≥ 0`);
+      return;
+    }
+    seen.set(sku, { sku, product_name: pname, price, stock_quantity: stock });
+  });
+  return { items: [...seen.values()], errors };
+}
 
 type Item = {
   productId: string;
@@ -38,6 +82,58 @@ export default function ManualEntry({
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [stock, setStock] = useState("");
+
+  // Массовая вставка
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  // Голосовой ввод наименования (Web Speech API — Chrome/Edge; иначе кнопки нет)
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const [listening, setListening] = useState(false);
+  useEffect(() => {
+    const w = window as any;
+    setVoiceSupported(!!(w.SpeechRecognition || w.webkitSpeechRecognition));
+  }, []);
+
+  function startVoice() {
+    const w = window as any;
+    const SR = w.SpeechRecognition || w.webkitSpeechRecognition;
+    if (!SR) return;
+    const rec = new SR();
+    rec.lang = "ru-RU";
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (e: any) => {
+      const text = e.results?.[0]?.[0]?.transcript ?? "";
+      if (text) setName((prev) => (prev ? prev + " " : "") + text.trim());
+    };
+    rec.onend = () => setListening(false);
+    rec.onerror = () => setListening(false);
+    setListening(true);
+    try { rec.start(); } catch { setListening(false); }
+  }
+
+  async function handleBulk() {
+    const { items: parsed, errors } = parseBulk(bulkText);
+    if (parsed.length === 0) {
+      setModalError({ kind: "validation", title: "Нечего добавить", message: errors[0] || "Вставьте строки: артикул, наименование, цена, остаток." });
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      const ok = await submitItems(parsed);
+      if (ok) {
+        const note = errors.length ? ` Пропущено строк с ошибками: ${errors.length}.` : "";
+        setBulkText("");
+        setBulkOpen(false);
+        router.refresh();
+        if (errors.length) setModalError({ kind: "validation", title: `Добавлено ${parsed.length}`, message: `Часть строк пропущена.${note}` });
+      }
+    } finally {
+      setBulkBusy(false);
+    }
+  }
 
   async function submitItems(payload: { sku: string; product_name?: string | null; stock_quantity: number; price: number }[]): Promise<boolean> {
     setModalError(null);
@@ -105,8 +201,19 @@ export default function ManualEntry({
         </div>
         <div className="sm:col-span-4">
           <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1">Наименование</label>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Футболка синяя, M"
-            className="w-full rounded-lg border border-line bg-bg-soft px-3 py-2 text-ink text-sm focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+          <div className="relative">
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Футболка синяя, M"
+              className="w-full rounded-lg border border-line bg-bg-soft px-3 py-2 pr-9 text-ink text-sm focus:bg-paper focus:border-lime-deep focus:outline-none transition" />
+            {voiceSupported && (
+              <button type="button" onClick={startVoice} title="Голосовой ввод"
+                className={`absolute right-1.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center size-6 rounded-md transition ${listening ? "text-rose animate-pulse" : "text-ink-hush hover:text-lime-deep"}`}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" />
+                </svg>
+              </button>
+            )}
+          </div>
         </div>
         <div className="sm:col-span-2">
           <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1">Цена, ₽ *</label>
@@ -126,10 +233,40 @@ export default function ManualEntry({
           </button>
         </div>
       </form>
-      <p className="text-[11px] text-ink-hush mb-5">
-        Добавили товар с текущим остатком — дальше отмечайте продажи и пополнения кнопками ниже.
-        Тот же артикул с новым остатком обновляет позицию.
-      </p>
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <p className="text-[11px] text-ink-hush flex-1 min-w-[200px]">
+          Добавили товар с текущим остатком — дальше отмечайте продажи и пополнения кнопками ниже.
+          Тот же артикул с новым остатком обновляет позицию.
+        </p>
+        <button type="button" onClick={() => setBulkOpen((v) => !v)}
+          className="text-xs font-semibold text-ink-muted hover:text-lime-deep underline transition shrink-0">
+          {bulkOpen ? "Скрыть массовую вставку" : "Вставить списком / из Excel"}
+        </button>
+      </div>
+
+      {bulkOpen && (
+        <div className="mb-5 rounded-xl border border-line bg-bg-soft p-4">
+          <label className="block font-mono text-[10px] uppercase tracking-widest text-ink-hush mb-1.5">
+            Строка на товар: артикул, наименование, цена, остаток
+          </label>
+          <textarea
+            value={bulkText}
+            onChange={(e) => setBulkText(e.target.value)}
+            rows={6}
+            placeholder={"ABC-123, Футболка синяя M, 990, 20\nABC-124, Футболка синяя L, 990, 15"}
+            className="w-full rounded-lg border border-line bg-paper px-3 py-2 text-ink text-sm font-mono focus:border-lime-deep focus:outline-none transition"
+          />
+          <div className="mt-2 flex items-center gap-3 flex-wrap">
+            <button type="button" onClick={handleBulk} disabled={bulkBusy || !bulkText.trim()}
+              className="inline-flex items-center gap-2 rounded-lg bg-ink text-paper px-4 py-2 text-sm font-semibold hover:bg-ink-soft disabled:opacity-50 transition">
+              {bulkBusy ? "Добавляю…" : "Добавить списком"}
+            </button>
+            <span className="text-[11px] text-ink-hush">
+              Разделитель — запятая, точка с запятой или табуляция (можно вставить прямо из Excel). Строку-заголовок пропустим.
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Список товаров */}
       {items.length > 0 ? (

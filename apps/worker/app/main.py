@@ -422,16 +422,26 @@ async def ingest_csv(connection_id: str, file: UploadFile = File(...)) -> dict:
     raw = await file.read()
     if not raw:
         raise HTTPException(400, "Файл пустой")
+    filename = (file.filename or "").lower()
     try:
-        snapshots = csv_upload.parse_csv(raw)
+        if filename.endswith(".xlsx"):
+            snapshots = csv_upload.parse_xlsx(raw)
+        elif filename.endswith(".xls"):
+            raise HTTPException(400, "Старый формат .xls не поддерживается — сохраните как .xlsx или CSV.")
+        else:
+            snapshots = csv_upload.parse_csv(raw)
+    except HTTPException:
+        raise
     except UnicodeDecodeError:
         raise HTTPException(
             400,
-            "Не удалось прочитать файл как текст. Похоже, это Excel (.xlsx). "
-            "Сохраните таблицу как CSV (UTF-8) и загрузите снова.",
+            "Не удалось прочитать файл как текст. Если это Excel — сохраните как .xlsx или CSV (UTF-8) и загрузите снова.",
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except Exception:
+        logger.exception("csv/xlsx parse failed", extra={"connection_id": connection_id})
+        raise HTTPException(400, "Не удалось прочитать файл. Проверьте формат (CSV или XLSX).")
 
     if not _try_acquire_sync_lock(sb, connection_id):
         return {"started": False, "status": "running", "message": "Загрузка уже идёт или склад на паузе"}

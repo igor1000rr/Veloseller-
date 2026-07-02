@@ -78,14 +78,26 @@ describe("POST /api/connections/[id]/upload-csv", () => {
     }));
   });
 
-  it("400 если .xlsx — просим сохранить как CSV", async () => {
+  it("400 если legacy .xls — просим пересохранить (.xlsx или CSV)", async () => {
     getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
     maybeSingleMock.mockResolvedValue({ data: { id: "c1", source: "csv_upload", seller_id: "u1" } });
     const fetchMock = global.fetch as any;
-    const res = await callUpload(new File(["PK...binary"], "book.xlsx"), { id: "c1" });
+    const res = await callUpload(new File(["binary"], "old.xls"), { id: "c1" });
     expect(res.status).toBe(400);
     // Воркер не должен вызываться — отклоняем до него
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it(".xlsx пробрасывается в worker (не отклоняется на роуте)", async () => {
+    getUserMock.mockResolvedValue({ data: { user: { id: "u1" } } });
+    maybeSingleMock.mockResolvedValue({ data: { id: "c1", source: "csv_upload", seller_id: "u1" } });
+    const fetchMock = global.fetch as any;
+    fetchMock
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ parsed: 2, inserted: 2 }) })
+      .mockResolvedValueOnce({ ok: true });
+    const res = await callUpload(new File(["xlsx-bytes"], "book.xlsx"), { id: "c1" });
+    expect(res.status).toBe(200);
+    expect(fetchMock.mock.calls[0][0]).toBe("http://worker:8001/ingest/csv/c1");
   });
 
   it("если worker вернул ошибку — пробрасываем", async () => {

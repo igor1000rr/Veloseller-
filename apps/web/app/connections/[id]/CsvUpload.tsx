@@ -54,15 +54,15 @@ export default function CsvUpload({ connectionId }: { connectionId: string }) {
       </h2>
       <p className="text-sm text-ink-muted mb-4">
         Колонки: <code className="font-mono text-[12px] bg-bg-soft border border-line rounded px-1.5 py-0.5">sku, stock_quantity, price</code>{" "}
-        (<span className="font-mono text-[12px]">product_name</span> — необязательно). Первая строка — заголовки, кодировка UTF-8.
-        Excel: «Сохранить как → CSV».
+        (<span className="font-mono text-[12px]">product_name</span> — необязательно). Первая строка — заголовки.
+        Форматы: CSV (UTF-8) или Excel <span className="font-mono text-[12px]">.xlsx</span>.
       </p>
 
       <div className="flex flex-wrap items-center gap-3">
         <input
           ref={inputRef}
           type="file"
-          accept=".csv,text/csv"
+          accept=".csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           onChange={(e) => { setResult(null); setFile(e.target.files?.[0] ?? null); }}
           className="block text-sm text-ink-muted file:mr-3 file:rounded-lg file:border-0 file:bg-bg-soft file:px-4 file:py-2 file:text-sm file:font-semibold file:text-ink hover:file:bg-line/40 file:cursor-pointer"
         />
